@@ -183,64 +183,18 @@ if %errorlevel% neq 0 (
 )
 call :log "[OK] Environment ready."
 
-REM --- [6/7] WEIGHTS SECTION [Parenthesis Safe] ---
-echo.
-echo =========================================================
-echo MODEL WEIGHTS DOWNLOAD
-echo =========================================================
-echo The core models, about 22 GB, into the weights folder:
-echo   Stable Video Diffusion img2vid-xt 1.1, DepthCrafter, StereoCrafter.
-echo.
-echo Stable Video Diffusion is GATED. Before saying Y:
-echo   1. accept its terms at https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1
-echo   2. make a READ token at https://huggingface.co/settings/tokens
-echo   and answer Y when asked to log in to Hugging Face.
-echo.
-echo These models are for academic, research and education use only - see License-Code.txt.
-echo.
-set /p get_weights="Would you like to download weights now? [Y/N]: "
-
-if /i "!get_weights!"=="Y" (
-    call :log "[INFO] Starting weight downloads..."
-    if not exist "weights" mkdir weights
-
-    set /p hf_login="Do you need to log in to Hugging Face? [Y/N]: "
-    if /i "!hf_login!"=="Y" (
-        echo [PROMPT] Please paste your Hugging Face Access Token below:
-        uv run hf auth login
-    )
-
-    call :log "[INFO] Downloading Models..."
-    set "WEIGHTS_FAILED="
-    uv run hf download stabilityai/stable-video-diffusion-img2vid-xt-1-1 --local-dir weights/stable-video-diffusion-img2vid-xt-1-1
-    if !errorlevel! neq 0 set "WEIGHTS_FAILED=1"
-    uv run hf download tencent/DepthCrafter --local-dir weights/DepthCrafter
-    if !errorlevel! neq 0 set "WEIGHTS_FAILED=1"
-    uv run hf download TencentARC/StereoCrafter --local-dir weights/StereoCrafter
-    if !errorlevel! neq 0 set "WEIGHTS_FAILED=1"
-
-    if defined WEIGHTS_FAILED (
-        call :log "[ERROR] One or more weight downloads FAILED - see the log."
-        call :log "[ERROR] Most often: Stable Video Diffusion's terms not accepted, or no Hugging Face token."
-        call :log "[ERROR] Fix that and run the installer again - finished downloads are kept."
-    ) else (
-        call :log "[SUCCESS] Weights downloaded."
-    )
-) else (
-    call :log "[SKIP] User skipped weights."
-)
+REM --- [6/7] MODELS: downloaded from inside Studio (Settings, Studio, Models), not here ---
+call :log "[6/7] Models: downloaded from inside Studio once it opens."
 
 call :log "[7/7] Finalizing..."
 echo.
-echo Other models are fetched only for the tools that use them - SAM 3 and ROSE from inside Studio,
-echo Scene Cut and Inpainting V2 as the README describes.
+echo INSTALLATION SUCCESSFUL
 echo.
-if defined WEIGHTS_FAILED (
-    echo INSTALLATION COMPLETED WITH ERRORS - some model weights did not download.
-    echo The app is installed; re-run this script to retry the downloads.
-) else (
-    echo INSTALLATION SUCCESSFUL
-)
+echo NEXT - the models: open Studio, then Settings ^> Studio ^> Models, and press Download
+echo on the ones you need - each stage needs only its own, and only the files Studio uses
+echo are fetched. The gated ones - Stable Video Diffusion, SAM 3, DINOv3 - need a free
+echo Hugging Face account: ask for access on each one's page, then sign in there with a
+echo read token. ROSE is set up in the Depth Map Editor.
 echo.
 echo To start StereoCrafter Studio, run:  "StereoCrafter Studio.bat"
 echo Log location: %LOGFILE%

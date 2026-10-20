@@ -64,7 +64,10 @@ uv sync
 
 ## 📦 Model Weights Installation
 
-The models are required to run StereoCrafter. You can download them automatically using the Hugging Face CLI (provided by the huggingface-hub package in your environment).
+**Easiest: skip this section.** Start Studio and open **Settings > Studio > Models**: it downloads each model with a
+button, signs you in to Hugging Face, and fetches only the files Studio uses (about 7.5 GB for the three below instead
+of 22). The commands here are the by-hand alternative, using the Hugging Face CLI (provided by the huggingface-hub
+package in your environment).
 
 ### 1. Prerequisite: Accept Model Terms
 

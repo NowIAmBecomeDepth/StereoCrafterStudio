@@ -153,10 +153,11 @@ Studio checks the driver and FFmpeg when it starts and tells you what's missing.
 ## Installing
 
 1. Put `_install/StereoCrafter_1click_Installer.bat` in the folder you want Studio in, and run it. It installs
-   [uv](https://docs.astral.sh/uv/), Python 3.13 and every package, then offers to download the core models.
-2. The core models are about 22 GB. One of them, Stable Video Diffusion, is **gated**: before you start, accept its
-   terms at <https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1> and create a read token at
-   <https://huggingface.co/settings/tokens> -- the installer asks for it.
+   [uv](https://docs.astral.sh/uv/), Python 3.13 and every package.
+2. Open Studio and get the models in **Settings > Studio > Models**: press Download on the ones your stages need
+   (DepthCrafter, Stable Video Diffusion and StereoCrafter for the main pipeline, about 7.5 GB). Stable Video
+   Diffusion is **gated**: accept its terms at <https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1>,
+   then sign in there with a read token from <https://huggingface.co/settings/tokens>. See [Models](#models).
 
 To install by hand instead, see [_install/StereoCrafter_Manual_Install.md](_install/StereoCrafter_Manual_Install.md).
 To update later, run `_update.bat`.
@@ -189,9 +190,9 @@ to download again. A model that folder doesn't have downloads into it; ROSE need
 
 | Model | Used by | Folder (in the models folder) | Download |
 | ----- | ------- | ----------------------------- | -------- |
-| Stable Video Diffusion img2vid-xt 1.1 (gated): its VAE + image encoder, 1.5 GB | DepthCrafter, Inpainting | `stable-video-diffusion-img2vid-xt-1-1` | Models (or the installer: the whole 18 GB repository) |
-| DepthCrafter (3.0 GB) | DepthCrafter | `DepthCrafter` | Models, or the installer |
-| StereoCrafter (3.0 GB) | Inpainting | `StereoCrafter` | Models, or the installer |
+| Stable Video Diffusion img2vid-xt 1.1 (gated): its VAE + image encoder, 1.5 GB | DepthCrafter, Inpainting | `stable-video-diffusion-img2vid-xt-1-1` | Models |
+| DepthCrafter (3.0 GB) | DepthCrafter | `DepthCrafter` | Models |
+| StereoCrafter (3.0 GB) | Inpainting | `StereoCrafter` | Models |
 | SAM 3 (gated, 3.4 GB) | Depth Map Editor | `SAM3/sam3.pt` | Models, or **Download Weights** on the editor's Segment page |
 | ROSE (about 3.7 GB, its own environment) | Erase from Clip, Edge Fill | `ROSE` | **Set Up ROSE** in the Depth Map Editor's Erase panel |
 | OmniShotCut (164 MB) | Scene Cut | `SceneCut/OmniShotCut_ckpt.pth` | Models |

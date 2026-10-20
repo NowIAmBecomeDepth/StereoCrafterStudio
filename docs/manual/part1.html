@@ -137,16 +137,15 @@
   <ol>
     <li>Make a folder where you want Studio to live, and run the installer script
         <code>StereoCrafter_1click_Installer.bat</code> from inside it.</li>
-    <li>When it asks, let it download the core models (<b>weights</b>, about 22 GB) into the
-        <code>weights</code> folder. One of them, Stable Video Diffusion, is <b>gated</b>: before you run the
-        installer, accept its terms on
+    <li>Start Studio (below) and get the models in <b>Settings → Studio → <a href="#models">Models</a></b>:
+        it lists each one, whether it's on this PC, and a <span class="btn">Download</span> for each one
+        missing -- only the files Studio loads (Stable Video Diffusion, for one, is 1.5 GB there rather than
+        18). For the main pipeline that's DepthCrafter, Stable Video Diffusion and StereoCrafter, about 7.5 GB.
+        Stable Video Diffusion is <b>gated</b>: accept its terms on
         <a href="https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1">its Hugging Face page</a>
-        and make a read token in your Hugging Face settings -- the installer asks for it.</li>
+        and sign in there with a read token first.</li>
   </ol>
-  <p>You can also skip that and get every model from inside Studio: <b>Settings → Studio →
-     <a href="#models">Models</a></b> lists each one, whether it's on this PC, and a
-     <span class="btn">Download</span> for each one missing -- only the files Studio loads (Stable Video
-     Diffusion, for one, is 1.5 GB there rather than 18). Each model is needed only for the tools that use it:</p>
+  <p>Each model is needed only for the tools that use it:</p>
   <ul>
     <li><b>DepthCrafter</b> and <b>Stable Video Diffusion</b> (gated) for DepthCrafter; <b>StereoCrafter</b> and
       Stable Video Diffusion for Inpainting.</li>
@@ -282,8 +281,8 @@
         (<span class="btn">Ask for Access</span> on its row, or the ⓘ beside it) and ask for access -- Stable
         Video Diffusion's is granted at once, the others by their makers. Then make a <b>Read</b> token in
         your Hugging Face settings (<span class="btn">Get a Token</span>), paste it in and press
-        <span class="btn">Sign In</span>. It's kept where <code>hf auth login</code> keeps it, so the installer
-        and Studio share it; Studio never saves it in its own settings.</li>
+        <span class="btn">Sign In</span>. It's kept where <code>hf auth login</code> keeps it, so the
+        <code>hf</code> command and Studio share it; Studio never saves it in its own settings.</li>
     <li><span class="btn">Download</span> on a model's row gets just the files Studio loads, into the models
         folder. One downloads at a time and the others queue behind it; while a job runs, a download waits
         for it to finish, so the job isn't slowed. <span class="btn">Stop</span> keeps what came down: the
