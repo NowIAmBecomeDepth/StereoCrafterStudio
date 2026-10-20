@@ -121,6 +121,9 @@ def build(app: QGuiApplication):
     _setup_logging(logs)
 
     shell = StudioShell()
+    # the models folder (Settings > Studio > Models, 2026-10-20): before any stage looks for a model
+    from .models_controller import ModelsController, apply_saved_folder
+    apply_saved_folder(shell)
     # something too big for the Recycle Bin: Studio asks before deleting it for good (user,
     # 2026-10-14) -- not Windows' own box, which came up from job threads, ownerless
     from core.common import recycle_bin as _recycle_bin
@@ -198,6 +201,9 @@ def build(app: QGuiApplication):
     from .updater import Updater
     updater = Updater()
     updater.job_running = lambda: (jobs.running() or ("", ""))[1]   # Install waits for a job (bug sweep A1)
+    models = ModelsController(shell)
+    # a download waits for a job; the folder can't change during one (the busy flag, as Main shows it)
+    models.job_running = lambda: next((name for _sid, name, c in jobs._stages if c.property("busy")), "")
     from .folder_browser import FolderBrowser
     folders = FolderBrowser()            # the Columns folder picker's disk (FolderPicker.qml)
 
@@ -230,7 +236,7 @@ def build(app: QGuiApplication):
                "DepthCrafter": depthcrafter, "Inpainting": inpainting, "InpaintingV2": inpainting_v2,
                "Splatting": splatting, "Merging": merging, "SceneCut": scenecut,
                "DepthEdit": depthedit, "EdgeFill": edgefill, "Beginner": beginner, "GpuJobs": jobs,
-               "JobStats": job_stats, "Vram": vram, "Folders": folders, "Glasses3D": glasses}
+               "JobStats": job_stats, "Vram": vram, "Folders": folders, "Glasses3D": glasses, "Models": models}
 
     # Real per-pixel alpha, so the tint over the glass is translucent.
     QQuickWindow.setDefaultAlphaBuffer(True)
@@ -387,7 +393,7 @@ def main() -> int:
         # Edge Fill first: it waits for its fill (ROSE ended, the clip's files as they were), well
         # inside the exit watchdog, before the slower stages' shutdowns (bug sweep 2026-10-14b)
         for name in ("EdgeFill", "Vram", "DepthCrafter", "Inpainting", "InpaintingV2", "Splatting", "Merging",
-                     "SceneCut", "DepthEdit"):
+                     "SceneCut", "DepthEdit", "Models"):
             try:
                 objects[name].shutdown()
             except Exception:

@@ -15,6 +15,10 @@ REPO = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(REPO)); os.ch
 sys.path.insert(0, str(Path(__file__).parent))
 rec = REPO / "last_jobs.json"; h0 = (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None)
 tmp = Path(tempfile.mkdtemp())
+# the whole models folder is the temp one, and only it is looked in (core.weights_paths): set before
+# anything loads. 2026-10-20: with only sam.WEIGHTS_DIR pointed at temp, the app's start put it back on
+# the real weights/SAM3 (the models-folder listener) and Uninstall below deleted the user's checkpoints.
+os.environ["STEREOCRAFTER_WEIGHTS"] = str(tmp / "weights")
 from studio.legacy import install; install()
 import studio.settings_store as ss; ss.CONFIG_DIR = tmp / "config"
 import core.ui.job_handoff as jh; jh._RECORD_PATH = str(tmp / "last_jobs.json")
@@ -101,6 +105,10 @@ QMetaObject.invokeMethod(dlg, "close"); pump(0.4)
 
 # ---- uninstall: the checkpoints to the Recycle Bin, the page section back
 toasts = []; de.toast.connect(lambda k, t, m: toasts.append((k, t, m)))
+# never past this point unless SAM 3 is looked for in the temp folder: Uninstall deletes what's there
+if not str(sam.WEIGHTS_DIR).startswith(str(tmp)):
+    print(f"  [FAIL] SAM 3 is looked for in {sam.WEIGHTS_DIR}, not the temp folder: stopping before Uninstall")
+    _fixtures.exit_now(1)
 de.uninstallSam()
 until(lambda: S().get("weights_btn") is True, 15); pump(0.5)
 check("Uninstall: the checkpoints go to the Recycle Bin", binned == [ckpt.name] and not ckpt.exists(), str(binned))

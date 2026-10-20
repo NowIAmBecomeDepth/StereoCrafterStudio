@@ -153,10 +153,14 @@ class RunnerTestBase(unittest.TestCase):
 
         self._saved_merge = R._merge_module
         R._merge_module = lambda: types.SimpleNamespace(merge_depth_segments=merge_depth_segments)
+        # the models aren't looked for on this PC (2026-10-20: none there is now an error)
+        self.real_model_paths = R.model_paths
+        R.model_paths = lambda repo=None: ("U:/unet", "U:/svd")
 
     def tearDown(self):
         self.utils.define_video_segments = self._saved_define
         R._merge_module = self._saved_merge
+        R.model_paths = self.real_model_paths
         if self._saved_logic is not None:
             sys.modules["depthcrafter.depthcrafter_logic"] = self._saved_logic
         else:
@@ -342,36 +346,66 @@ class FullVideoTests(RunnerTestBase):
 
 
 class ModelPathsTest(RunnerTestBase):
-    """DepthCrafter loads the models the installer put in weights/ (release check 2026-10-17: it only ever
-    asked the Hub, so the installer's download sat unused and the first job fetched them again)."""
+    """DepthCrafter loads the models in the models folder (release check 2026-10-17: it only ever asked the
+    Hub, so the installer's download sat unused and the first job fetched them again). 2026-10-20: the Hub
+    only when its cache already has them; otherwise the run says to download them in Settings > Studio >
+    Models, rather than fetching ~5 GB from a gated repo without a word."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        self.cached = set()
+        patcher = mock.patch.object(R, "_in_hub_cache", lambda repo, _f: repo in self.cached)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _weights(self, root, svd_names=("stable-video-diffusion-img2vid-xt-1-1",), unet=True):
+        from studio import model_catalog as C
         w = os.path.join(root, "weights")
-        if unet:
-            os.makedirs(os.path.join(w, "DepthCrafter"))
-            for n in ("config.json", "diffusion_pytorch_model.safetensors"):
-                open(os.path.join(w, "DepthCrafter", n), "w").close()
-        for n in svd_names:
-            os.makedirs(os.path.join(w, n, "vae"))
-            open(os.path.join(w, n, "model_index.json"), "w").close()
+        parts = [(C.SVD, n) for n in svd_names] + ([(C.DEPTHCRAFTER, "DepthCrafter")] if unet else [])
+        for part, folder in parts:
+            for f, _n in part.files:
+                path = os.path.join(w, folder, f)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                Path(path).write_bytes(b"1")
         return w
 
-    def test_hub_ids_without_the_folders(self):
+    def test_missing_says_where_to_get_them(self):
         root = tempfile.mkdtemp(dir=self.tmp.name)
-        self.assertEqual(R.model_paths(root), (R.DEPTHCRAFTER_HUB, R.SVD_HUB))
+        with self.assertRaises(R.ModelsMissing) as cm:
+            self.real_model_paths(root)
+        self.assertIn("DepthCrafter and Stable Video Diffusion 1.1 are not in your models folder", str(cm.exception))
+        self.assertIn("Settings > Studio > Models", str(cm.exception))
 
-    def test_the_installers_folders_when_there(self):
+    def test_hub_ids_when_the_cache_has_them(self):
+        root = tempfile.mkdtemp(dir=self.tmp.name)
+        self.cached = {R.DEPTHCRAFTER_HUB, R.SVD_HUB}
+        self.assertEqual(self.real_model_paths(root), (R.DEPTHCRAFTER_HUB, R.SVD_HUB))
+
+    def test_the_models_folders_when_there(self):
         root = tempfile.mkdtemp(dir=self.tmp.name)
         w = self._weights(root)
-        self.assertEqual(R.model_paths(root), (os.path.join(w, "DepthCrafter"),
-                                               os.path.join(w, "stable-video-diffusion-img2vid-xt-1-1")))
+        self.assertEqual(self.real_model_paths(root), (os.path.join(w, "DepthCrafter"),
+                                                       os.path.join(w, "stable-video-diffusion-img2vid-xt-1-1")))
 
-    def test_xt_before_xt_1_1_and_an_empty_folder_ignored(self):
+    def test_the_xt_folder_counts_and_an_empty_folder_doesnt(self):
         root = tempfile.mkdtemp(dir=self.tmp.name)
-        w = self._weights(root, ("stable-video-diffusion-img2vid-xt", "stable-video-diffusion-img2vid-xt-1-1"),
-                          unet=False)
+        w = self._weights(root, ("stable-video-diffusion-img2vid-xt",), unet=False)
         os.makedirs(os.path.join(w, "DepthCrafter"))          # an empty folder: not the model
-        self.assertEqual(R.model_paths(root), (R.DEPTHCRAFTER_HUB, os.path.join(w, "stable-video-diffusion-img2vid-xt")))
+        with self.assertRaises(R.ModelsMissing) as cm:
+            self.real_model_paths(root)
+        self.assertTrue(str(cm.exception).startswith("DepthCrafter is not in your models folder"), str(cm.exception))
+        self.cached = {R.DEPTHCRAFTER_HUB}
+        self.assertEqual(self.real_model_paths(root), (R.DEPTHCRAFTER_HUB, os.path.join(w, "stable-video-diffusion-img2vid-xt")))
+
+    def test_the_run_says_what_is_missing(self):
+        self.clip("a.mp4")
+        specs, _ = R.discover_sources(str(self.inp))
+        R.model_paths = lambda repo=None: self.real_model_paths(self.tmp.name)
+        runner = R.DepthCrafterRunner(self.opts(), RecordingHooks(), threading.Event())
+        self.assertFalse(runner.run_batch(specs, 42))
+        self.assertIn("Settings > Studio > Models", runner.outcome.error)
+        self.assertEqual(FakeDemo.instances, [], "nothing loaded")
 
     def test_the_run_loads_what_model_paths_says(self):
         from unittest import mock

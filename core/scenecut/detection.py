@@ -44,9 +44,40 @@ logger = logging.getLogger(__name__)
 #: Repo root -- core/scenecut/detection.py -> core/scenecut -> core -> root.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-#: Where the Scene Cut checkpoints are expected. weights/ is gitignored; the
-#: bundle that fills this folder is linked from the README.
-WEIGHTS_DIR = _REPO_ROOT / "weights" / "SceneCut"
+from core import weights_paths  # noqa: E402
+
+#: Where the Scene Cut checkpoints are expected: SceneCut/ in the models folder
+#: (Settings > Studio > Models, 2026-10-20; core.weights_paths). Each detector
+#: finds its own file at use time (DetectorSpec.weights_path).
+WEIGHTS_DIR = weights_paths.find("SceneCut")
+
+
+@weights_paths.on_change
+def _models_moved() -> None:
+    global WEIGHTS_DIR
+    WEIGHTS_DIR = weights_paths.find("SceneCut")
+
+
+#: TransNetV2's checkpoint. The transnetv2-pytorch package ships the same
+#: weights (every tensor equal, checked 2026-10-20), so it needs no download.
+TRANSNETV2_FILE = "transnetv2-pytorch-weights.pth"
+
+
+def detector_weights(filename: str) -> Path:
+    """Where a detector's checkpoint is: SceneCut/<filename> in the models folder (or
+    <repo>/weights), else TransNetV2's own copy in its package, else where it would go."""
+    path = weights_paths.find("SceneCut", filename)
+    if not path.is_file() and filename == TRANSNETV2_FILE:
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("transnetv2_pytorch")
+            bundled = Path(spec.origin).parent / filename if spec and spec.origin else None
+            if bundled is not None and bundled.is_file():
+                return bundled
+        except Exception:
+            pass
+    return path
+
 
 # ANSI colour helpers for the keep/merge lines the validator prints.
 KEEP_FG, MERG_FG, BOLD, RESET = "\033[94m", "\033[92m", "\033[1m", "\033[0m"
@@ -418,9 +449,14 @@ class DetectorParam:
 @dataclass(frozen=True)
 class DetectorSpec:
     name: str
-    weights_path: str
+    weights_file: str
     params: Tuple[DetectorParam, ...]
     unavailable_reason: Callable[[], Optional[str]]
+
+    @property
+    def weights_path(self) -> str:
+        """Looked up when used: the models folder can change while Studio runs."""
+        return str(detector_weights(self.weights_file))
 
 
 _DEVICE_PARAM = DetectorParam(
@@ -485,13 +521,13 @@ def _omnishotcut_unavailable() -> Optional[str]:
 DETECTORS: dict[str, DetectorSpec] = {
     "AutoShot": DetectorSpec(
         name="AutoShot",
-        weights_path=str(WEIGHTS_DIR / "ckpt_0_200_0.pth"),
+        weights_file="ckpt_0_200_0.pth",
         params=(_DEVICE_PARAM, _threshold_param("0.24"), _MIN_SCENE_LEN_PARAM),
         unavailable_reason=_autoshot_unavailable,
     ),
     "TransNetV2": DetectorSpec(
         name="TransNetV2",
-        weights_path=str(WEIGHTS_DIR / "transnetv2-pytorch-weights.pth"),
+        weights_file=TRANSNETV2_FILE,
         params=(_DEVICE_PARAM, _threshold_param("0.3"), _MIN_SCENE_LEN_PARAM),
         unavailable_reason=_transnetv2_unavailable,
     ),
@@ -501,7 +537,7 @@ DETECTORS: dict[str, DetectorSpec] = {
     # _omnishot_predict_windows for why that and not the no-object class.
     "OmniShotCut": DetectorSpec(
         name="OmniShotCut",
-        weights_path=str(WEIGHTS_DIR / "OmniShotCut_ckpt.pth"),
+        weights_file="OmniShotCut_ckpt.pth",
         params=(
             _DEVICE_PARAM,
             DetectorParam(
@@ -614,7 +650,8 @@ def _autoshot_load_model(weights_path: str, device: str):
     if AutoShotNet is None:
         raise RuntimeError(f"AutoShot is unavailable: {AUTO_SHOT_IMPORT_ERROR}")
     if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"AutoShot weights file not found: {weights_path}")
+        raise FileNotFoundError(f"AutoShot weights file not found: {weights_path}\n\n"
+                                "Settings > Studio > Models has its download page (Get It).")
 
     device = _autoshot_select_device(device)
     model = AutoShotNet().eval()

@@ -43,28 +43,51 @@ from studio.outcome import Outcome, is_out_of_memory
 OOM_HINT = ("It ran out of graphics memory. Turn on Process as Segments (Low VRAM Mode), or lower Window Size "
             "or the Target Width / Height, then run it again.")
 
-#: The models, as the installer downloads them into weights/ (release check 2026-10-17: DepthCrafter only ever
-#: asked the Hub for them, so the installer's ~10 GB sat unused and the first job downloaded them again, the SVD
-#: base from another, gated repo). DepthCrafter's UNet in weights/DepthCrafter is the Hub's own file; of SVD it
-#: takes the VAE, image encoder, scheduler and feature extractor, which are byte-identical in -xt and -xt-1-1
-#: (measured: the UNet, the only part that differs, is DepthCrafter's). Hub ids when the folders aren't there.
+#: The models, as the installer or Settings > Studio > Models put them in the models folder (release check
+#: 2026-10-17: DepthCrafter only ever asked the Hub for them, so the installer's ~10 GB sat unused and the first
+#: job downloaded them again, the SVD base from another, gated repo). DepthCrafter's UNet is the Hub's own file;
+#: of SVD it takes the VAE, image encoder, scheduler and feature extractor, which are byte-identical in -xt and
+#: -xt-1-1 (measured: the UNet, the only part that differs, is DepthCrafter's). The Hub ids only when Hugging
+#: Face's cache already holds them (2026-10-20: no more silent downloads -- the Models window says what's missing).
 DEPTHCRAFTER_HUB = "tencent/DepthCrafter"
 SVD_HUB = "stabilityai/stable-video-diffusion-img2vid-xt"
-SVD_LOCAL = ("stable-video-diffusion-img2vid-xt", "stable-video-diffusion-img2vid-xt-1-1")
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
-def model_paths(repo: str = _REPO) -> Tuple[str, str]:
-    """(DepthCrafter's UNet, the SVD base): the folders in <repo>/weights when they hold the model, else the
-    Hugging Face ids (downloaded into its cache on first use)."""
-    weights = os.path.join(repo, "weights")
-    unet = os.path.join(weights, "DepthCrafter")
-    has_unet = os.path.isfile(os.path.join(unet, "config.json")) and any(
-        n.startswith("diffusion_pytorch_model") for n in (os.listdir(unet) if os.path.isdir(unet) else ()))
-    svd = next((os.path.join(weights, n) for n in SVD_LOCAL
-                if os.path.isfile(os.path.join(weights, n, "model_index.json"))
-                and os.path.isdir(os.path.join(weights, n, "vae"))), None)
-    return (unet if has_unet else DEPTHCRAFTER_HUB), (svd or SVD_HUB)
+class ModelsMissing(Exception):
+    """DepthCrafter's models are in neither the models folder nor Hugging Face's cache."""
+
+
+def _in_hub_cache(repo_id: str, filename: str) -> bool:
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        return isinstance(try_to_load_from_cache(repo_id, filename), str)
+    except Exception:
+        return False
+
+
+def model_paths(repo: Optional[str] = None) -> Tuple[str, str]:
+    """(DepthCrafter's UNet, the SVD base): their folders in the models folder (core.weights_paths, then
+    <repo>/weights; only <repo>/weights when `repo` is given), else the Hugging Face ids when its cache has
+    them. Neither: ModelsMissing, saying where to get them."""
+    from pathlib import Path
+    from studio import model_catalog as C
+    root = Path(repo) / "weights" if repo else None
+    found, lacking = [], []
+    for part, hub, probe in ((C.DEPTHCRAFTER, DEPTHCRAFTER_HUB, "config.json"),
+                             (C.SVD, SVD_HUB, "model_index.json")):
+        if C.installed([part], root):
+            found.append(str(C.part_dir(part, root)))
+        elif _in_hub_cache(hub, probe):
+            found.append(hub)
+        else:
+            found.append("")
+            lacking.append(C.MODELS_BY_KEY[part.key].name.split(" (")[0])
+    if lacking:
+        where = str(root) if root is not None else str(C.weights_paths.root())
+        raise ModelsMissing(f"{' and '.join(lacking)} {'is' if len(lacking) == 1 else 'are'} not in your models folder "
+                            f"({where}). Download {'it' if len(lacking) == 1 else 'them'} in Settings > Studio > "
+                            "Models, or point Studio at the folder that has them there.")
+    return found[0], found[1]
 
 _logger = logging.getLogger("depthcrafter.v2.runner")
 
@@ -322,6 +345,8 @@ class DepthCrafterRunner:
             self.hooks.status("Error: Model initialization failed. See console.")
             self.hooks.clip("N/A", "N/A", "N/A")
             outcome.error = f"The DepthCrafter model could not be loaded ({e.__class__.__name__})."
+            if isinstance(e, ModelsMissing):
+                outcome.error = str(e)
             if is_out_of_memory(e):
                 outcome.hint = OOM_HINT
             torch.backends.cudnn.benchmark = cudnn_was

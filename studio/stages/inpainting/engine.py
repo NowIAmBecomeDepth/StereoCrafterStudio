@@ -3367,9 +3367,17 @@ class InpaintingEngine:
                 self.after(0, lambda: self.processing_done(True))
                 return
             # v2: loaded now that there is work (audit O8)
+            # v2: from the models folder (Settings > Studio > Models, 2026-10-20), not the
+            # working directory's weights/; one missing is said, not a loader's traceback
+            from studio.model_catalog import missing_message, model_dir
+            _missing = missing_message(("stereocrafter", "svd"))
+            if _missing:
+                self.outcome.error = _missing
+                self.after(0, self.processing_done)
+                return
             self.pipeline = load_inpainting_pipeline(
-                pre_trained_path=r"./weights/stable-video-diffusion-img2vid-xt-1-1",
-                unet_path=r"./weights/StereoCrafter",
+                pre_trained_path=model_dir("svd"),
+                unet_path=model_dir("stereocrafter"),
                 device="cuda",
                 dtype=torch.float16,
                 offload_type=offload_type,

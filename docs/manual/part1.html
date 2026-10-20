@@ -143,20 +143,26 @@
         <a href="https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1">its Hugging Face page</a>
         and make a read token in your Hugging Face settings -- the installer asks for it.</li>
   </ol>
-  <p>The other models are needed only for the tools that use them, and each is fetched when you want it:</p>
+  <p>You can also skip that and get every model from inside Studio: <b>Settings → Studio →
+     <a href="#models">Models</a></b> lists each one, whether it's on this PC, and a
+     <span class="btn">Download</span> for each one missing -- only the files Studio loads (Stable Video
+     Diffusion, for one, is 1.5 GB there rather than 18). Each model is needed only for the tools that use it:</p>
   <ul>
-    <li><b>SAM 3</b> (Depth Map Editor, 3.4 GB, gated): <span class="btn">Download Weights</span> on the
+    <li><b>DepthCrafter</b> and <b>Stable Video Diffusion</b> (gated) for DepthCrafter; <b>StereoCrafter</b> and
+      Stable Video Diffusion for Inpainting.</li>
+    <li><b>SAM 3</b> (Depth Map Editor, 3.4 GB, gated): also <span class="btn">Download Weights</span> on the
       editor's Segment page -- see <a href="part3.html#sam3">Setting up SAM 3</a>.</li>
     <li><b>ROSE</b> (Erase from Clip, Edge Fill, about 3.7 GB): <span class="btn">Set Up ROSE</span> in the
-      editor's Erase panel.</li>
-    <li><b>Scene Cut's detectors</b>: the SceneCutGUI checkpoint bundle, linked in the README, into
-      <code>weights/SceneCut</code> -- only the detectors you use.</li>
-    <li><b>Inpainting V2</b> (experimental, 46.6 GB): <span class="btn">Download V2 Weights</span> on its page
-      fetches just the files it uses -- Wan 2.1 VACE's text encoder, VAE and tokenizer, and StereoCrafter2.</li>
+      editor's Erase panel -- it builds an environment of its own.</li>
+    <li><b>Scene Cut</b>: OmniShotCut, and DINOv3 (gated) and SSCD for cut validation, download in Models;
+      TransNetV2 comes with Studio. AutoShot is only in the SceneCutGUI bundle on Google Drive
+      (<span class="btn">Get It</span> opens it): put <code>ckpt_0_200_0.pth</code> in the models folder's
+      <code>SceneCut</code> folder.</li>
+    <li><b>Inpainting V2</b> (experimental, 46.6 GB): also <span class="btn">Download V2 Weights</span> on its
+      page -- Wan 2.1 VACE's text encoder, VAE and tokenizer, and StereoCrafter2.</li>
   </ul>
-  <div class="tip"><b>Tip</b><span>Without the core models in <code>weights</code>, DepthCrafter downloads its
-     own the first time it runs (about 10 GB), so that first job takes longer and needs an internet
-     connection.</span></div>
+  <div class="tip"><b>Tip</b><span>A stage whose model isn't there says so when you press
+     <span class="btn">Start</span>, and which one to get in Models.</span></div>
 
   <h3>Starting Studio</h3>
   <p>Double-click <code>StereoCrafter Studio.exe</code> in your Studio folder. A small black window
@@ -265,6 +271,30 @@
      to set up. <b>Check for Updates at Startup</b> (off until you turn it on) does that check once, a few seconds
      after Studio opens, and tells you when there's something new; it doesn't check again that session
      unless you click <b>Check for Updates</b>, and it never installs anything by itself.</p>
+  <p id="models"><b>Models</b> shows where Studio keeps its models and which of them are on this PC:</p>
+  <ul>
+    <li><b>Models folder</b>: <span class="btn">Change…</span> points Studio at another folder or drive -- one
+        with more room, or one two installs share. Nothing is moved or copied: move the model folders there
+        yourself, or download them there. A model not moved yet is still found in Studio's own
+        <code>weights</code> folder, and <span class="btn">Use Default</span> goes back to that one. Not while a
+        job runs.</li>
+    <li><b>Hugging Face</b>: Stable Video Diffusion, SAM 3 and DINOv3 are <b>gated</b>. Open the model's page
+        (<span class="btn">Ask for Access</span> on its row, or the ⓘ beside it) and ask for access -- Stable
+        Video Diffusion's is granted at once, the others by their makers. Then make a <b>Read</b> token in
+        your Hugging Face settings (<span class="btn">Get a Token</span>), paste it in and press
+        <span class="btn">Sign In</span>. It's kept where <code>hf auth login</code> keeps it, so the installer
+        and Studio share it; Studio never saves it in its own settings.</li>
+    <li><span class="btn">Download</span> on a model's row gets just the files Studio loads, into the models
+        folder. One downloads at a time and the others queue behind it; while a job runs, a download waits
+        for it to finish, so the job isn't slowed. <span class="btn">Stop</span> keeps what came down: the
+        next Download carries on from there.</li>
+  </ul>
+  <div class="tip"><b>Already have StereoCrafter?</b><span>Point <span class="btn">Change…</span> at its
+     <code>weights</code> folder and Studio uses those models where they are -- nothing to download again. Studio
+     looks for the same folder names (<code>stable-video-diffusion-img2vid-xt-1-1</code>, <code>DepthCrafter</code>,
+     <code>StereoCrafter</code>, and <code>SceneCut</code> from the SceneCutGUI bundle), so those rows show
+     Installed. Pick the <code>weights</code> folder itself, not the install above it. A model it doesn't have
+     downloads into that folder, and ROSE needs <span class="btn">Set Up ROSE</span> again.</span></div>
 
   <h3>Picking folders and clips</h3>
   <p>Every <span class="btn">Browse</span> button opens Studio's folder picker. Each level of folders sits

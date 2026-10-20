@@ -405,8 +405,7 @@ class SceneCutEngine:
             if not weights_path or not os.path.exists(weights_path):
                 raise FileNotFoundError(
                     f"OmniShotCut weights file not found: {weights_path}\n\n"
-                    "Download 'OmniShotCut_ckpt.pth' from https://huggingface.co/uva-cv-lab/OmniShotCut "
-                    f"into {WEIGHTS_DIR}."
+                    "Download OmniShotCut in Settings > Studio > Models."
                 )
 
             resolved_device = _autoshot_select_device(device)

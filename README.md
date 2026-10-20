@@ -172,19 +172,35 @@ and Studio keeps each stage's input and output for every chapter there. Until yo
 
 ## Models
 
-| Model | Used by | Folder (under `weights/`) | How to get it |
-| ----- | ------- | ------------------------- | ------------- |
-| Stable Video Diffusion img2vid-xt 1.1 (gated) | DepthCrafter, Inpainting | `stable-video-diffusion-img2vid-xt-1-1` | the installer |
-| DepthCrafter | DepthCrafter | `DepthCrafter` | the installer |
-| StereoCrafter | Inpainting | `StereoCrafter` | the installer |
-| SAM 3 (gated, 3.4 GB) | Depth Map Editor | `SAM3/sam3.pt` | request access at <https://huggingface.co/facebook/sam3>, run `uv run hf auth login`, then **Download Weights** on the editor's Segment page |
-| ROSE (about 3.7 GB, its own environment) | Erase from Clip, Edge Fill | `ROSE` | **Set Up ROSE** in the Depth Map Editor's Erase panel |
-| Scene Cut detectors, DINOv3 + SSCD | Scene Cut | `SceneCut/` | the [SceneCutGUI checkpoint bundle](https://drive.google.com/file/d/1aJ96eJE4DstJ_HBzAusuYLvfU01Jnc92/view?usp=sharing); get only the detectors you use |
-| Wan 2.1 VACE's text encoder, VAE and tokenizer (11.9 GB) + StereoCrafter2 (34.7 GB): 46.6 GB | Inpainting V2 (experimental) | `Wan2.1-VACE-14B-diffusers`, `StereoCrafter2` | **Download V2 Weights** on Inpainting V2's page (only the files V2 loads -- not VACE's own 59 GB transformer); FP8 resident mode: **Download FP8 Model** there (17.4 GB, `weights/StereoCrafter2-FP8`) |
+**Settings > Studio > Models** lists every model, whether it's on this PC, and a **Download** for each one
+missing -- only the files Studio loads, from a pinned revision. There you can also:
 
-Scene Cut's bundle holds `ckpt_0_200_0.pth` (AutoShot), `transnetv2-pytorch-weights.pth` (TransNetV2),
-`OmniShotCut_ckpt.pth` (OmniShotCut), the `DINOv3/` folder and `sscd_disc_large.torchscript.pt` (cut
-validation). Each detector says which file it's missing.
+- **point Studio at another models folder** (another drive, or one two installs share). Nothing is moved:
+  Studio looks there first, then in its own `weights/` for anything not moved yet, and downloads go there.
+- **sign in to Hugging Face** for the gated models (Stable Video Diffusion, SAM 3, DINOv3): ask for access on
+  each one's page, make a *Read* token at <https://huggingface.co/settings/tokens> and paste it in. It's stored
+  where `hf auth login` stores it, never in Studio's settings.
+
+One download runs at a time, the rest queue, and a download waits while a job runs.
+
+**Already have StereoCrafter?** Point the models folder at its `weights` folder: Studio looks for the same folder
+names (`stable-video-diffusion-img2vid-xt-1-1`, `DepthCrafter`, `StereoCrafter`, `SceneCut/`), so there's nothing
+to download again. A model that folder doesn't have downloads into it; ROSE needs **Set Up ROSE** again.
+
+| Model | Used by | Folder (in the models folder) | Download |
+| ----- | ------- | ----------------------------- | -------- |
+| Stable Video Diffusion img2vid-xt 1.1 (gated): its VAE + image encoder, 1.5 GB | DepthCrafter, Inpainting | `stable-video-diffusion-img2vid-xt-1-1` | Models (or the installer: the whole 18 GB repository) |
+| DepthCrafter (3.0 GB) | DepthCrafter | `DepthCrafter` | Models, or the installer |
+| StereoCrafter (3.0 GB) | Inpainting | `StereoCrafter` | Models, or the installer |
+| SAM 3 (gated, 3.4 GB) | Depth Map Editor | `SAM3/sam3.pt` | Models, or **Download Weights** on the editor's Segment page |
+| ROSE (about 3.7 GB, its own environment) | Erase from Clip, Edge Fill | `ROSE` | **Set Up ROSE** in the Depth Map Editor's Erase panel |
+| OmniShotCut (164 MB) | Scene Cut | `SceneCut/OmniShotCut_ckpt.pth` | Models |
+| TransNetV2 | Scene Cut | comes with Studio (the `transnetv2-pytorch` package) | -- |
+| AutoShot | Scene Cut | `SceneCut/ckpt_0_200_0.pth` | only in the [SceneCutGUI checkpoint bundle](https://drive.google.com/file/d/1aJ96eJE4DstJ_HBzAusuYLvfU01Jnc92/view?usp=sharing) on Google Drive |
+| DINOv3 ViT-L/16 (gated, 1.2 GB) + SSCD (178 MB) | Scene Cut's cut validation | `SceneCut/DINOv3/`, `SceneCut/sscd_disc_large.torchscript.pt` | Models |
+| Wan 2.1 VACE's text encoder, VAE and tokenizer (11.9 GB) + StereoCrafter2 (34.7 GB): 46.6 GB | Inpainting V2 (experimental) | `Wan2.1-VACE-14B-diffusers`, `StereoCrafter2` | Models, or **Download V2 Weights** on Inpainting V2's page (not VACE's own 59 GB transformer); FP8 resident mode: StereoCrafter2 FP8 (17.4 GB, `StereoCrafter2-FP8`) |
+
+Each stage says which model it's missing when you press Start.
 
 Inpainting V2 is experimental: much more demanding than V1 and much slower, for problem scenes where V1 isn't good
 enough, not a whole long video.

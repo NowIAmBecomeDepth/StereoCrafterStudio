@@ -1091,7 +1091,11 @@ class DepthEditEngine:
         if missing:
             lines.append("Needs packages: " + ", ".join(missing) + ".")
             ready = False
-        default_ckpt = sam.checkpoint_path(sam.DEFAULT_VERSION).relative_to(_REPO_ROOT)
+        default_ckpt = sam.checkpoint_path(sam.DEFAULT_VERSION)
+        try:  # v2: the models folder may be elsewhere (Settings > Studio > Models)
+            default_ckpt = default_ckpt.relative_to(_REPO_ROOT)
+        except ValueError:
+            pass
         if not sam.weights_present():
             lines.append(f"Needs weights: {default_ckpt} (gated on Hugging Face).")
             ready = False

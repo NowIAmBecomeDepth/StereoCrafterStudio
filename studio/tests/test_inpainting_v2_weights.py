@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO))
 import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
 
 from studio.stages.inpainting_v2 import weights as W  # noqa: E402
+from studio import model_catalog as C  # noqa: E402  -- the downloader V2 shares (2026-10-20)
 
 #: writes each file at the size its name ends with (".../name@123"), slowly enough to be seen
 _WRITE = (
@@ -79,16 +80,16 @@ class DownloadTest(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp())
         self.part = W.Part("Test model", "nobody/test", "0" * 40, "TestModel",
                            (("config.json", 4000), ("sub/model.bin", 4000), ("LICENSE", 4000)))
-        self._fetch = W._FETCH
+        self._fetch = C._FETCH
 
     def tearDown(self):
-        W._FETCH = self._fetch
+        C._FETCH = self._fetch
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_fetches_only_whats_missing_with_progress(self):
         (self.root / "TestModel").mkdir()
         (self.root / "TestModel" / "LICENSE").write_text("already here")
-        W._FETCH = _WRITE
+        C._FETCH = _WRITE
         seen = []
         W.download([self.part], lambda f, t: seen.append((f, t)), threading.Event(), root=self.root, poll_s=0.1)
         self.assertTrue(W.installed([self.part], root=self.root))
@@ -99,7 +100,7 @@ class DownloadTest(unittest.TestCase):
         self.assertEqual(fr, sorted(fr), "progress only goes up")
 
     def test_stop_ends_the_child_at_once(self):
-        W._FETCH = _HANG
+        C._FETCH = _HANG
         stop = threading.Event()
         procs = []
         threading.Timer(0.5, stop.set).start()
@@ -110,7 +111,7 @@ class DownloadTest(unittest.TestCase):
         self.assertEqual(procs, [], "the child is gone")
 
     def test_a_failure_says_why(self):
-        W._FETCH = _FAIL
+        C._FETCH = _FAIL
         with self.assertRaises(RuntimeError) as cm:
             W.download([self.part], lambda f, t: None, threading.Event(), root=self.root, poll_s=0.1)
         self.assertIn("Test model", str(cm.exception))

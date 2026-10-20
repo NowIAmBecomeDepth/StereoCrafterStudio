@@ -29,8 +29,12 @@ from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
+from core import weights_paths  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
-ROSE_DIR = REPO / "weights" / "ROSE"
+#: ROSE/ in the models folder (Settings > Studio > Models, 2026-10-20), or in <repo>/weights when
+#: it was set up there. Its .venv is tied to where it was built: moved by hand, Set Up ROSE again.
+ROSE_DIR = weights_paths.find("ROSE", marker=os.path.join(".venv", "pyvenv.cfg"))
 GIT_URL = "https://github.com/Kunbyte-AI/ROSE.git"
 #: The commit Studio was tested with (2026-10-05).
 ROSE_COMMIT = "6be41c5420bf331c6d491277d5a6feaf9b3a779a"
@@ -104,6 +108,13 @@ def _run(cmd: List[str], log: Callable[[str], None], stop=None, cwd=None) -> Non
 #: Written once the clone is checked out at ROSE_COMMIT (bug sweep 2026-10-09
 #: #12: the folder appears when a clone starts, so a stopped one counted as done).
 CLONE_MARKER = ROSE_DIR / ".studio_clone_ok"
+
+
+@weights_paths.on_change
+def _models_moved() -> None:
+    global ROSE_DIR, CLONE_MARKER
+    ROSE_DIR = weights_paths.find("ROSE", marker=os.path.join(".venv", "pyvenv.cfg"))
+    CLONE_MARKER = ROSE_DIR / ".studio_clone_ok"
 
 
 def _head(git: str) -> Optional[str]:

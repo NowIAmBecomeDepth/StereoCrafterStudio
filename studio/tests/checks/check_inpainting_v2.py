@@ -10,11 +10,14 @@ os.environ["QT_QPA_FONTDIR"] = "C:/Windows/Fonts"
 REPO = Path(__file__).resolve().parents[3]; sys.path.insert(0, str(REPO)); os.chdir(REPO)
 rec = REPO / "last_jobs.json"; h0 = (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None)
 tmp = Path(tempfile.mkdtemp())
+# V2's weights looked for in an empty models folder, and only there (core.weights_paths): the download
+# row shows (user, 2026-10-18)
+os.environ["STEREOCRAFTER_WEIGHTS"] = str(tmp / "weights")
 from studio.legacy import install; install()
 import studio.settings_store as ss; ss.CONFIG_DIR = tmp / "config"
 import core.ui.job_handoff as jh; jh._RECORD_PATH = str(tmp / "last_jobs.json")
-# V2's weights looked for in an empty folder: the download row shows (user, 2026-10-18)
-from studio.stages.inpainting_v2 import weights as W; W.WEIGHTS = tmp / "weights"
+from studio.stages.inpainting_v2 import weights as W
+from core import weights_paths
 from PySide6.QtCore import QCoreApplication, QEventLoop, QMetaObject, Q_ARG, QPoint, QPointF, Qt, qInstallMessageHandler
 warns = []
 qInstallMessageHandler(lambda t, ctx, m: warns.append(m) if (".qml" in m or "qml" in m.lower()) else None)
@@ -95,10 +98,10 @@ wan._dl = {"what": "", "progress": 0.0, "text": ""}; wan._dl_stop.clear()
 # every file there: the row goes; FP8 resident picked without its model: the FP8 row
 for part in W.REQUIRED:
     for path, _n in part.files:
-        f = W.WEIGHTS / part.folder / path
+        f = weights_paths.root() / part.folder / path
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(b"1")
-wan.downloadChanged.emit(); pump(0.3)
+weights_paths.refresh(); pump(0.3)       # as a finished download does: the page and the engine look again
 block = find(v2, lambda c: c.objectName() == "v2WeightsBlock")
 check("weights all there: the download row is gone", weights_installed() and not block.isVisible())
 _off = wan.settings.property("offload_mode")

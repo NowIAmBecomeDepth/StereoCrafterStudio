@@ -59,8 +59,19 @@ CONFIG_FILE = "config_inpaint_v2.json"
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".mov", ".avi", ".webm")
 
 # Hardcoded model locations (not exposed in the GUI).
-PRE_TRAINED_PATH = str(_REPO / "weights" / "Wan2.1-VACE-14B-diffusers")  # base Wan model (tokenizer/text_encoder/vae)
-TRANSFORMER_PATH = str(_REPO / "weights" / "StereoCrafter2")             # fine-tuned VACE transformer
+from studio.model_catalog import fp8_dir_for as _fp8_dir_for, model_dir as _model_dir  # v2
+from studio.model_catalog import on_change as _on_models_change  # v2
+
+
+@_on_models_change
+def _models_moved():
+    """v2: the models folder changed, or a download landed: where the two models are now."""
+    global PRE_TRAINED_PATH, TRANSFORMER_PATH
+    PRE_TRAINED_PATH, TRANSFORMER_PATH = _model_dir("wan_vace"), _model_dir("stereocrafter2")
+
+
+PRE_TRAINED_PATH = _model_dir("wan_vace")  # base Wan model (tokenizer/text_encoder/vae)
+TRANSFORMER_PATH = _model_dir("stereocrafter2")             # fine-tuned VACE transformer
 FP8_STATE_FILE = "diffusion_pytorch_model_fp8.pt"         # inside <transformer>-FP8/ (see export_fp8_transformer.py)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1165,7 +1176,7 @@ def load_models(pre_trained_path, transformer_path, device=DEVICE, dtype=DTYPE,
 
     progress_cb("load_models", 3, 4, "Loading transformer...")
     if fp8_resident:
-        fp8_dir = transformer_path.rstrip("/\\") + "-FP8"
+        fp8_dir = _fp8_dir_for(transformer_path)  # v2: the models folder
         logger.info("Loading pre-quantized FP8 transformer from %s (GPU-resident).", fp8_dir)
         transformer = _load_fp8_transformer(fp8_dir).to(device)
     else:
@@ -1782,13 +1793,12 @@ class WanInpaintRunner:
                 )
                 return None
         if offload_sel == "fp8":
-            fp8_dir = TRANSFORMER_PATH.rstrip("/\\") + "-FP8"
+            fp8_dir = _fp8_dir_for(TRANSFORMER_PATH)  # v2: the models folder
             if not os.path.isfile(os.path.join(fp8_dir, FP8_STATE_FILE)):
                 messagebox.showerror(
                     "FP8 checkpoint missing",
                     f"FP8 resident mode needs the pre-quantized transformer at:\n{fp8_dir}\n\n"
-                    "Download it:  uv run hf download enoky/StereoCrafter2-FP8 "
-                    "--local-dir weights/StereoCrafter2-FP8\n"
+                    "Download it with Download FP8 Model on this page, or in Settings > Studio > Models,\n"
                     "or export it locally with export_fp8_transformer.py (needs ~64 GB RAM).",
                 )
                 return None

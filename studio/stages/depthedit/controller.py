@@ -253,6 +253,7 @@ class DepthEditController(QObject):
     #: Erase from Clip (user, 2026-10-05): progress (0..1, text) and the end (ok, text)
     _sigErase = Signal(float, str)
     _sigEraseDone = Signal(bool, str)
+    _sigModelsMoved = Signal()
     #: the 3D view's picture from Splatting's preview: (request, QImage or None, error)
     _sigWarp = Signal(int, object, str)
     warpNoteChanged = Signal()
@@ -303,6 +304,11 @@ class DepthEditController(QObject):
         self._sigWarp.connect(self._on_warp, q)
         self._sigErase.connect(self._on_erase_progress, q)
         self._sigEraseDone.connect(self._on_erase_done, q)
+        # the models folder changed, or Settings > Studio > Models downloaded SAM 3 (2026-10-20):
+        # the Segment page's status says so (the listener may run on a download's thread)
+        self._sigModelsMoved.connect(lambda: self._run("_refresh_sam_status"), q)
+        from core import weights_paths
+        weights_paths.on_change(self._models_moved)
         # Erase from Clip / ROSE set-up: one at a time, on their own thread
         self._erase_thread: Optional[threading.Thread] = None
         self._erase_stop = threading.Event()
@@ -549,6 +555,9 @@ class DepthEditController(QObject):
                 mb.answers = {}
 
     # ---- setters and actions ------------------------------------------------------------
+
+    def _models_moved(self) -> None:
+        self._sigModelsMoved.emit()
 
     def _run(self, name: str, *args) -> None:
         if self._engine is None:

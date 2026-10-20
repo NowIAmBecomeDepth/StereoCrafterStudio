@@ -94,7 +94,17 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 VENDOR_DIR = _REPO_ROOT / "third_party" / "sam3"
-WEIGHTS_DIR = _REPO_ROOT / "weights" / "SAM3"
+from core import weights_paths  # noqa: E402
+
+#: SAM3/ in the models folder (Settings > Studio > Models, 2026-10-20), kept
+#: current when that changes or a download lands
+WEIGHTS_DIR = weights_paths.find("SAM3", marker="sam3.pt")
+
+
+@weights_paths.on_change
+def _models_moved() -> None:
+    global WEIGHTS_DIR
+    WEIGHTS_DIR = weights_paths.find("SAM3", marker="sam3.pt")
 BPE_PATH = VENDOR_DIR / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz"
 
 #: version -> (display name, Hugging Face repo, checkpoint file). Preference
@@ -203,11 +213,12 @@ def download_weights(progress: Optional[Callable[[str], None]] = None,
         progress(f"Downloading {filename} (about 3.4 GB) from Hugging Face...")
     try:
         path = hf_hub_download(repo_id=repo, filename=filename, local_dir=str(WEIGHTS_DIR))
+        weights_paths.refresh()          # the other places that look for it (Settings > Studio > Models)
     except GatedRepoError as e:
         raise WeightsAccessError(
             f"Your Hugging Face account does not have access to {label} yet.\n\n"
             f"1. Open {page} and request access (Meta usually approves quickly).\n"
-            "2. Make sure this machine is logged in: run `hf auth login`.\n"
+            "2. Sign in to Hugging Face in Settings > Studio > Models (or run `hf auth login`).\n"
             "3. Press Download Weights again."
         ) from e
     return Path(path)

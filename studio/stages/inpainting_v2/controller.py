@@ -160,6 +160,9 @@ class InpaintingV2Controller(QObject):
         self._dl_procs: list = []                 # the download's child process, for Stop and shutdown
         self._sigDlProgress.connect(self._on_dl_progress, q)
         self._sigDlDone.connect(self._on_dl_done, q)
+        # the models folder changed, or Settings > Studio > Models downloaded V2's weights (2026-10-20)
+        from core import weights_paths
+        weights_paths.on_change(self._models_moved)
 
     # ---- settings ------------------------------------------------------------------
 
@@ -190,7 +193,7 @@ class InpaintingV2Controller(QObject):
                 "parts": [{"name": p.name, "size": W.gb(p.size),
                            "left": W.gb(sum(n for q, _f, n in todo if q is p))} for p in parts],
                 "free": W.gb(free) if free >= 0 else "", "fits": free < 0 or free > need + 2e9,
-                "folder": str(W.WEIGHTS)}
+                "folder": str(W.C.weights_paths.root())}
 
     @Slot(result="QVariantMap")
     def weightsNeed(self) -> Dict[str, Any]:
@@ -208,6 +211,9 @@ class InpaintingV2Controller(QObject):
 
     fp8Installed = Property(bool, _fp8_installed, notify=downloadChanged)
     download = Property("QVariantMap", lambda self: dict(self._dl), notify=downloadChanged)
+
+    def _models_moved(self) -> None:
+        self.downloadChanged.emit()
 
     @Slot()
     def downloadWeights(self) -> None:

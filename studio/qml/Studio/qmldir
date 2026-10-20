@@ -42,6 +42,7 @@ ClipInfo 1.0 ClipInfo.qml
 PairRow 1.0 PairRow.qml
 TitleBar 1.0 TitleBar.qml
 UpdateDialog 1.0 UpdateDialog.qml
+ModelsDialog 1.0 ModelsDialog.qml
 SliderRow 1.0 SliderRow.qml
 DialField 1.0 DialField.qml
 PreviewAutoFit 1.0 PreviewAutoFit.qml

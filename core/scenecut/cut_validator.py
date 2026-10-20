@@ -42,15 +42,22 @@ from transformers import AutoImageProcessor, AutoModel
 
 logger = logging.getLogger("CutValidator")
 
+from core import weights_paths  # noqa: E402
+
 #: Where the validation checkpoints live: the DINOv3 model folder, with
-#: sscd_disc_large.torchscript.pt beside it inside the same folder. Resolved
-#: from this file rather than the working directory.
-DEFAULT_DINOV3_DIR = str(
-    Path(__file__).resolve().parent.parent.parent / "weights" / "SceneCut" / "DINOv3"
-)
+#: sscd_disc_large.torchscript.pt beside it inside the same folder. In the
+#: models folder (Settings > Studio > Models, 2026-10-20; core.weights_paths),
+#: kept current when that changes -- read it at use time, as the engine does.
+DEFAULT_DINOV3_DIR = str(weights_paths.find("SceneCut", "DINOv3", marker="config.json"))
 
 #: Name of the optional SSCD descriptor inside the checkpoint bundle.
 SSCD_FILENAME = "sscd_disc_large.torchscript.pt"
+
+
+@weights_paths.on_change
+def _models_moved() -> None:
+    global DEFAULT_DINOV3_DIR
+    DEFAULT_DINOV3_DIR = str(weights_paths.find("SceneCut", "DINOv3", marker="config.json"))
 
 
 def _find_sscd(model_dir: str) -> str:
@@ -66,6 +73,8 @@ def _find_sscd(model_dir: str) -> str:
     candidates = [
         os.path.join(model_dir, SSCD_FILENAME),
         os.path.join(os.path.dirname(os.path.abspath(model_dir)), SSCD_FILENAME),
+        # downloaded on its own into the models folder's SceneCut/ (2026-10-20)
+        str(weights_paths.find("SceneCut", SSCD_FILENAME)),
     ]
     for path in candidates:
         if os.path.isfile(path):

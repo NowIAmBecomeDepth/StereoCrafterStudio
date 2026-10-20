@@ -488,6 +488,14 @@ ApplicationWindow {
             }
         }
         MenuItem { text: "Set Project Folder…"; onTriggered: projectDlg.open() }
+        // the models folder, each model's download, the Hugging Face sign-in (user, 2026-10-20)
+        MenuItem {
+            objectName: "modelsItem"
+            text: "Models"
+            property string tip: "Where Studio keeps its models, which are here, and a Download for each one missing "
+                                 + "(with the Hugging Face sign-in the gated ones need)."
+            onTriggered: modelsDlg.open()
+        }
         // for the experts who never use it (user, 2026-10-11)
         MenuItem {
             objectName: "hideBeginnerItem"
@@ -897,6 +905,13 @@ ApplicationWindow {
             jobRunning: win.runningStage !== null
             onInstallRefused: (why) => prompt.ask({ title: "Can't install the update", message: why,
                                                     buttons: [{ text: "OK", code: 1, kind: "filled" }] })
+        }
+
+        // Settings > Studio > Models (models_controller.py; user, 2026-10-20)
+        ModelsDialog {
+            id: modelsDlg
+            jobRunning: win.runningStage !== null
+            onAskSignOut: (opts) => prompt.ask(opts)
         }
 
         SettingsDialog {

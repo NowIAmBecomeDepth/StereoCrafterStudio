@@ -133,6 +133,10 @@ class EngineTests(unittest.TestCase):
         self._saved = (E.load_inpainting_pipeline, E.InpaintingEngine.process_single_video)
         self.loads = []
         E.load_inpainting_pipeline = lambda **kw: self.loads.append(kw) or "PIPELINE"
+        # the models are taken as there: a clean checkout has none (2026-10-20: the run checks first)
+        from studio import model_catalog
+        self._saved_missing = model_catalog.missing_message
+        model_catalog.missing_message = lambda keys, root=None: ""
         test = self
 
         def fake_process(self, **kw):
@@ -148,6 +152,8 @@ class EngineTests(unittest.TestCase):
 
     def tearDown(self):
         self.E.load_inpainting_pipeline, self.E.InpaintingEngine.process_single_video = self._saved
+        from studio import model_catalog
+        model_catalog.missing_message = self._saved_missing
         self.tmp.cleanup()
 
     def clip(self, name, hires=True):
@@ -309,6 +315,16 @@ class EngineTests(unittest.TestCase):
         self.run_batch()                                     # one clip to do
         self.assertEqual(len(self.loads), 1)
         self.assertEqual([os.path.basename(c["input_video_path"]) for c in self.calls], ["shot-0007_640_splatted4.mp4"])
+
+    def test_a_missing_model_is_said_and_nothing_loads(self):
+        # 2026-10-20: the run names what's missing and where to get it, not a loader's traceback
+        from studio import model_catalog
+        model_catalog.missing_message = lambda keys, root=None: "StereoCrafter is not in your models folder."
+        self.clip("shot-0006_640_splatted4.mp4")
+        _hooks, eng = self.run_batch()
+        self.assertEqual(self.loads, [])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(eng.outcome.error, "StereoCrafter is not in your models folder.")
 
     # audit 2026-09-28 (minor): an Overlap not below the Chunk makes no
     # progress (the step clamps to one frame and the loop quits after the
