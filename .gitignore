@@ -1,0 +1,211 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+.env/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# VS Code
+.vscode/
+.vs/
+
+# Custom
+
+.DS_Store
+outputs/
+weights/
+old/
+temp/
+
+
+config.json
+config_depthcrafter.json
+config_inpaint.json
+config_splat.json
+yolo12s.pt
+yolo12n.pt
+yolo12m.pt
+config_auto_conv.json
+models/res10_300x300_ssd_iter_140000.caffemodel
+models/deploy.prototxt.txt
+convergence_tool_config.json
+sidecaredit_config.json
+config_sidecaredit.json
+config_merging.mergecfg
+config_splat.splatcfg
+nul
+AGENTS.md
+/debug_dumps
+/ryudoaema-updates
+/completed_output
+/.kilo
+
+# Subtitle Fixer model checkpoints. Fetched by the Install button in that tab;
+# both are far over GitHub's 100MB per-file limit, so they are never committed.
+models/*.pth
+
+# --- Runtime state the program writes into its own folder -------------------
+# These are per-machine and several contain absolute local paths, so they must
+# never be committed. The per-stage configs above were already covered; these
+# are the ones that arrived later and were missed.
+config_studio.json
+config_scenecut.json
+config_inpaint_v2.json
+last_jobs.json
+studio_ready.flag
+# Studio v2 (studio/) keeps its settings apart from v1's, same reasoning.
+config/
+
+# Configs for the _R variants, same reasoning as the ones above.
+config_*_R.json
+config_*_R.splatcfg
+
+# Logs and crash artefacts: studio_last_run.log, inpainting_runtime.log, and
+# any config quarantined by the corrupt-config handler
+# (config_inpaint.json.corrupt and friends).
+*.log
+*.corrupt
+# Named .txt rather than .log, so *.log does not cover it.
+_install/install_log.txt
+
+# Windows shortcuts made beside the launchers.
+*.lnk
+
+# Pre-edit file snapshots written by .claude/hooks/snapshot.py
+.claude/backups/
+torchinductor_cache/
+
+# The manual's one-page phone copy: built from docs/manual by build_offline.py
+docs/manual/StereoCrafter-Studio-Manual.html
+
+# the user's own tools, not released (personal/README.md)
+personal/
+
+# ---- The retired Prototype (the CustomTkinter Studio) and its tooling (release, 2026-10-17) ----
+# Kept on the developer's PC as reference; StereoCrafter Studio (studio/) doesn't use any of it.
+# The generators (studio/tools/gen_*.py) build Studio's engines from these files -- the engines ship.
+/stereocrafter_studio.py
+/splatting_gui.py
+/splatting_gui_R.py
+/merging_gui.py
+/inpainting_gui.py
+/inpainting_gui_v2.py
+/depth_editor_gui.py
+/scenecut_gui.py
+/depthcrafter_gui_seg.py
+/_RUN_*.bat
+/RUN_Splatting_GUI_R.bat
+/StereoCrafter Studio (Prototype).bat
+/unified_gui/
+/core/ui/inline_preview_panel.py
+/core/ui/preview_autofit.py
+/core/ui/tab_strip.py
+/core/ui/video_previewer.py
+/studio/tools/gen_*.py
+/studio/tests/_splat_v1_parity.py
+/studio/tests/checks/measure_v1_fit.py
+# the _R reference family -- but Splatting's M2S warp / mask backend (core/splatting/m2s_backends.py) and its notices ship
+/dependency_R/*
+!/dependency_R/m2s_backend/
+!/dependency_R/notices/
+
+# ---- Not part of the release (2026-10-17): DepthCrafter's upstream benchmark / point-cloud scripts, the
+# developer's own DaVinci Resolve scripts and dev tools, unused icon designs and test files
+/benchmark/
+/visualization/
+/scripts/
+/assets/icon_variants/
+/assets/camel_*.jpg
+/assets/*_change_log.md
+/tools/npz_to_exr.py
+/tools/image.png
+/dependency/forward_warp_pytorch/forward_warp_rescaled.py
+/build_icon.py
+/clean_autopass_sidecars.py
+/read_checkpoint_signature.py
+/venv_stack_probe.py
+/write_test.txt
+
+# ---- The stages' default folders when no project is chosen (older Studio made them in this folder)
+/input_clips/
+/input_source_clips/
+/input_depth_maps/
+/output_depthmaps/
+/output_splatted/
+/output_splatted_hires/
+/final_videos/
+
+# The manual shows WebP copies of its screenshots (build_offline.py makes them); the shot scripts' PNGs are
+# the full-quality originals, kept on the developer's PC (release check 2026-10-17)
+docs/manual/shots/*.png
+
+# the developer's own notes (user, 2026-10-17)
+DepthCrafter_speck_findings.txt

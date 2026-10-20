@@ -1,0 +1,1406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Pipeline · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Part 2 of 5</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html" class="current"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Part 2</div>
+  <h1>The pipeline</h1>
+  <p>Each stage in turn: what it's for, what goes in and what comes out, its settings panel by
+     panel, and what to do when something doesn't look right.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="scenecut">
+  <h2><span class="num">6</span> Scene Cut <a class="anchor" href="#scenecut">#</a></h2>
+
+  <p><b>Scene Cut</b> chops a whole movie into short clips, one for every shot, ready for
+     DepthCrafter. You'll find it in the <span class="btn">Extra</span> tab, under
+     <span class="btn">Scene Cut</span>.</p>
+
+  <div class="careful"><b>Required: one clip per shot</b><span>Your movie must be cut into separate
+     shots before DepthCrafter. What's optional is the tool: Scene Cut, or any other that cuts a video
+     into one clip per shot, such as DaVinci Resolve's scene cut detection. Scene Cut is included so
+     you can do it without leaving Studio.</span></div>
+
+  <h3>Why every shot needs its own clip</h3>
+  <p>DepthCrafter is a <i>temporal</i> model: it works on a run of frames at once and keeps the depth
+     of the same scene consistent from frame to frame, so things don't flicker nearer and further.
+     That's exactly what goes wrong across a cut. With several shots in one clip, it tries to keep
+     unrelated scenes consistent with each other, and the depth map quickly loses quality.</p>
+  <p>The later stages benefit too: Inpainting also works through a clip in pieces, and a fill that
+     suddenly changes scene halfway through looks wrong.</p>
+
+  <h3>Before you start: the model files</h3>
+  <p>Scene Cut finds the cuts with an AI. Each <b>detector</b> needs its own model file in the
+     <code>weights/SceneCut</code> folder inside your Studio folder:</p>
+  <table class="keys">
+    <tr><td><code>ckpt_0_200_0.pth</code></td><td>AutoShot</td></tr>
+    <tr><td><code>transnetv2-pytorch-weights.pth</code></td><td>TransNetV2</td></tr>
+    <tr><td><code>OmniShotCut_ckpt.pth</code></td><td>OmniShotCut</td></tr>
+    <tr><td><code>DINOv3/</code> (the whole folder)</td><td>Validate cuts with DINOv3 (optional)</td></tr>
+  </table>
+  <p>You only need the ones you'll use. If a file is missing, Scene Cut tells you which one rather
+     than failing.</p>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/09_scenecut.webp" alt="The Scene Cut page">
+      <span class="marker" style="left:1.2%;top:15%">1</span>
+      <span class="marker" style="left:1.2%;top:31.6%">2</span>
+      <span class="marker" style="left:1.2%;top:51.7%">3</span>
+      <span class="marker" style="left:1.2%;top:67.3%">4</span>
+      <span class="marker" style="left:1%;top:83%">5</span>
+    </div></div>
+    <figcaption>Scene Cut, set up to cut a movie into chapters of clips.</figcaption>
+  </figure>
+
+  <h3><span class="num">1</span> &nbsp;Input &amp; Output</h3>
+  <ul>
+    <li><span class="set">Video File</span>: the movie to cut. Use <span class="btn">Browse…</span>,
+        or drop the file onto the field.</li>
+    <li><span class="set">Output Folder</span>: where the clips go. With a project folder set
+        (Part 1, section 4) it's filled in with your Source folder, and Split into chapters is turned
+        on. Scene Cut always takes the whole movie, so it has no chapter list. Change the folder and
+        Studio keeps yours for that project.</li>
+    <li><span class="set">Split into chapters</span> (on from the start) files the clips into one folder per chapter,
+        the way your project is laid out. It uses the chapter markers inside the movie file, which a
+        Blu-ray or DVD rip usually has. An existing <code>Chapter N</code> folder is reused; a missing
+        one is made and named from the marker. A shot that runs across a chapter start is cut there.</li>
+  </ul>
+
+  <h3><span class="num">2</span> &nbsp;Detection Configuration</h3>
+  <p><span class="set">Detector</span> picks the AI that finds the cuts:</p>
+  <ul>
+    <li><b>AutoShot</b>: a good all-rounder. Try it first.</li>
+    <li><b>TransNetV2</b>: a second opinion for the same kind of footage.</li>
+    <li><b>OmniShotCut</b>: better for cartoons, anime, games and screen recordings. It also
+        understands fades and dissolves.</li>
+  </ul>
+  <p>The settings beside it change with the detector. For AutoShot and TransNetV2:</p>
+  <ul>
+    <li><span class="set">device</span>: leave on <b>auto</b>, which uses your graphics card.</li>
+    <li><span class="set">threshold</span>: how sure the AI must be to call something a cut. Lower
+        finds more cuts, including some that aren't real; higher finds fewer.</li>
+    <li><span class="set">min_scene_len</span>: the shortest a clip may be, in frames. Anything
+        shorter joins the clip next to it, so a camera flash doesn't become a clip of its own.</li>
+  </ul>
+  <p>OmniShotCut has its own: <b>clean_shot</b> mode keeps only hard cuts and folds fades into the
+     shot before them (start with this); a <b>confidence</b> above 0 drops the doubtful cuts (raise it
+     in small steps, such as 0.3).</p>
+  <p><b>FFmpeg Output</b> sets how the clips are saved. They're always high-quality 10-bit video,
+     made on your graphics card. <span class="set">Preset</span> trades speed for quality (p7 is the
+     best and the default) and <span class="set">CQ Level</span> sets the quality (lower is better and
+     bigger; 16 is already high).</p>
+
+  <h3><span class="num">3</span> &nbsp;Refinements &amp; Validation</h3>
+  <ul>
+    <li><span class="set">Snap cuts to frame-perfect boundary</span>: leave it on. It nudges each cut
+        onto the exact frame, so no clip starts with a frame of the shot before.</li>
+    <li><span class="set">Validate cuts with DINOv3 AI</span>: a second, slower AI double-checks
+        every cut and throws away false alarms from camera flashes, fast movement and near-black
+        frames. Turn it on if you're getting cuts where nothing changed.
+        <span class="set">Validation Window</span> and <span class="set">Flash Sensitivity</span> fine-tune
+        it; the defaults are fine for most films.</li>
+  </ul>
+
+  <h3><span class="num">4</span> &nbsp;Output Actions</h3>
+  <ul>
+    <li><span class="set">Split video into scenes</span>: <b>the one that matters</b>, on from the start. It
+        writes each shot out as its own clip, which is what DepthCrafter works on.</li>
+    <li><span class="set">Auto Crop</span> (with Split video into scenes; on from the start): crops each shot to its own
+        picture, for movies whose shape switches -- an IMAX sequence at 1.90:1 in a 2.39:1 film, a 4:3
+        flashback in a 16:9 show. It reads the black bars across the whole movie first, finds the few bar
+        sizes it really uses, and gives each shot the one that fits it, so a dark shot is never cropped
+        into. The crop happens on the graphics card as each shot is decoded, so it costs next to no time.
+        The later stages handle the mixed shapes: turn on
+        <span class="set">Auto Size for the Loaded Clip</span> in DepthCrafter and Splatting so each clip
+        runs at its own shape's size, and each clip's shape shows in Upcoming Jobs.</li>
+    <li><span class="set">Export scene list to CSV / HTML</span>: a list of every shot with its start
+        and end times, as a spreadsheet or a web page.</li>
+    <li><span class="set">Export to .sc file</span>: the cuts as a list DaVinci Resolve can read, so
+        they appear on its timeline. <span class="set">SC Offset</span> shifts them a few frames if your
+        timeline counts from somewhere else.</li>
+    <li><span class="set">Save scene thumbnails</span>: a few stills from each shot, so you can see
+        what's in it without opening it. <span class="set">Images</span> is how many,
+        <span class="set">Margin</span> how many frames in from each end they're taken.</li>
+  </ul>
+
+  <h3><span class="num">5</span> &nbsp;Run Process</h3>
+  <p>Press <span class="btn">Start Processing</span>. The bar shows how far along it is;
+     <span class="btn">Abort</span> stops it. A whole movie takes a while, mostly for writing the
+     clips. <span class="btn">Open Console</span>, at the right of the Run Process heading, shows the run
+     as it goes, with its progress bar, on the console's Extra tab.</p>
+  <p>When it's done, go to <span class="btn">1. DepthCrafter</span> and press
+     <span class="btn">Import from Scene Cut</span>: its input is filled in with the new clips.</p>
+
+  <h3>Using another tool instead</h3>
+  <p>If you'd rather cut the movie elsewhere, a few things keep the clips at their best:</p>
+  <ul>
+    <li><b>One clip per shot</b>, cut on the exact frame.</li>
+    <li><b>Keep the quality high.</b> Every later stage builds on these clips, so export at high
+        quality, ideally 10-bit.</li>
+    <li><b>Save them into the chapter's Source folder</b>, such as
+        <code>DM Source Clips/Chapter 1 - Opening</code>.</li>
+  </ul>
+
+  <h3>When the cuts aren't right</h3>
+  <table class="keys">
+    <tr><td><b>Cuts are missed</b></td><td>Lower the <span class="set">threshold</span> a little, or
+      try another detector. On animation or games, try <b>OmniShotCut</b>.</td></tr>
+    <tr><td><b>Cuts where nothing changed</b></td><td>Raise the <span class="set">threshold</span>, or
+      turn on <span class="set">Validate cuts with DINOv3 AI</span>. Flashes and strobes are the usual
+      cause.</td></tr>
+    <tr><td><b>Lots of tiny clips</b></td><td>Raise <span class="set">min_scene_len</span>, so very
+      short pieces join their neighbours.</td></tr>
+    <tr><td><b>No chapter folders</b></td><td><span class="set">Split into chapters</span> needs chapter
+      markers inside the movie file. If yours has none, leave it off and sort the clips into chapter
+      folders yourself.</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="depthcrafter">
+  <h2><span class="num">7</span> DepthCrafter <a class="anchor" href="#depthcrafter">#</a></h2>
+
+  <p><b>DepthCrafter</b> is the first numbered stage. It looks at each clip and makes its
+     <b>depth map</b>: a black-and-white video of the same shot where <b>white is near and black is
+     far</b>. Everything after it builds the 3D from this map, so a good depth map matters more than
+     anything else in the pipeline.</p>
+
+  <table class="keys">
+    <tr><td><b>Reads</b></td><td>Your clips, one per shot, from the chapter's Source folder.</td></tr>
+    <tr><td><b>Writes</b></td><td>One depth map per clip into the chapter's DepthMaps folder, named
+      after the clip with <code>_depth</code> added: <code>chase_001.mp4</code> gives
+      <code>chase_001_depth.mp4</code>.</td></tr>
+    <tr><td><b>Then</b></td><td>Each clip it has finished moves into <code>finished</code> inside the
+      Source folder (Part 1, section 4), where Splatting picks it up. A clip that fails moves into
+      <code>failed</code> instead, so you can see which ones need another look.</td></tr>
+  </table>
+
+  <div class="tip"><b>Quick start</b><span>Pick the chapter, press <span class="btn">Select Preset…</span>
+     and choose the <b>768</b>-wide size in the column that matches your movie's shape, then press
+     <span class="btn">Start</span>. The other settings start out at good values.</span></div>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/10_dc_page.webp" alt="The DepthCrafter page">
+      <span class="marker" style="left:1.5%;top:11.4%">1</span>
+      <span class="marker" style="left:1.5%;top:18.4%">2</span>
+      <span class="marker" style="left:33.9%;top:18.4%">3</span>
+      <span class="marker" style="left:1.5%;top:54.9%">4</span>
+      <span class="marker" style="left:33.9%;top:51.2%">5</span>
+      <span class="marker" style="left:33.9%;top:61.5%">6</span>
+      <span class="marker" style="left:66.2%;top:18.4%">7</span>
+      <span class="marker" style="left:1%;top:82%">8</span>
+    </div></div>
+    <figcaption>DepthCrafter with chapter 3 picked.</figcaption>
+  </figure>
+
+  <h3><span class="num">1</span> &nbsp;Input Source</h3>
+  <p>With a chapter picked, the folders are filled in for you and folded away;
+     <span class="btn">Change Folders</span> shows them. On <b>Manual paths</b> you set them yourself with
+     <span class="btn">Browse</span>, which opens Studio's folder picker: each level of folders side by side,
+     each folder showing how many clips it holds, and the open folder's clips in the last column. Click a
+     folder to open it, double-click it (or press <span class="btn">Select Folder</span>) to use the whole
+     folder; click a clip and press <span class="btn">Select Clip</span> to process just that one. A folder of
+     numbered image frames counts as one video. Every stage's folder fields use the same picker.</p>
+  <p>After Scene Cut has split a movie, <span class="btn">Import from Scene Cut</span> appears here
+     and fills the input with its clips.</p>
+
+  <h3><span class="num">2</span> &nbsp;Main Parameters</h3>
+  <ul>
+    <li><span class="set">Resolution Preset</span>: the size the clips are worked on at. Studio comes with
+      no presets: you make your own in Settings (below), a column per aspect ratio, each size with how far
+      it is from the true shape, for example <i>640×448 (7.1% wider)</i>. Until you do, the menu says where
+      to make them. Press <span class="btn">Select Preset…</span> and pick a size; a column with more than
+      three sizes scrolls. <b>Start with 768 wide</b> (see the note below). The preset fills in
+      <span class="set">Target Width</span> and <span class="set">Target Height</span>; if you type
+      your own, both must be multiples of 64. Once a clip is loaded, the menu shows only the sizes for
+      that clip's shape, with its Auto Size pick.</li>
+    <li><span class="set">Auto Size for the Loaded Clip</span> (off until you tick it): loading a clip
+      fills Target Width and Height with the size picked for its shape -- <b>768</b> wide, with the
+      height (a multiple of 64) nearest the clip's shape, unless you've picked another for that shape in
+      Settings (below). The picked size is marked <i>auto</i> in the Resolution Preset menu, and you can
+      still change it. In a folder of mixed shapes, the clips shaped like the loaded one run at Target
+      Width and Height, and every other clip runs at its own shape's pick.</li>
+    <li><span class="set">Inference Steps</span>: how many passes the AI makes over each window. See the
+      note below.</li>
+    <li><span class="set">Guidance Scale</span>: leave it at <b>1</b>. It's an advanced control, and
+      Beginner Mode hides it.</li>
+    <li><span class="set">Seed</span>: the AI's starting point. The same seed and settings give the same
+      depth map again; <b>-1</b> picks a new one every run.</li>
+    <li><span class="set">CPU Offload Mode</span>: saves graphics memory by keeping parts of the AI in
+      normal memory until they're needed. <b>model</b> suits most cards. If you run out of memory, try
+      <b>sequential</b> (slower); with lots of memory, <b>none</b> is fastest.</li>
+  </ul>
+  <figure class="shot" style="max-width:560px">
+    <div class="frame"><div class="canvas"><img src="shots/11_dc_presets_crop.webp" alt="The Resolution Preset choices"></div></div>
+    <figcaption>The preset menu on a 2.39:1 clip: only the sizes for its shape, with the Auto Size pick marked <i>auto</i>.
+      Sizes you tick in <b>Settings &gt; DepthCrafter &gt; Custom Resolution Presets</b> join it, a column per shape.</figcaption>
+  </figure>
+  <div class="careful"><b>Start at 768</b><span>Most scenes are perfectly fine at <b>768</b> wide, and
+     it still picks up fine detail like particles, snow and sparks. Bigger isn't better here: a size
+     that's too high can <b>exaggerate the separation</b> between things and put them at the
+     <b>wrong depth</b>. Only move up to 960 or 1152 when a scene needs more detail than 768 gives,
+     and check the result. Bigger sizes also take more graphics memory and time.</span></div>
+
+  <div class="note"><b>Inference Steps</b><span><b>5</b> is a good starting point for testing: you get
+     a result quickly. For your real runs, <b>10 to 15</b> is recommended. <b>25</b> is the most the
+     model takes. Going higher can sometimes improve quality, but too many steps can introduce
+     artifacts of their own. The same advice holds for Inpainting.</span></div>
+
+  <h3><span class="num">3</span> &nbsp;Frame &amp; Segment Control</h3>
+  <ul>
+    <li><span class="set">Window Size</span>: how many frames the AI looks at together. This is what
+      makes DepthCrafter a <i>temporal</i> model: within a window, the depth stays steady from frame to
+      frame. Bigger windows are steadier but need more memory; 60 to 120 is typical, and Studio starts at
+      60.</li>
+    <li><span class="set">Overlap</span>: how many frames each window shares with the next, so the depth
+      blends where they meet instead of jumping. Studio starts at 45; more blends more smoothly and takes
+      longer. It must be smaller than the window.</li>
+    <li><span class="set">Save Checkpoint</span>: saves the AI's slow work on each clip once it's done,
+      before the depth video is written. If something goes wrong after that, or you run the clip again
+      with the same settings, Studio offers to pick up from there instead of doing the slow part
+      again. On from the start: it costs a little disk space while a clip runs.</li>
+    <li><span class="set">Target FPS</span> and <span class="set">Process Max Frames</span>: leave both at
+      <b>-1</b> (the clip's own frame rate, every frame). Anything else makes a depth map that doesn't
+      line up frame for frame with the clip. Beginner Mode hides both, and keeps Target FPS at -1.</li>
+    <li><span class="set">Save Sidecar JSON for Final Output</span>: a small file beside each depth map
+      recording the settings used. It doesn't change the depth map.</li>
+    <li><span class="set">Process as Segments (Low VRAM Mode)</span>: for very long clips or small
+      graphics cards. See <a href="#dc-segments">below</a>.</li>
+  </ul>
+
+  <h3><span class="num">4</span> &nbsp;Output Processing</h3>
+  <ul>
+    <li><span class="set">Stabilize Depth Scale</span>: each window is worked out on its own, so over a long
+      clip the whole scene can slowly drift nearer and further, like it's breathing. This evens it
+      out against one reference frame. Turn it on for clips longer than one window; it does nothing
+      useful on short ones.</li>
+    <li><span class="set">Percentile Output Norm</span>: one stray bright or dark speck can squash the
+      depth of everything else. This ignores the most extreme pixels when setting the depth range, for
+      better contrast. Its <span class="set">Auto Top</span> switch is for clips where something comes
+      right up to the camera for a moment (a person walking past the lens): the range is then set from
+      the frames that show the usual scene, so the passer-by clips to white and the scene keeps its full
+      depth instead of being squeezed dark. A clip without such a moment comes out the same.</li>
+    <li><span class="set">Encoder CRF / Preset</span>: quality and file size. Leave them on <b>auto</b>
+      and <b>veryslow</b>; saving is quick next to the depth work.</li>
+    <li><span class="set">Output Format</span>: <b>main10_mp4</b> (the default) stores finer depth steps
+      than plain <b>mp4</b>, so smooth surfaces don't show bands. The image-sequence formats save one
+      picture per frame and take much more space.</li>
+  </ul>
+
+  <h3><span class="num">5</span> &nbsp;Secondary Output</h3>
+  <p>Makes a second depth map for each clip, with its range set more firmly so things entering or
+     leaving the frame don't shift the rest of the depth. It's an extra for experimenting; most
+     people leave it off.</p>
+
+  <h3><span class="num">6</span> &nbsp;Current Clip Info</h3>
+  <p>The clip being worked on, its size and frame count, and how far through the batch you are.
+     <span class="btn">Open Console</span> shows the detail. While it runs, the line under the progress bar
+     reads <i>Processing video 3 of 20</i>, adding <i>segment 2 of 4</i> when the clip is done in
+     segments.</p>
+
+  <h3><span class="num">7</span> &nbsp;Upcoming Jobs</h3>
+  <p>To the right of the settings: the clips in the input folder that <span class="btn">Start</span> will
+     process, each with its own bar while the batch runs. Tick clips and press
+     <span class="btn">Process Selected</span> to do just those, or right-click one for
+     <b>Process This Clip Now</b>, <b>Move to Finished</b> or <b>Play Source Clip</b>
+     (see <a href="part4.html">Upcoming Jobs</a>).</p>
+
+  <h3><span class="num">8</span> &nbsp;The action bar</h3>
+  <ul>
+    <li>While a clip runs, the ring shows the current window, with the time each step takes beside it,
+      and the bar shows the clip's progress. The <b>TIP</b> line above it offers a hint now and then.</li>
+    <li><span class="btn">Start</span> works through every clip in the input.</li>
+    <li><span class="btn">Cancel</span> asks how to stop: <b>now</b>, losing the clip in progress, or
+      <b>after this segment</b>, keeping what's finished so the next run carries on.</li>
+    <li><span class="btn">View Output Folder</span> opens the depth maps' folder, even during a run.</li>
+  </ul>
+
+  <h3 id="dc-segments">Process as Segments</h3>
+  <p>Normally a clip is worked on as one piece. With <span class="set">Process as Segments</span> on, a
+     long clip is split into pieces, each piece gets its own depth map, and the pieces are joined
+     back together. Use it for very long clips, or when your graphics card runs out of memory.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/12_dc_segments.webp" alt="DepthCrafter with Process as Segments on">
+      <span class="marker" style="left:51.7%;top:17.6%">1</span>
+      <span class="marker" style="left:38.5%;top:94.2%">2</span>
+    </div></div>
+    <figcaption><b>1</b> Merged Output Options, how the pieces are joined. <b>2</b> The segment tools.</figcaption>
+  </figure>
+  <ul>
+    <li><span class="set">Alignment Method</span>: how neighbouring pieces are matched where they overlap.
+      <b>Shift &amp; Scale</b> fits each piece to the one before; <b>Linear Blend</b> fades between them.
+      If the depth jumps where pieces join, try the other.</li>
+    <li><span class="set">Normalization</span>, <span class="set">Dithering</span> and
+      <span class="set">Gamma Adjust</span> fine-tune the joined depth map: ignoring extreme specks,
+      hiding banding, and pulling the middle of the scene nearer or further.</li>
+    <li><span class="set">Keep intermediate NPZ</span> keeps each piece's raw depth after joining, so you can
+      join them again later with different options.</li>
+    <li><span class="set">Output Suffix</span>: leave it as <code>_depth</code>. Splatting looks for that
+      name.</li>
+    <li><span class="btn">Re-Merge Segments</span> joins a finished clip's pieces again with the current
+      options, without redoing the slow depth work (it needs the kept NPZ files).
+      <span class="btn">Generate Seg Visuals</span> saves a viewable copy of each piece, to check one that
+      looks wrong.</li>
+  </ul>
+
+  <h3>In Settings</h3>
+  <p>With the DepthCrafter tab showing, <b>Settings</b> lists its extra options:</p>
+  <ul>
+    <li><b>Load Settings / Save Settings As</b>, to keep a set of settings for a kind of footage, and
+      <b>Reset to Default</b>.</li>
+    <li><b>Restore Finished / Failed Input Files</b> moves clips back out of <code>finished</code> or
+      <code>failed</code>, so you can run them again.</li>
+    <li><b>Use SageAttention (Faster)</b> speeds the AI up on cards that support it. <b>Use Local
+      Models Only</b> skips the online check for the model files at the start of a run, once you have
+      them.</li>
+    <li><b>Enable Debug Logging</b> adds detail to the console, for troubleshooting.</li>
+  </ul>
+  <p><b>Custom Resolution Presets</b>, under those options, makes your own sizes for the Resolution Preset
+     menu. Pick an <b>Aspect ratio</b>, then open <b>Sizes</b> and tick the ones you want. Every size there
+     is a multiple of 64, as DepthCrafter needs, from 256 wide up to about 1080p; at each width you get
+     the heights just under and just over the true shape, each with how far off it is (<i>exact</i>,
+     <i>7.1% wider</i>, <i>6.2% taller</i>). For an exact size of your own, type it into
+     <b>Add a size</b> (width × height, both multiples of 64) and press <span class="btn">Add</span>: it's
+     ticked and listed with the rest. Tick sizes in as many ratios as you like, then
+     <span class="btn">Save Presets</span>: they appear in the menu at once, a column per ratio. Untick a
+     size and save to take it out again; <span class="btn">Remove All Presets</span> (click it twice)
+     empties the menu.</p>
+  <p>The same window holds the <b>Auto Size picks</b>: for each aspect ratio, the size
+     <span class="set">Auto Size for the Loaded Clip</span> uses for a clip of that shape. Each shows its
+     default (768 wide) until you choose another.</p>
+
+  <h3>When something isn't right</h3>
+  <table class="keys">
+    <tr><td><b>Out of memory</b></td><td>Pick a smaller preset, lower <span class="set">Window Size</span>,
+      set <span class="set">CPU Offload Mode</span> to <b>sequential</b>, or turn on
+      <span class="set">Process as Segments</span>. Close other programs that use the graphics card.</td></tr>
+    <tr><td><b>Depth slowly breathes</b></td><td>Turn on <span class="set">Stabilize Depth Scale</span>.</td></tr>
+    <tr><td><b>Depth jumps partway through</b></td><td>Raise <span class="set">Overlap</span>, so windows
+      blend over more frames.</td></tr>
+    <tr><td><b>Everything looks flat</b></td><td>Turn on <span class="set">Percentile Output Norm</span>:
+      a few extreme pixels are probably squashing the range.</td></tr>
+    <tr><td><b>Bands on smooth surfaces</b></td><td>Use <b>main10_mp4</b> as the Output Format.</td></tr>
+    <tr><td><b>Not enough detail</b></td><td>Check <span class="set">Inference Steps</span> is at 10 to
+      15, not the quick-test 5. Only if the scene still needs it, try the next preset up (960, then
+      1152).</td></tr>
+    <tr><td><b>Separation looks exaggerated, or things sit at the wrong depth</b></td><td>The preset is
+      probably too high for the scene. Go back to the 768-wide one.</td></tr>
+    <tr><td><b>The depth mixes two scenes</b></td><td>The clip has a cut in it. Cut it into one clip per
+      shot (section 6).</td></tr>
+  </table>
+  <div class="note"><b>Good to know</b><span>While DepthCrafter runs, Studio keeps about 3 GB of your
+     graphics card free, so Windows and Studio's own window stay responsive.</span></div>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="splatting">
+  <h2><span class="num">8</span> Splatting <a class="anchor" href="#splatting">#</a></h2>
+
+  <p><b>Splatting</b> turns each clip and its depth map into the second eye's view. Every pixel is
+     shifted sideways by how near it is: near things move a lot, far things hardly at all. <b>This is
+     where your main 3D effect editing happens</b>: how deep the 3D is, where the screen sits, how clean
+     the edges are, and the Special FX.</p>
+
+  <table class="keys">
+    <tr><td><b>Reads</b></td><td>The clips DepthCrafter has finished (in the Source folder's
+      <code>finished</code>) and their depth maps from the DepthMaps folder. Each depth map must be
+      named after its clip plus <code>_depth</code>.</td></tr>
+    <tr><td><b>Writes</b></td><td>Into the chapter's Splats folder: a full-size result in
+      <code>hires</code> and a smaller copy in <code>lowres</code> for Inpainting. Both still have
+      <b>holes</b> where the shift uncovered something the camera never saw; Inpainting fills them
+      next.</td></tr>
+    <tr><td><b>Per clip</b></td><td>The settings you choose for a clip can be saved with it in a small
+      <b>sidecar</b> file (<a href="#splat-sidecars">8f</a>), so every clip can have its own 3D.</td></tr>
+  </table>
+
+  <div class="tip"><b>Quick start</b><span>Pick the chapter and click the preview to load the first
+     clip. Put on red/cyan glasses (the preview shows an anaglyph), set
+     <span class="set">Disparity</span> for how deep it should feel and <span class="set">Convergence</span>
+     for where the screen sits, press <span class="btn">Create Sidecar</span>, and move on to the next
+     clip. When every clip looks right, press <span class="btn">Start</span>.</span></div>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/13_splat_page.webp" alt="The Splatting page with a clip in the preview">
+      <span class="marker" style="left:0.7%;top:6.7%">1</span>
+      <span class="marker" style="left:18.3%;top:14.4%">2</span>
+      <span class="marker" style="left:0.7%;top:14.4%">3</span>
+      <span class="marker" style="left:0.7%;top:28.3%">4</span>
+      <span class="marker" style="left:18.3%;top:78%">5</span>
+      <span class="marker" style="left:50.2%;top:78%">6</span>
+      <span class="marker" style="left:82.1%;top:14.4%">7</span>
+      <span class="marker" style="left:82.1%;top:31.1%">8</span>
+      <span class="marker" style="left:41.5%;top:96.4%">9</span>
+    </div></div>
+    <figcaption><b>1</b> Folders · <b>2</b> the preview · <b>3</b> Process Resolution ·
+      <b>4</b> Splatting &amp; Output Settings · <b>5</b> Depth Map Pre-processing (Edge Alignment) ·
+      <b>6</b> Stereo Projection · <b>7</b> Special FX · <b>8</b> Upcoming Jobs · <b>9</b> the action
+      bar.</figcaption>
+  </figure>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-folders">8a &nbsp;Folders and the clip list</h3>
+  <p>With a chapter picked, the folders fill in by themselves. The folder panel also holds
+     <span class="btn">Encoding Options…</span> (how the results are saved, <a href="#splat-output">8g</a>),
+     the <b>8-bit / 10-bit</b> buttons that set it in one click, and <span class="set">Multi-Map</span>
+     (<a href="#splat-sidecars">8f</a>).</p>
+  <p><b>Upcoming Jobs</b> lists the chapter's clips. Click a clip to load it into the preview; right-click it
+     for <b>Splat This Clip Now</b> or <b>Rerun in DepthCrafter</b> (see <a href="part4.html">Upcoming Jobs</a>).</p>
+  <figure class="shot" style="max-width:420px">
+    <div class="frame"><div class="canvas"><img src="shots/16_splat_queue.webp" alt="Upcoming Jobs"></div></div>
+    <figcaption>Each clip shows a still, its length, and two bars that fill as its full-size (H) and
+      smaller (L) results are made.</figcaption>
+  </figure>
+  <ul>
+    <li><b>Tick boxes</b> pick clips. <span class="btn">Select All</span> and
+      <span class="btn">Deselect All</span> do it in one go. <span class="btn">Process Selected</span>
+      converts only the ticked clips; <span class="btn">Move to Finished</span> moves them into
+      <code>finished</code> without converting them, for clips you've decided not to use.</li>
+    <li><b>Little badges</b> on a clip show what's set for it: a sidecar, Pop Out Boost, Keyframes,
+      Frame Break, Rain (three blue streaks), a depth map edited in the Depth Map Editor (a pencil), or
+      a saved Detect Text mask (a <b>T</b>), or an object taken out with Erase from Clip (a violet circle
+      struck through -- Merging's list shows it too, where Put Back lays it back). The sidecar's badge sits
+      beside the progress bars; the others on a line under the clip's name, so a row with any of them is a little
+      taller. A legend under the list says which is which.</li>
+    <li><span class="btn">Start</span> converts every clip in the list; <span class="btn">Single</span>
+      converts only the one in the preview. To convert just some of them, tick those clips and press
+      <span class="btn">Process Selected</span>.</li>
+    <li><span class="set">Resume</span> (in Stereo Projection): finished clips move into
+      <code>finished</code>, so if you stop and start again, the batch carries on with the rest. Leave it on.</li>
+  </ul>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-preview">8b &nbsp;The preview</h3>
+  <p>The preview shows a frame of the clip exactly as it will be converted, and updates as you change
+     settings. It shows two views, <span class="set">Front</span> and <span class="set">Back</span>:
+     <b>click the picture to flip between them</b>, or grab its left or right edge and drag it across to
+     turn it over by hand (let go before halfway and it falls back). Every view, what it shows and what
+     it's for: <a href="appendices.html#views">Appendix D</a>.</p>
+  <ul>
+    <li><b>Dubois Anaglyph</b> (the usual Front) is red/cyan 3D: wear red/cyan glasses to judge depth
+      on any screen. Other choices include plain side-by-side, cross-eye, a <b>Wigglegram</b> that rocks
+      between the eyes, the depth map, and <b>Splat Result</b>: the new eye on its own (the usual Back).</li>
+    <li><b>Glasses-Free 3D</b> needs a glasses-free 3D monitor on Leia's SR platform (Samsung's
+      Odyssey 3D, for one), with Studio's window on it; without one it is greyed out, and its tip says
+      what's missing (its caveats: <a href="appendices.html#views-glasses">Appendix D</a>). Only the picture turns 3D, with each eye at full resolution; the rest of the
+      window stays as it is. The
+      3D follows your eyes while nothing is running. While a job runs, it holds the last frame and the
+      eye-tracking camera stays off. Choose another view and the camera and the 3D lens switch off.
+      Tick <span class="set">Keep Tracking</span> (beside the view, while Glasses-Free 3D is chosen) to keep
+      the camera on between clips, in and out of Full Preview and while a job runs, so the 3D doesn't
+      have to find you again each time. It still switches off on another tab or view, and when Studio closes.</li>
+    <li><b>Full Preview</b>: the full-screen icon in the preview's top-right corner (or <kbd>F11</kbd>) shows the preview full screen, for watching
+      on a 3D TV or monitor. It opens on the screen Studio is on the first time; move it to another with
+      <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> and it opens there from then on. With
+      <b>Glasses-Free 3D</b> facing you, its picture is the one shown in 3D while it is open; the page's
+      picture shows it again once it is closed. <kbd>Esc</kbd> or <kbd>F11</kbd> closes it, or the
+      <b>X</b> in the top-right corner. The X and a <b>frame slider</b> near the bottom show for a moment
+      when it opens and again whenever you move the mouse (in Glasses-Free 3D too, over the 3D picture);
+      the playback keys work there as on the page. In Splatting, <b>Convergence</b>, <b>Disparity (Depth
+      Strength)</b> and <b>Gamma</b> dials float under the slider, so you can tune the 3D while you watch.
+      They are the page's own dials: keyframes work on them as on the page.</li>
+    <li>The frame slider, <span class="btn">‹ Prev</span> / <span class="btn">Next ›</span> (clips),
+      play and fast-forward move around. Keys: <kbd>←</kbd> <kbd>→</kbd> a frame
+      (<kbd>Shift</kbd> for 10), <kbd>↑</kbd> <kbd>↓</kbd> the next or previous clip, <kbd>Space</kbd>
+      play.</li>
+    <li>Double-click to zoom in on a spot, and again to see the whole frame; the mouse wheel zooms too.
+      <span class="set">Preview Scale</span> sets the size: <b>Fit</b> (the first choice, and how Studio
+      starts) fills the space the preview has and keeps it filled as the window or the clip changes, up to
+      250%; pick a percentage, or zoom with the wheel or a double-click, to hold a size instead (a
+      double-click on a zoomed-in picture goes back to Fit). <span class="set">Preview Brightness</span>
+      lightens dark scenes (double-click it, or right-click it, to go back to 1.0), and <span class="set">Crosshair</span> marks the screen centre, which helps
+      with Convergence. In Glasses-Free 3D it is drawn in both eyes, so it sits at screen depth. None of
+      these change the saved files.</li>
+  </ul>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/14_splat_holes.webp" alt="Splat Result with holes highlighted"></div></div>
+    <figcaption><b>Splat Result</b> with <span class="set">Highlight Holes</span> on (and the 3D turned
+      up so they show). The coloured bands beside the three of them are the holes: places the second eye
+      sees that the camera never did. Inpainting paints them in.</figcaption>
+  </figure>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-depth">8c &nbsp;The 3D look</h3>
+  <p><b>Stereo Projection</b> sets the 3D itself:</p>
+  <ul>
+    <li><span class="set">Disparity</span> (Depth Strength): how strong the 3D
+      is. Higher gives more depth, but also bigger holes to fill, and very high values are hard on the
+      eyes. The <span class="btn">≈</span> button beside the knobs measures how strong it really gets
+      across the clip.</li>
+    <li><span class="set">Convergence</span>: where the screen sits in the scene. <b>1.0</b> puts
+      everything behind the screen, like looking through a window; lower values bring things out toward
+      you, and <b>0.0</b> makes everything pop out. <b>0.8</b> is a good start.</li>
+    <li><span class="set">Gamma</span>: reshapes the middle distance. Above 1.0 brings it nearer, below
+      1.0 pushes it back.</li>
+    <li><span class="set">Pop-Out</span>: more pop for whatever is in front of the screen, with the rest of
+      the scene left where it is. Everything at or behind the screen stays exactly put, subjects just in
+      front of it barely move, and the nearest things get the full extra. It's spread over the whole
+      front of the scene, so it bends outlines much less than Pop Out Boost for the same pop. It goes up
+      to <b>60</b>, in the same units as Disparity. It's saved with the clip and can be keyframed.</li>
+    <li><span class="set">Border Width</span> and <span class="set">Border Bias</span> (shown with
+      <span class="set">Border Settings</span>): black edges at the sides of the frame, so things that
+      pop out aren't cut off by the edge of the screen. The <span class="set">Border</span> setting in
+      Splatting &amp; Output Settings can work them out for you (<b>Auto Basic</b>, <b>Auto Adv.</b>).</li>
+    <li><span class="set">Dual Eye</span> builds both eyes from your video and splits the shift between
+      them, so each eye has smaller holes. <span class="set">Flip</span> mirrors a clip where things
+      move left to right; Merging flips it back at the end.</li>
+  </ul>
+  <p><b>Depth Map Pre-processing</b> (Edge Alignment) tidies the depth map
+     before the 3D is built, so depth edges line up with the edges of objects and outlines don't shimmer:</p>
+  <ul>
+    <li><span class="set">Dilate X / Y</span> (Expand X / Y) grow near objects' outlines in the depth map, so their 3D
+      edge covers the whole object (below 0 shrinks them).</li>
+    <li><span class="set">Blur X / Y</span> soften depth edges, smoothing jagged or flickering outlines.
+      Too much makes edges soft.</li>
+    <li><span class="set">Dilate Left</span> (Expand Left), <span class="set">Blur Left</span> and
+      <span class="set">Blur Left Mix</span> do the same for left-facing edges only.</li>
+  </ul>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-fx">8d &nbsp;Special FX and keyframes</h3>
+  <figure class="shot" style="max-width:360px;float:right;margin:4px 0 12px 20px">
+    <div class="frame"><div class="canvas"><img src="shots/15_splat_fx.webp" alt="Special FX, all three open"></div></div>
+    <figcaption>Special FX: Pop Out Boost, Keyframe and Frame Break open.</figcaption>
+  </figure>
+  <ul>
+    <li><b>Pop Out Boost</b>: use the <span class="set">Pop-Out</span> dial in Stereo Projection (8c)
+      first, for a clean enhancement of foreground elements. Boost is meant to work together with that
+      dial to create "right in front of your face" pop when the dial alone isn't enough. It pushes only
+      what is nearer than a set depth further out of the screen, and it has a higher risk of warping the
+      edges of objects.
+      <span class="set">Strength</span> (up to 60, in the same units as Disparity) turns it on;
+      <span class="set">Threshold</span> sets how near
+      something must be, and <span class="set">Curve</span> how sharply it ramps up.</li>
+    <li><b>Keyframe</b> lets settings change partway through a clip. Set things up at one frame and press
+      <span class="btn">Add Static Keyframe</span> (the values hold from there until the next keyframe) or
+      <span class="btn">Add Dynamic Keyframe</span> (the values glide to these from the keyframe before);
+      move on and do it again. Once a clip has keyframes, the dials show the values at the frame you're on,
+      playing too. Turning a dial on a keyframe changes that keyframe; between keyframes they decide the values,
+      so go to one (or add one there) to change it.
+      <br>The <b>Shaper</b> under the keyframe buttons sets <i>how</i> the values glide into a dynamic
+      keyframe. Put the playhead in the stretch that ends on it, then pick a <span class="set">Shape</span>:
+      <b>Linear</b> (a steady ramp, as before), <b>Ease In</b>, <b>Ease Out</b> or <b>Ease In-Out</b>; an
+      LFO -- <b>Sine</b>, <b>Triangle</b>, <b>Square</b>, <b>Saw</b> or <b>Random</b> -- swinging back and
+      forth between the two keyframes' looks for <span class="set">Cycles</span> swings before it lands; or
+      <b>Custom</b>. In the graph the bottom is the keyframe before, the top this one, and the line the
+      playhead. For Custom, click to add a point, drag to move it, and right-click or double-click to remove
+      it. Hover a stretch of the line for its orange handle: drag it up or down to bend that stretch, left
+      or right to move the bend; double-click it to straighten it. Every shape lands exactly on the
+      keyframe, and the shape is saved with the keyframe in the sidecar.</li>
+    <li><b>Frame Break</b> adds letterbox bars that near objects can break out of, for a
+      popping-out-of-the-frame effect. <span class="set">Bar Size</span> sets the bars (the
+      <span class="set">Letterbox Size</span> buttons match standard shapes), and
+      <span class="set">Break Thr</span> how near something must be to cross them.</li>
+  </ul>
+  <div class="careful" style="clear:both"><b>One scene at a time</b><span>Special FX are meant for a
+     single shot. Save them in the clip's sidecar, and set Strength or Bar Size back to 0 for the next
+     clip. Closing a section only hides it; the heading says <b>on</b> while it still applies.</span></div>
+
+  <h4 id="splat-particles">Rain</h4>
+  <figure class="shot" style="max-width:340px;float:right;margin:4px 0 12px 20px">
+    <div class="frame"><div class="canvas"><img src="shots/23_splat_particles.webp" alt="The Rain section, open"></div></div>
+    <figcaption>Rain, open.</figcaption>
+  </figure>
+  <p>DepthCrafter struggles to detect rain, so in a plain splat the rain follows the shape of whatever
+     object it falls in front of: the drops shift with the wall, not in front of it. <b>Rain</b> takes each frame's rain out,
+     using the frames around it, warps the scene without it, then warps the rain on its own at depths of
+     its own and adds it back to both eyes. (Most other particles -- snow, sparks, dust -- DepthCrafter
+     picks up by itself; rain is the one it sees through.) They go through the same
+     Disparity, Convergence, Pop-Out and Pop Out Boost as the scene, so the nearest drops come out the
+     way the nearest objects do. Everything here is saved with the clip, and a clip with Rain on shows
+     three blue streaks in Upcoming Jobs once its sidecar is saved. Rain needs tuning for each scene, so Beginner Mode hides
+     it.</p>
+  <figure class="shot pair stack" style="clear:both">
+    <div class="frame"><div class="canvas"><img src="shots/30_rain_off.webp" alt="Rain off"></div>
+      <span class="label">Rain off</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/30_rain_on.webp" alt="Rain on"></div>
+      <span class="label">Rain on</span></div>
+    <figcaption>A rainy street in the Glasses-Free 3D / Dubois Anaglyph preview (Static camera, Downpour, In front). With Rain off the streaks are part of the picture and take the depth of the street and walls they fall in front of; with it on, they come off the scene and are laid back in front of it, on layers of their own.</figcaption>
+  </figure>
+  <ul>
+    <li><b>The switch</b> turns Rain on or off for the clip. Beside it, the <b>camera</b>:
+      <b>Moving</b> lines the neighbouring frames up
+      on each frame first (any shot, camera or people moving); <b>Static</b> is for a locked-off shot,
+      simpler and a little cleaner.</li>
+    <li><span class="set">Scenario</span>: <b>Downpour</b> for sharp streaks -- a storm, a lit
+      downpour; <b>Soft (out of focus)</b> for wide, faint rain, in close-ups or behind a shallow focus;
+      <b>Mist (dense fine)</b> for a dense sheet of fine rain in a backlit haze. Soft and Mist work best
+      with Moving.</li>
+    <li><span class="set">Place</span>: where the drops go in depth. <b>In front</b> puts them on
+      planes from the middle of the scene out toward you, the same all over the frame -- rain in the air
+      between you and the scene. <b>In place</b> puts each one at the scene's own depth where it is,
+      lifted a little by its layer -- rain falling far off stays with what's behind it instead of
+      floating in front.</li>
+    <li><span class="set">Any direction</span>: for rain that doesn't fall one way, looking up into it
+      or coming at the lens. Slower.</li>
+    <li><span class="set">Keep wires &amp; lines out</span> (on by default): long, thin, bright things
+      that run on through the frame -- wires, cables, ropes, a kerb's edge -- stay with the scene.</li>
+    <li><span class="set">Keep lights out</span> (on by default): lamps, lit windows and signs stay with the
+      scene. When the camera moves, a light lands a little off in the frames around it, and what is left
+      over can be taken for a drop; no rain is taken on or right around a light. (Guard doesn't help
+      there: it only protects what is near you.)</li>
+    <li><span class="set">Guard</span>: takes no rain where the scene is near -- people standing in the rain,
+      whose clothes' moving reflections can look like rain. 0 is off.</li>
+    <li><span class="set">Grow</span>: grows (+) or shrinks (−) the cut-outs, in pixels at 1080p. Grown, they
+      take in their glow and tips, but never more light than the frame has there, so no dark edges are cut
+      into the scene; shrunk, their edges stay painted on the scene.</li>
+    <li><span class="set">Depth</span>: how strongly the drops get depths of their own. <b>0</b> leaves
+      each one at the scene's depth right where it is, the same as Rain off; <b>1</b> is the full
+      placement (In front: the nearest a whole scene's depth in front of the scene's nearest part).</li>
+    <li><span class="set">Amount</span>: how strongly they go back in -- 1 as they were, less to thin them,
+      more to bring them out.</li>
+    <li><span class="set">Layers</span>: how many depth planes they're spread over (1 to 10). Rain is shared
+      out by streak length, the longest streaks on the nearest plane.</li>
+    <li><span class="set">Pop</span>: extra Pop-Out for the rain alone, in the same units: the nearest
+      drops get all of it, farther layers less, and the scene none.</li>
+    <li>The <span class="btn">≡</span> button beside the camera opens the layer controls:
+      <span class="set">Spread</span>, the distance between the layers (1 as it was, lower draws them together
+      toward the nearest plane -- 0 puts them all on it -- higher spreads them further back, up to twice as
+      far); <span class="set">Spacing</span>, how they share that distance (1 even, higher crowds them toward
+      the nearest plane, lower toward the farthest); and <span class="set">Convergence</span>, the rain's
+      own screen plane, from the scene's (0 the scene's; + puts them further back, − brings them out, the
+      scene staying where it is). With In place, Spread sets how far the layers lift off the surface.</li>
+  </ul>
+  <figure class="shot pair wide" style="clear:both">
+    <div class="frame"><div class="canvas"><img src="shots/31_rain_anydir_off.webp" alt="Any direction off"></div>
+      <span class="label">Any direction off</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/31_rain_anydir_on.webp" alt="Any direction on"></div>
+      <span class="label">Any direction on</span></div>
+    <figcaption>Rain coming at a camera that looks down on it: the streaks point every way, so the usual search, for rain falling one way, misses most of them. With <span class="set">Any direction</span> off they stay with the street, behind the screen; on, they're found and come out in front of it.</figcaption>
+  </figure>
+  <div class="note" style="clear:both"><b>Checking what it takes</b><span>The preview shows exactly what is
+     taken: turn Rain off and on to compare.</span></div>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-fix">8e &nbsp;Fixing problem areas</h3>
+  <ul>
+    <li><span class="btn">Hole Shift</span> opens a window showing the frame's holes. Click the ones to
+      move and nudge them with the X and Y knobs, without changing their shape.</li>
+    <li><span class="btn">Detect Text</span> masks burned-in subtitles and captions so they stay flat
+      and readable instead of being warped into the 3D. See below.</li>
+    <li><span class="btn">Edit Depth Map</span> opens the clip in the Depth Map Editor, to fix the depth
+      of an object by hand (Part 3).</li>
+  </ul>
+
+  <h4 id="detect-text">Detect Text</h4>
+  <p>Load the clip in the preview and press <span class="btn">Detect Text</span>. A window opens on
+     the same frame.</p>
+  <figure class="shot pair wide">
+    <div class="frame"><div class="canvas"><img src="shots/32_detect_text.webp" alt="The picture"></div>
+      <span class="label">The picture</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/32_detect_text_mask.webp" alt="The mask alone"></div>
+      <span class="label">Mask ticked</span></div>
+    <figcaption>Detect Text on a title card: a box drawn round the title, and two selections that cover the frames it is on (0–41 and 42–83). Tick <span class="set">Mask</span> to see only what will be kept flat -- here the letters, cleanly, and nothing of the city behind them. Untick it to go back to the picture.</figcaption>
+  </figure>
+  <ol>
+    <li><b>Draw a box</b> over where the text sits. Only text inside it is picked up.</li>
+    <li><b>Tune what counts as text</b> with <span class="set">Core</span> and
+      <span class="set">Edge</span> (and <span class="set">Refine</span>), watching the mask on the
+      picture. <span class="btn">Zoom Rect</span> zooms in on the box.</li>
+    <li><b>Set the frame range.</b> Step to the first frame with the text and press
+      <span class="btn">Set From</span> (or <kbd>I</kbd>), then to the last and press
+      <span class="btn">Set To</span> (or <kbd>O</kbd>). The slider moves one frame at a time, and the
+      range is marked on it.</li>
+    <li>Press <span class="btn">Save</span>. Studio writes the mask as a video beside the clip
+      (<code>&lt;clip&gt;_submask.mp4</code>), and Splatting uses it from then on. The mask video is
+      never treated as a clip of its own.</li>
+  </ol>
+  <ul>
+    <li><b>Several bits of text in one clip?</b> Press <span class="btn">+ Add</span> for each one. Every
+      selection has its own frame range, box and Core / Edge settings; click its chip to edit it.
+      <span class="btn">Save</span> puts them all into the one mask.</li>
+    <li><b>Text that fades in or out</b> loses the detection as it fades. Find a frame where it's
+      caught well and press <span class="btn">Freeze Here</span>: that frame's mask is used, at full
+      strength, for the whole selection. Click it again to unfreeze.</li>
+    <li><b>Lots of text, like opening credits?</b> When the list gets long, press
+      <span class="btn">Flatten Layers</span>. It saves the mask with every selection so far, then sets them
+      aside: they stay in the mask, and you still see them on the picture and as faint marks on the slider, but
+      they leave the list. The next selection you add starts fresh. Flatten as often as you like.</li>
+    <li><span class="btn">Remove</span> deletes the current selection. With none left,
+      <span class="btn">Save</span> becomes <span class="btn">Remove Mask</span> and takes the clip's
+      mask away.</li>
+    <li><span class="btn">Reset All</span> (it asks first) starts the clip over: every selection,
+      range, freeze and setting is erased.</li>
+  </ul>
+  <p>Once a clip has a saved mask, four more knobs appear in Splatting, next to Dilate and Blur. They
+     only affect the text, and they're saved with the clip:</p>
+  <ul>
+    <li><span class="set">Text Grow</span> widens the mask by that many pixels (below 0 shrinks it).</li>
+    <li><span class="set">Text Soften</span> feathers its edge, so the flat text blends into the 3D
+      around it.</li>
+    <li><span class="set">Text Clean</span> takes DepthCrafter's own copy of the text out of the depth
+      map, filling it from the background around it, so its warped edges don't stick out past the mask.
+      It's how far past the mask to clean, in pixels; <b>0</b> is off. Start around <b>8 to 12</b>, and
+      raise it if warped edges still show around the letters.</li>
+    <li><span class="set">Text Conv</span> sets where the text sits in depth: its own Convergence,
+      as an offset from the clip's. At <b>0</b> it sits flat on the screen. Above 0 sets it back
+      behind the screen, below 0 brings it out toward you, the way the Convergence knob moves the
+      scene. Small values go a long way.</li>
+  </ul>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-sidecars">8f &nbsp;Sidecars and Multi-Map</h3>
+  <p>A <b>sidecar</b> is a small file saved beside a clip's depth map (ending in
+     <code>.fssidecar</code>) that holds that clip's own settings: Disparity, Convergence, borders,
+     Special FX, keyframes. <span class="btn">Create Sidecar</span> (then
+     <span class="btn">Update Sidecar</span>) saves the preview's settings for the clip showing. When the
+     batch reaches that clip, it uses them, and so do the later stages.</p>
+  <p>That's how you give every shot its own 3D: go through the clips in the preview, set each one, save
+     its sidecar, then convert them all with <span class="btn">Start</span>.</p>
+  <p><span class="set">Multi-Map</span> lets you keep several versions of the depth maps in subfolders of
+     the DepthMaps folder and switch between them per clip, to compare and pick the best.</p>
+
+  <!-- ---------------------------------------------------------------------- -->
+  <h3 id="splat-output">8g &nbsp;Output</h3>
+  <p><b>Process Resolution</b> decides what's made:</p>
+  <ul>
+    <li><span class="set">Enable Full Res</span>: the full-size result, in <code>hires</code>.
+      Inpainting and Merging use it to keep the final picture sharp.</li>
+    <li><span class="set">Enable Low Res</span> (on from the start, as Full Res is): the smaller copy Inpainting works on, in
+      <code>lowres</code>, at the <span class="set">Width</span> and <span class="set">Height</span> set
+      below it. Bigger keeps more detail but makes Inpainting slower. The preset button next to them
+      works like DepthCrafter's, with your own sizes from <b>Settings &gt; Splatting &gt; Custom Resolution
+      Presets</b>: the same editor as DepthCrafter's, suggesting four sizes for each shape -- 512, 640, 768
+      and 960 high, each with the width nearest the shape -- and taking any exact size you type in, in
+      multiples of 16, which both Inpainting versions can use. If you type your own size into Width and
+      Height, keep both numbers multiples of 16. It's only the size the fill is made
+      at: Inpainting's Hi-Res Blend puts it back on the full-size picture.</li>
+    <li><span class="set">Auto Size for the Loaded Clip</span> (off until you tick it): loading a clip
+      into the preview fills Low Res Width and Height with the size picked for its shape (the Auto Size
+      picks in that same Settings editor; 768 high by default). In a batch, every clip of another shape
+      runs its Low Res pass at its own shape's pick, so a chapter that switches aspect ratios gets the
+      right size for every clip.</li>
+    <li>Both are on from the start: keep them that way for the normal pipeline (Beginner Mode does this for
+      you). <span class="set">Dual Output Only</span>, also on from the start, keeps just what Inpainting needs
+      for the right eye, to save space; <span class="set">ffmpeg</span> (on too) decodes the clips with FFmpeg, so
+      the colours match what Resolve or VLC show (a little slower).</li>
+    <li><span class="set">Batch</span>: how many frames go to the graphics card at once. Higher can be
+      faster but needs more memory. <b>10</b> is a safe full-size batch; on a 16 GB card, keep full-size
+      batches to about 20 and smaller ones to about 30.</li>
+  </ul>
+  <figure class="shot" style="max-width:560px">
+    <div class="frame"><div class="canvas"><img src="shots/35_splat_presets.webp" alt="Low Res's preset menu, open"></div></div>
+    <figcaption>Low Res's preset button on a 2.39:1 clip: the menu offers only the sizes for the loaded clip's shape, and the Auto Size pick is marked <i>auto</i> (1840×768, 0.2% wider than the true ratio). Picking one fills Width and Height.</figcaption>
+  </figure>
+  <figure class="shot" style="max-width:640px">
+    <div class="frame"><div class="canvas"><img src="shots/35_settings_presets.webp" alt="Settings, Splatting, Custom Resolution Presets"></div></div>
+    <figcaption><b>Settings &gt; Splatting &gt; Custom Resolution Presets</b>: pick an aspect ratio, tick the sizes you want in its menu (or type your own, in multiples of 16, and press <span class="btn">Add</span>), and choose the ratio's <span class="set">Auto Size pick</span>. Every size ticked so far is listed under it; <span class="btn">Save Presets</span> keeps them.</figcaption>
+  </figure>
+  <p><b>Splatting &amp; Output Settings</b> holds the choices you make once for a project:
+     <span class="set">Mask</span> and <span class="set">Warp</span> (how holes are found and how the
+     picture is shifted; <b>SC</b> is the standard), <span class="set">Auto-Converge</span> (works out
+     Convergence for you), <span class="set">Border</span> mode, and the Mesh settings for the
+     <b>Mesh Warp</b> preview. <span class="btn">Encoding Options…</span> sets how the files are saved;
+     the defaults are high quality.</p>
+  <ul>
+    <li><span class="set">Full Res CRF</span> and <span class="set">Low Res CRF</span> set the quality of
+      each result (lower is better quality and bigger files).</li>
+    <li><span class="set">Enable DNxHR</span> saves the full-size result as DNxHR (a <code>.mov</code>
+      made for editing) instead of H.264 / H.265, so the picture stays visually lossless as it passes
+      through Inpainting and Merging. The files are <b>very large</b>: several GB per minute.</li>
+    <li><span class="set">DNxHR Profile</span>: match it to your source. <b>8-bit</b> (SQ / HQ) suits
+      1080p Blu-rays and web rips; <b>10-bit</b> (HQX / 444) is for HDR and 10-bit SDR sources, such as
+      4K Blu-rays.</li>
+  </ul>
+
+  <h3>When something isn't right</h3>
+  <table class="keys">
+    <tr><td><b>Rain looks painted on the wall</b></td><td>Turn on <a href="#splat-particles">Rain</a>
+      with Rain, and pick the Scenario that matches it.</td></tr>
+    <tr><td><b>Rain barely picked up</b></td><td>Try another Scenario (Soft for faint, out-of-focus rain;
+      Mist for a dense haze), or Any direction.</td></tr>
+    <tr><td><b>Lamps or lit windows taken as rain</b></td><td>Keep <span class="set">Keep lights out</span> on.
+      Guard won't help: it only protects what is near.</td></tr>
+    <tr><td><b>Wires, cables or clothing taken as rain</b></td><td>Keep <span class="set">Keep wires &amp; lines
+      out</span> on; raise <span class="set">Guard</span> for people standing in the rain.</td></tr>
+    <tr><td><b>Far-off rain floats in front of what's behind it</b></td><td>Set <span class="set">Place</span> to
+      <b>In place</b>.</td></tr>
+    <tr><td><b>Boosted objects' outlines bend</b></td><td>Lean on <span class="set">Pop-Out</span> and turn
+      Pop Out Boost's <span class="set">Strength</span> down.</td></tr>
+    <tr><td><b>Boost catches things you didn't mean</b></td><td>Depth alone can't tell two things at the
+      same depth apart. Select just the object in the Depth Map Editor (Part 3) and push it nearer.</td></tr>
+    <tr><td><b>3D is uncomfortable to watch</b></td><td>Lower <span class="set">Disparity</span>, or raise
+      <span class="set">Convergence</span> so less pops out of the screen.</td></tr>
+    <tr><td><b>Outlines shimmer or look ragged</b></td><td>Raise <span class="set">Blur X / Y</span> a
+      little, or <span class="set">Dilate X</span> so the depth covers the whole object.</td></tr>
+    <tr><td><b>Pop-out objects cut off at the frame edge</b></td><td>Add <span class="set">Border Width</span>,
+      or let <span class="set">Border</span> work it out (Auto).</td></tr>
+    <tr><td><b>Subtitles warp</b></td><td><span class="btn">Detect Text</span> (<a href="#detect-text">8e</a>).</td></tr>
+    <tr><td><b>Warped edges around masked text</b></td><td>Raise <span class="set">Text Clean</span>, or
+      <span class="set">Text Grow</span> if the mask misses part of the letters.</td></tr>
+    <tr><td><b>An object sits at the wrong depth</b></td><td>Fix its depth in the Depth Map Editor
+      (<span class="btn">Edit Depth Map</span>, Part 3).</td></tr>
+    <tr><td><b>Out of memory, or very slow</b></td><td>Lower the <span class="set">Batch</span> sizes.
+      Too big a batch spills into normal memory and slows to a crawl before failing.</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="inpainting">
+  <h2><span class="num">9</span> Inpainting <a class="anchor" href="#inpainting">#</a></h2>
+
+  <p>The Splatting stage creates holes in the frame where the image was warped. <b>Inpainting</b> uses
+     generative AI to fill in those gaps for a much cleaner right eye view. It looks at the frames
+     around each hole, works out what was probably behind the object, and paints it in, keeping it
+     steady from frame to frame.</p>
+
+  <table class="keys">
+    <tr><td><b>Reads</b></td><td>Splatting's smaller results from the chapter's <code>lowres</code>
+      folder (the AI works at that size), and the full-size ones from <code>hires</code> to blend the
+      fills into the full-size picture.</td></tr>
+    <tr><td><b>Writes</b></td><td>The filled right eye for each clip into the chapter's Inpainted
+      folder.</td></tr>
+    <tr><td><b>Then</b></td><td>Each finished clip's Splatting results move into <code>finished</code>,
+      ready for Merging.</td></tr>
+  </table>
+
+  <div class="tip"><b>Quick start</b><span>Pick the chapter (or press
+     <span class="btn">Import from Splatting</span>) and press <span class="btn">Start</span>
+     (<span class="set">Inference Steps</span> starts at 10). Inpainting is the slowest stage, so a whole chapter
+     is a good overnight run.</span></div>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/17_inp_page.webp" alt="The Inpainting page">
+      <span class="marker" style="left:1.5%;top:10.3%">1</span>
+      <span class="marker" style="left:1.5%;top:13.3%">2</span>
+      <span class="marker" style="left:1.5%;top:19.9%">3</span>
+      <span class="marker" style="left:1.5%;top:53.7%">4</span>
+      <span class="marker" style="left:38.1%;top:53.7%">5</span>
+      <span class="marker" style="left:67.1%;top:19.9%">6</span>
+      <span class="marker" style="left:1%;top:76.6%">7</span>
+    </div></div>
+    <figcaption><b>1</b> V1 / V2 · <b>2</b> Folders · <b>3</b> Parameters · <b>4</b> Post-Processing ·
+      <b>5</b> Current Clip Info · <b>6</b> Upcoming Jobs · <b>7</b> Progress and the buttons.</figcaption>
+  </figure>
+
+  <h3><span class="num">1</span> &nbsp;V1 or V2</h3>
+  <p>The tab holds two inpainting engines. <b>V1 (SVD)</b> is the standard one, and everything in this
+     section is about it. <b>V2 (Wan VACE)</b> is experimental and meant only for problem scenes
+     (<a href="#inp-v2">below</a>).</p>
+
+  <h3><span class="num">2</span> &nbsp;Folders</h3>
+  <ul>
+    <li><span class="set">Lo-Res Blend Folder</span>: Splatting's <code>lowres</code> results, the ones the
+      AI fills.</li>
+    <li><span class="set">Hi-Res Blend Folder</span>: Splatting's <code>hires</code> results. The fills are
+      blended into these, so the finished eye keeps its full sharpness.</li>
+    <li><span class="set">Output Folder</span>: where the filled clips go.</li>
+  </ul>
+  <p>Picking a chapter fills all three. Otherwise <span class="btn">Import from Splatting</span> fills
+     the two inputs from the last Splatting run.</p>
+
+  <h3><span class="num">3</span> &nbsp;Parameters</h3>
+  <ul>
+    <li><span class="set">Inference Steps</span>: <b>5</b> for a quick test, <b>10–15</b> for real runs;
+      <b>25</b> is the model's limit, and too many can add artifacts of their own.</li>
+    <li><span class="set">Frames Chunk</span>: how many frames the AI fills at once. <b>25</b> is as high as
+      it goes well; higher and pans can come out scrambled. Lower it only if you run out of memory.</li>
+    <li><span class="set">Frame Overlap</span>: how many frames each chunk shares with the one before, so the
+      fills blend where chunks meet. Raise it (10 is common) if you see a seam; those frames are filled
+      twice, so it costs time.</li>
+    <li><span class="set">Original Input Bias</span>: where chunks join, how much to lean on the original
+      picture rather than the frames already filled. Higher invents less; lower keeps the fills more
+      consistent. 0 = off; Studio starts at 0.1.</li>
+    <li><span class="set">Guidance Scale</span>: how much extra effort the AI puts into each step. Leave it at
+      <b>1.0</b>: each step is filled once, the fastest and lightest on graphics memory. Above 1.0 each step
+      is filled twice, about 30–45% slower, for results that look almost the same: in busy scenes 1.0 can
+      keep a touch less fine detail, hard to see unless you look for it. Hidden in Beginner Mode.</li>
+    <li><span class="set">Tile Number</span>: splits each frame into a grid (2 = 2×2) and fills each piece
+      separately, so big frames fit in memory. <b>2</b> is the default, and right for 16 GB cards; 1 = no splitting.</li>
+    <li><span class="set">Inpaint Direction</span>: <b>Forward</b> works through the clip from the start;
+      <b>Reverse</b> from the end; <b>Both</b> does one then the other.</li>
+    <li><span class="set">CPU Offload</span>: keeps parts of the AI in normal memory to save graphics memory.
+      <b>model</b> suits most cards; <b>sequential</b> saves the most but is slowest; <b>none</b> is
+      fastest.</li>
+    <li><span class="set">Process Length</span> is for testing: only the first so many frames of each clip.
+      To run just one clip, right-click it in Upcoming Jobs and choose <b>Inpaint This Clip Now</b>.</li>
+    <li><span class="set">Torch Compile</span>: prepares a faster version of the model when a run starts. The
+      first chunk takes about 10 minutes longer while it does, then the run is roughly 10% faster. Worth it
+      for a long unattended chapter, not for a quick test.</li>
+    <li>The <span class="set">Inpaint … Thresh / Kernel</span> settings shape the outline of the holes the AI
+      fills. <span class="set">Dilate Kernel</span> grows it so the fill covers the very edge of each
+      hole; <span class="set">Blur Kernel</span> softens it. The defaults suit most clips.</li>
+  </ul>
+  <div class="note"><b>Guidance Scale and speed</b><span>At <b>1.0</b> (the default) the AI fills each step
+     once. Any value above 1.0 makes it fill each step <b>twice</b> and compare the two, so every chunk takes
+     about <b>30–45% longer</b> and uses more graphics memory: a chapter that inpaints in 2 hours at 1.0 takes
+     roughly 2 hours 40 minutes to 3 hours above it. The results look almost the same; in busy scenes 1.0
+     can keep a little less fine detail, but you'd have to look for it. So leave it at 1.0 for whole
+     chapters, and raise it slightly (1.01 to 1.1) only for a busy shot that looks soft. Values well above
+     that are untested with this model and may add artifacts.</span></div>
+
+  <h3><span class="num">4</span> &nbsp;Post-Processing</h3>
+  <ul>
+    <li><span class="set">Enable Color Transfer</span>: matches the fills' colours to the original picture.
+      Leave it on. It runs on the graphics card, in full precision, so smooth gradients don't band.</li>
+    <li><span class="set">Keep Inpaint Cache For Re-Merge</span>: keeps the filled frames so a rerun can redo the
+      finish (Color Transfer, a new Hi-Res Blend clip) without filling again. Takes disk space.</li>
+    <li><span class="set">Resume</span>: finished clips move into <code>finished</code>, so a stopped run
+      carries on with the rest. Leave it on.</li>
+  </ul>
+
+  <h3><span class="num">5</span> &nbsp;Current Clip Info</h3>
+  <p>The clip being filled, its size and length, the overlap and bias it's using, and how far through
+     the batch you are.</p>
+
+  <h3><span class="num">6</span> &nbsp;Upcoming Jobs</h3>
+  <p>To the right of the settings: the Lo-Res splats that <span class="btn">Start</span> will inpaint,
+     each with its own bar while the batch runs. Tick clips and press <span class="btn">Process
+     Selected</span> to do just those, or right-click one for <b>Inpaint This Clip Now</b>,
+     <b>Move to Finished</b> (the splat, its sidecar and its Hi-Res splat), <b>Play Lo-Res Splat</b> or
+     <b>Play Hi-Res Splat</b>.</p>
+
+  <h3><span class="num">7</span> &nbsp;Progress and stopping</h3>
+  <ul>
+    <li>The ring counts the chunks of the current clip, with the time per step beside it; the bar shows
+      the clip.</li>
+    <li><span class="btn">Stop</span> asks how: <b>now</b>, or <b>after this chunk</b>, which keeps the
+      finished chunks so the next Start on that clip carries on from there.</li>
+    <li>While a folder of clips runs, <span class="btn">Stop After Clip</span> lets the current clip finish,
+      then stops before the next. Click it again to carry on instead.</li>
+    <li><span class="btn">View Output Folder</span> opens the results, even mid-run.</li>
+  </ul>
+
+  <div class="careful"><b>Disk space</b><span>While a clip runs, Inpainting saves each finished chunk
+     (about half a gigabyte each on a 1408-wide clip) so a crash can resume mid-clip. They're deleted when
+     the clip finishes, but a long clip can need several gigabytes at once. Keep plenty of free space on
+     the drive, or the saves fail and you lose the ability to resume.</span></div>
+
+  <h3>In Settings</h3>
+  <ul>
+    <li><b>Use SageAttention</b>: a faster way to run the AI, on cards that support it.
+      <b>Use Sage Attention (for V2)</b> is the same for Inpainting V2, and <b>Load / Save V2 Settings</b>
+      keep V2's settings in a file of their own.</li>
+    <li><b>Encoding Settings</b> (how the files are saved, for V1 and V2 alike: <b>10-bit (Main10)</b> writes
+      10-bit HEVC; <b>Enable DNxHR</b>, off by default, writes DNxHR .mov files for an all-DNxHR pipeline),
+      <b>Load / Save Settings</b>,
+      <b>Reset to Default</b>, <b>Restore Finished</b> (moves clips back out of <code>finished</code> to run
+      them again) and <b>Enable Debugging</b>.</li>
+  </ul>
+
+  <h3 id="inp-v2">Inpainting V2 (experimental)</h3>
+  <p>Switch to <span class="btn">V2 (Wan VACE)</span> at the top of the tab. V2 is a <b>much larger
+     model</b> and <b>more demanding on hardware</b>, so expect <b>significantly longer wait times</b>.
+     Measured on a 16 GB RTX 5060 Ti (MMGP streaming, 5 steps, 2 tiles per axis): about <b>10 seconds
+     per frame</b> at 1408x768 per eye, so a 4-second clip takes about a quarter of an hour; 20 steps take
+     about 3.5 times as long.</p>
+  <div class="careful"><b>Problem scenes only</b><span>It isn't practical to attempt a full conversion with
+     all V2 inpainting, even on the biggest cards (an RTX 5090 included). Keep it for problem scenes where V1 simply isn't good enough at any other
+     settings, and use V1 for everything else.</span></div>
+  <p>Its page is simpler: input and output, chunk and overlap, tiles, steps and seed, and a
+     <b>VRAM / Performance</b> panel to fit it to your card. The offload mode starts at <b>MMGP streaming</b>,
+     which runs on a 16 GB card; check it against yours before starting. <b>Torch Compile</b> there makes the chunks faster after a first one that takes
+     several minutes longer while it compiles: worth it for a long unattended run. It works with the
+     offload modes <b>None</b>, <b>FP8 resident</b> and <b>MMGP streaming</b>; the others run without it.
+     (SageAttention for V2 is in <b>Settings</b>.) <b>Upcoming Jobs</b> beside the settings lists the clips a
+     Start would run, as V1's does: tick some and <span class="btn">Process Selected</span>, or right-click one
+     for <span class="btn">Inpaint This Clip Now</span>, <span class="btn">Move to Finished</span> or, once
+     it's done, <span class="btn">Send to Merging</span>.</p>
+  <p>Leave <b>Tiles / axis</b> at 2 on a 16 GB card: at 1, an 81-frame chunk runs out of memory.
+     <b>Tile overlap</b> is 64 by default: about 9% faster than 128, with no visible seam where the
+     tiles meet. More <b>Inference steps</b> cost time in proportion and help little.</p>
+  <p><b>Stopping and crashes</b>: each chunk V2 finishes is kept as it goes (in the output folder's
+     <code>_inpaint_resume</code>), so a clip you stop -- or one cut off by a crash -- carries on from its last
+     finished chunk at the next Start, and comes out the same as an unbroken run. Only the finished chunks'
+     decoding is done again, a few seconds each. Change a setting that changes the result (chunk, overlap,
+     tiles, steps, seed, prompt or offload mode) and the clip starts over. A finished clip deletes its chunks.</p>
+  <div class="careful"><b>What it can't fix</b><span>V2 fills ordinary holes well, but it can't repair
+     pixels the splat has already stretched: a person seen through thin near bars or a fence, where the
+     depth map gives their edge the bars' depth. Fix the depth there instead (the
+     <a href="part3.html">Depth Map Editor</a>, or less depth dilation in Splatting). More steps or a
+     bigger mask only make V2 invent what was hidden, and get it wrong.</span></div>
+  <div class="note"><b>Getting its weights</b><span>Until they're on your PC, the top of V2's page offers
+     <span class="btn">Download V2 Weights</span>: <b>46.6 GB</b> from Hugging Face -- Wan 2.1 VACE's text encoder,
+     VAE and tokenizer (11.9 GB) and StereoCrafter2 (34.7 GB), only the files V2 uses. Windows shows that as about
+     43.4 GB. It asks first, showing the sizes and your free space, then downloads in the background with a progress
+     bar; <span class="btn">Stop</span> it any time and the next Download carries on where it stopped. With
+     <b>FP8 resident</b> picked as the offload mode, <span class="btn">Download FP8 Model</span> fetches its
+     pre-quantized StereoCrafter2 (17.4 GB more).</span></div>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/18_inp_v2.webp" alt="Inpainting V2"></div></div>
+    <figcaption>Inpainting V2.</figcaption>
+  </figure>
+
+  <h3>When something isn't right</h3>
+  <table class="keys">
+    <tr><td><b>A visible seam where chunks join</b></td><td>Raise <span class="set">Frame Overlap</span>
+      (10 is common).</td></tr>
+    <tr><td><b>Pans come out scrambled</b></td><td>Keep <span class="set">Frames Chunk</span> at 25 or
+      below.</td></tr>
+    <tr><td><b>Fills look a different colour</b></td><td>Turn on <span class="set">Enable Color
+      Transfer</span>.</td></tr>
+    <tr><td><b>Thin lines left at the edge of the fills</b></td><td>Raise <span class="set">Inpaint Dilate
+      Kernel</span> a little.</td></tr>
+    <tr><td><b>Out of memory</b></td><td>Raise <span class="set">Tile Number</span>, set
+      <span class="set">CPU Offload</span> to sequential, or lower <span class="set">Frames Chunk</span>.</td></tr>
+    <tr><td><b>Too slow</b></td><td>Turn on <b>Use SageAttention</b>; for a long run, <b>Torch
+      Compile</b>.</td></tr>
+    <tr><td><b>"Failed to save chunk checkpoint"</b> (V2: "Could not keep chunk checkpoint")</td><td>The drive is full. Free some space; the run
+      carries on, but can't resume from the chunks it couldn't save.</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="merging">
+  <h2><span class="num">10</span> Merging <a class="anchor" href="#merging">#</a></h2>
+
+  <p><b>Merging</b> is the last stage. It takes Inpainting's filled-in right eye and blends just the
+     filled areas into Splatting's full-size right eye, so everything that didn't need filling keeps its
+     full sharpness. Then it puts the left and right eyes together into the finished 3D video.</p>
+
+  <table class="keys">
+    <tr><td><b>Reads</b></td><td>The filled right eyes from the Inpainted folder, your original clips
+      (the left eye) from the Source folder's <code>finished</code> folders, and Splatting's full-size
+      results from <code>hires</code>, which carry the outline of the holes (the <b>mask</b>).</td></tr>
+    <tr><td><b>Writes</b></td><td>The finished 3D video for each clip into the chapter's Merged
+      folder.</td></tr>
+    <tr><td><b>Then</b></td><td>With <span class="set">Resume</span> on, each clip's inputs move into
+      <code>finished</code>.</td></tr>
+  </table>
+
+  <div class="careful"><b>No original, no start</b><span>A clip inpainted from a two-picture splat has no
+     left eye of its own: Merging takes it from your original clip in the
+     <span class="set">Original Video Folder</span>. If any clip's original isn't there, the batch doesn't
+     start at all -- it says which clips and which folder it looked in, so you can fix the path. (It used to
+     carry on and write only the right eye.) A clip whose original goes missing during the batch fails on its
+     own; the rest carry on.</span></div>
+
+  <div class="tip"><b>Quick start</b><span>Pick the chapter, check a clip in the preview, choose the
+     <span class="set">Output Format</span> your TV or player wants, and press
+     <span class="btn">Start Blending</span>.</span></div>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/19_merge_page.webp" alt="The Merging page with a clip in the preview">
+      <span class="marker" style="left:0.7%;top:6.2%">1</span>
+      <span class="marker" style="left:15.9%;top:13.5%">2</span>
+      <span class="marker" style="left:0.7%;top:23.8%">3</span>
+      <span class="marker" style="left:0.7%;top:52.1%">4</span>
+      <span class="marker" style="left:83.7%;top:37.5%">5</span>
+      <span class="marker" style="left:83.7%;top:13.5%">6</span>
+      <span class="marker" style="left:0.7%;top:66%">7</span>
+      <span class="marker" style="left:83.7%;top:19.6%">8</span>
+      <span class="marker" style="left:39%;top:96.4%">9</span>
+    </div></div>
+    <figcaption><b>1</b> Folders · <b>2</b> the preview · <b>3</b> Mask Processing · <b>4</b> Shadow ·
+      <b>5</b> Upcoming Jobs · <b>6</b> Film Grain · <b>7</b> Current Clip Info · <b>8</b> Options ·
+      <b>9</b> the buttons.</figcaption>
+  </figure>
+
+  <h3><span class="num">1</span> &nbsp;Folders</h3>
+  <p>A chapter fills in all four: <span class="set">Inpainted Video Folder</span>,
+     <span class="set">Original Video Folder</span>, <span class="set">Mask Folder</span> and
+     <span class="set">Output Folder</span>. Otherwise <span class="btn">Import from Inpainting</span>
+     (or <span class="btn">Import from Inpainting V2</span>) fills them from the last run.
+     <span class="btn">Encoding Options…</span> and the <b>8-bit / 10-bit</b> presets set how the finished
+     video is saved.</p>
+
+  <h3><span class="num">2</span> &nbsp;The preview</h3>
+  <p>The same kind of preview as Splatting's: two views, <b>click to flip</b> between them, with the frame
+     slider, play, the full-screen icon in the picture's top-right corner (Full Preview) and the brightness control.
+     <span class="set">Preview Scale</span> starts at <b>Fit</b>, as Splatting's does: the picture fills the space it
+     has; a percentage, the mouse wheel or a double-click zoom picks a size instead. The views to know:</p>
+  <ul>
+    <li><b>Blended Image</b>: the finished right eye, fills blended in.</li>
+    <li><b>Processed Mask</b>: where the fills go, after the mask settings below.</li>
+    <li><b>Inpainted Right Eye</b>, <b>Warped (Right BG)</b> and <b>Original (Left Eye)</b>: the
+      ingredients, to compare.</li>
+    <li>The anaglyph, side-by-side and Wigglegram views, to judge the 3D, and <b>Glasses-Free 3D</b>
+      on an SR 3D monitor, as in Splatting. All of them: <a href="appendices.html#views">Appendix D</a>.</li>
+  </ul>
+  <p>The preview doesn't show film grain or colour correction; those are only added on export and in the
+     Grain Match Preview.</p>
+
+  <h3><span class="num">3</span> &nbsp;Mask Processing Parameters</h3>
+  <p>The mask decides which parts of the right eye come from the fill. Shaping it right hides the
+     joins:</p>
+  <ul>
+    <li><span class="set">Binarize Thresh</span>: turns the mask into hard black and white before the rest.
+      Below 0 switches it off and keeps the soft mask.</li>
+    <li><span class="set">Dilate Kernel</span>: grows the mask, to cover thin dark lines at the edge of the
+      fills.</li>
+    <li><span class="set">Blur Kernel</span>: feathers the mask, so the fills fade in instead of ending in
+      a hard edge.</li>
+  </ul>
+  <p><span class="set">Highlight Mask in Preview</span> shows the mask over the picture;
+     <span class="btn">Reset to Defaults</span> puts the mask settings back.</p>
+
+  <h3><span class="num">4</span> &nbsp;Shadow</h3>
+  <p>A soft shadow cast from the edge of the mask into the fill, which helps the fill sit behind the
+     object in front of it. Open the section to set how far it reaches (<span class="set">Shift</span>),
+     how it fades (<span class="set">Gamma</span>), and how strong it starts and ends.</p>
+
+  <h3><span class="num">5</span> &nbsp;Upcoming Jobs</h3>
+  <p>The chapter's clips, as in Splatting: click one to preview it, tick clips and press
+     <span class="btn">Process Selected</span> to merge just those, or <span class="btn">Move to
+     Finished</span> to set them aside. Right-click a clip for <b>Merge This Clip Now</b> or
+     <b>Move to Finished</b> on that clip alone.</p>
+
+  <h3><span class="num">6</span> &nbsp;Film Grain (Inpainted Fills)</h3>
+  <p>The AI's fills are clean, so on film footage they can look smoother than the grain around them.
+     <span class="set">Add matching grain to inpainted fills</span> adds film-style grain only where the
+     fills are, fading with the mask; the original picture is never touched.</p>
+  <ul>
+    <li><span class="set">Auto-match grain per clip on render</span> measures each clip's own grain and
+      sets the amount for it. A clip you've tuned by hand keeps your setting.</li>
+    <li><span class="btn">Grain Match Preview…</span> shows the fills with grain next to the original, with
+      magnified close-ups and the measured grain of each, so you can tune it by eye.</li>
+  </ul>
+
+  <h3><span class="num">7</span> &nbsp;Current Clip Info</h3>
+  <p>The clip, its size and length, and the borders and flip it carries from Splatting.</p>
+
+  <h3><span class="num">8</span> &nbsp;Options</h3>
+  <ul>
+    <li><span class="set">Output Format</span>: the kind of 3D video to make.
+      <ul>
+        <li><b>Full SBS</b> (the default): both eyes side by side at full size. The best quality.</li>
+        <li><b>Half SBS</b>: both eyes squeezed into one frame; works with more TVs and players.</li>
+        <li><b>Full SBS Cross-eye</b>, <b>Double SBS</b>, <b>Split L/R Output</b> (two files),
+          <b>Right-Eye Only</b>, and two <b>Anaglyph</b> versions for red/cyan glasses.</li>
+      </ul></li>
+    <li><span class="set">Enable Color Transfer</span>: matches the fills' colours to the original. Leave it
+      on.</li>
+    <li><span class="set">Pad to 16:9</span>: adds black bars above and below so wide movies are a standard
+      TV shape, which some 3D players need.</li>
+    <li><span class="set">Add Borders</span>: applies the edge borders each clip got in Splatting.</li>
+    <li><span class="set">Resume</span>: finished clips move into <code>finished</code>, so a stopped batch
+      carries on with the rest.</li>
+    <li><span class="set">Split L/R</span>: also saves each Full SBS video as separate left and right files;
+      <span class="set">Delete SBS Videos</span> then keeps only those.</li>
+    <li><span class="set">Use GPU for Mask Processing</span> is faster, but it blends a whole chunk of
+      full-size frames on the graphics card at once, and keeps that memory for the rest of the batch: at
+      a large <span class="set">Batch Chunk Size</span> it can fill a 16 GB card, even while the card is
+      idle during encoding. Turn it off, or lower Batch Chunk Size, if the card is short on memory -- most of
+      a Merging run is the encode, so it costs little time. <span class="set">Batch Chunk Size</span> is how
+      many frames are held at once.</li>
+  </ul>
+  <p><b>Erased objects put back.</b> On static shots that don't have any camera movement, Inpainting has to
+     guess what's behind the foreground objects (a lamp post, a railing, a closeup shot through a fence,
+     cage/jail bars) it sometimes can't see enough to invent good detail.
+     <a href="part3.html#erasing">Erase</a> in the Depth Map Editor takes the object out first, so the scene
+     behind it is filled in from the frames it can pull from but also generatively fill the holes created
+     from the object removal. With <b>Put back</b> on there, Merging then lays the object back over both eyes
+     at the depth you set, and the gap beside it shows that recovered background instead of a guess.
+     <b>Over</b>, the usual choice, puts the original's pixels back inside the object's outline, for a solid
+     object. <b>Add</b> puts back only what erasing took away, for something you see through. Put Back works
+     in the preview and the batch alike, flipped clips included.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/36_merge_putback_full.webp" alt="Merging with the Put Back section showing"></div></div>
+    <figcaption>Merging on a clip a man was erased from. Its <b>Put Back</b> section, on the left, is on <b>Over</b> with <b>Original Depth</b>, setting him at the depth the original clip's own map gave him; Grow −3 and Blur 10 soften his outline. The preview shows him laid back over the street, in 3D, and the clip in Upcoming Jobs carries the violet <i>Object removed</i> badge.</figcaption>
+  </figure>
+  <p>When the clip on screen has one, a <b>Put Back</b> section shows in the left column with its controls,
+     saved with the clip and shown live in the preview:</p>
+  <ul>
+    <li><span class="set">Depth</span> (Add): <b>Glass Plane</b> lays what came off a window -- dust, a
+      reflection -- on the glass itself. A depth map sees through glass, so each window gets a plane fitted to the
+      depth of the car or frame around it, and the layer is warped at that plane, as Splatting warps the scene.
+      <span class="set">Convergence</span> moves it forward (−) or back (+) and <span class="set">Disparity</span>
+      sets how strongly its slope reads. <b>Parallax</b> moves it by one amount instead.</li>
+    <li><span class="set">Depth</span> (Over): <b>Original Eyes</b> cuts the object from the original clip's
+      own merge -- the conversion made before erasing, the object still in it: its left eye inside the object's
+      mask, and its right eye inside the mask moved to where the object is there (measured between the two eyes).
+      Every pixel of the object is what that conversion rendered, so its edges stay as they were. Choose that
+      merge's folder with <span class="btn">Choose…</span>; its depth is that conversion's, so Convergence and
+      Disparity don't apply. Until a merge is found it uses Original Depth, and says so.
+      <b>Original Depth</b> warps the object with the original clip's depth map at that map's own scale.
+      <b>Depth Map</b> puts the object at the depth the
+      <i>original</i> clip's depth map gives it -- the one made before erasing, with the object in it -- pixel by
+      pixel, moved exactly as Splatting moved the scene (the clip's own Disparity, Convergence, Gamma and
+      keyframes). A slanted or bowed thing, like a cage's bars, keeps its shape in 3D. <b>Parallax</b> moves
+      the whole object by one amount.</li>
+    <li><span class="set">Convergence</span> (Depth Map) moves the whole object off the depth its map gives
+      it, keeping its shape: + sets it back, − brings it out (−2 to 2).
+      <span class="set">Disparity</span> (Depth Map) is how much 3D the object gets, in % of the scene's:
+      <b>100</b> as Splatting gave the scene, less flattens it toward the screen, more deepens it.
+      <span class="set">Parallax</span> is the one amount otherwise.</li>
+    <li><span class="set">Grow</span> widens the object's mask (+, to take in more of its edge) or narrows it
+      (−, to leave a halo of old background out); <span class="set">Blur</span> softens its edge;
+      <span class="set">Opacity</span> is how much of it comes back.</li>
+  </ul>
+  <p>Depth Map needs the clean clip's depth map in Splatting's depth folder (where Splatting read it) and
+     an erase made by this version of Studio, which keeps the original depth map for it. When the clean map
+     isn't there, the section says so in yellow: the object then uses Parallax, and Convergence and Disparity
+     do nothing until Splatting's Depth Maps points at it.</p>
+
+  <h3><span class="num">9</span> &nbsp;The buttons</h3>
+  <ul>
+    <li><span class="btn">Start Blending</span> merges every clip in the folders.</li>
+    <li><span class="btn">Process Current Clip</span> merges only the clip in the preview, to test your
+      settings first.</li>
+    <li><span class="btn">Stop</span> stops once the piece being worked on is finished.</li>
+    <li><span class="btn">Move to Finish</span> moves the clip in the preview into <code>finished</code> and
+      goes to the next.</li>
+    <li><span class="btn">Fill Edges</span> opens <b>Extra &gt; Edge Fill</b> on this stage's folders, to refill the strip a deep 3D shift leaves at the frame's edge --
+      see <a href="#fill-edges">11</a>.</li>
+    <li><span class="btn">Merge All SBS to 1 Video</span> puts the whole movie back together -- see
+      <a href="#merge-all">10</a>.</li>
+    <li><span class="btn">View Output Folder</span> opens the finished videos.</li>
+  </ul>
+
+  <h3 id="merge-all"><span class="num">10</span> &nbsp;Merge All: the whole movie</h3>
+  <p>Once the scenes are merged, <span class="btn">Merge All SBS to 1 Video</span> joins them into one video:
+     every chapter in order, and every scene in the order it plays. The scenes are the clips Scene Cut made,
+     found in each chapter of the Source folder; each one's merged output is looked for in that chapter of
+     the merged folder, subfolders included. Split <code>_L</code> / <code>_R</code> files are joined side by
+     side. For a TV show it's the episode Merging's chapter belongs to.</p>
+  <ul>
+    <li>When every scene has its merged output, it asks you to confirm and names the file it will write.</li>
+    <li>When some don't, it lists them, each with the stage it still needs: <span class="btn">Play</span>
+      opens the scene's clip in your media player, to see which scene it is, and
+      <span class="btn">Send to</span> loads it into that stage with the chapter's folders.
+      <span class="btn">Merge Anyway</span> is for scenes you left out on purpose: each missing scene becomes
+      black, for as many frames as it has, so the sound still lines up.</li>
+    <li>It runs like any Merging job: the bar shows it, <span class="btn">Stop</span> ends it and discards the
+      unfinished file.</li>
+  </ul>
+  <p>How it's written is under <span class="btn">Encoding Options…</span> &rsaquo; <b>Merge All</b>:
+     <span class="set">Layout</span> (<b>Full SBS</b>, <b>Half SBS</b>, or <b>L and R files</b>, a whole-movie
+     file per eye), the codec and quality, the container, and the <span class="set">Movie (sound)</span> --
+     the movie file whose soundtrack goes in, every audio track of it (use MKV for TrueHD / Atmos). Leave
+     that empty for no sound. The file goes in the project's folder, as <code>&lt;project&gt; - 3D Full
+     SBS.mkv</code>, unless you set an <span class="set">Output Folder</span>.</p>
+  <div class="tip"><b>Merged in DNxHR?</b><span>When every scene is in one frame-by-frame format (DNxHR,
+     ProRes) the scenes are joined as they are, which is quickest. Mixed formats or H.264 / H.265 clips are
+     decoded scene by scene first: slower, but the result is the same.</span></div>
+
+  <h3 id="fill-edges"><span class="num">11</span> &nbsp;Edge Fill: the strip at the frame's edge</h3>
+  <p>With a lot of depth, the 3D shift uncovers a strip at the frame's edge that nothing in the picture can
+     fill -- usually on the right eye's left side. Inpainting guesses it from a thin margin, and the guess
+     shows as a dark bar or the edge smeared across. <b>Extra &gt; Edge Fill</b> refills that strip with ROSE,
+     on merged clips. Merging's <span class="btn">Fill Edges</span> button opens it on Merging's
+     <span class="set">Output Folder</span> and <span class="set">Mask Folder</span>.</p>
+  <div class="tip"><b>What it suits</b><span>Edge Fill does best on simple backgrounds with little movement.
+     Walls, sky and plain objects -- a house, a bench, a cabinet -- carry on into the strip well. It can't
+     rebuild fine detail: a face or text in the strip comes out rough, so leave those clips unticked.</span></div>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/37_edge_fill.webp" alt="The Edge Fill page with five clips"></div></div>
+    <figcaption>Edge Fill on five merged clips from one chapter. Each still is the right eye at the frame where its strip is widest, with a red line where the strip ends and its width under it -- 26 or 27 px here, at the right eye's left edge. Two clips have no strip there, so only three are ticked; <span class="btn">Fill 3 Clips</span> refills them with ROSE.</figcaption>
+  </figure>
+  <ul>
+    <li>On the left: <span class="set">Merged Folder</span>, the merged clips (Full SBS, or <code>_L</code> /
+      <code>_R</code> files), and <span class="set">Mask Folder</span>, their splats (or its
+      <code>finished</code>), which say how wide each strip is. In a project, the chapter dropdown above them points
+      both at a chapter -- its Merged folder and its splats -- as the stages' dropdowns do; editing a folder by
+      hand switches back to <b>Manual paths</b>, and the pick is kept per project. A project Edge Fill hasn't
+      been on yet takes Merging's chapter or folders. Then the fill's settings.</li>
+    <li>On the right, the clips as a grid of stills, the ones it can fill ticked. Each still is the eye with
+      the strip, at the frame where it's widest, with a red line where the strip ends and its width under
+      it -- so you can see which clips have a dark bar. A clip with no strip, or one already filled, is left
+      unticked. <b>Select All</b> ticks every clip with a strip (<b>Deselect All</b> unticks them). Click a
+      still to tick or untick it; right-click it for <b>Fill Just This Clip</b>, or to <b>Play</b> the clip in
+      your default player -- the eye with the bar first -- and watch the whole thing. The <b>Thumbnails</b>
+      slider (or its <b>&minus;</b> / <b>+</b>) makes the stills bigger or smaller, fewer or more to a row.
+      Each clip's strip is measured once and remembered; it is measured again only when the clip's splat
+      mask changes. <b>Refresh</b> looks through the folders again. While another stage's job runs the
+      grid waits -- looking means reading every mask -- and looks once that job ends. A filled clip's
+      tile is light green, as the clip lists show a finished clip -- one filled in this run as soon as it's done.</li>
+    <li><span class="btn">Open Console</span>, under the fill's settings, shows each clip's fill as it goes,
+      with its progress bars, on the console's Extra tab. It works during a fill too.</li>
+    <li>To fill one clip from Merging's <b>Upcoming Jobs</b>, right-click it there and pick
+      <b>Fill Edges</b>: its merged clip is filled straight away (once it has been merged).</li>
+    <li><span class="set">Steps</span> is how many steps ROSE takes -- type any number. 6 looks the same as
+      50 on an edge strip; fewer is quicker but softens fine detail.</li>
+    <li><span class="set">Resolution</span> is how big ROSE works the edge: <b>560</b> keeps more texture (a
+      wall's ridges, grain) and is quicker; <b>784</b> carries lines that run into the edge -- a roofline, a
+      railing -- on straighter, a little softer and about twice as long. <b>Native</b> works the edge at the clip's
+      own size, in overlapping tiles near ROSE's own size faded into each other: the sharpest and closest to the real
+      picture (a wall's ridges and rivets, straight lines), about 2&ndash;2.5&times; 560's time. With 784 and Native the
+      fill's colour is matched to the picture beside the strip (ROSE drifts a few levels at those sizes).</li>
+    <li><span class="set">Right Edge Too</span>: Splatting leaves the strip on the right eye's left edge, so by
+      default that is the only edge Edge Fill measures and fills. Tick it to look at the right eye's right edge
+      as well, for a clip whose strip really is on that side; the clips are measured again when you change it.</li>
+    <li><span class="set">Match Grain</span> gives the fill the film grain of the picture beside it, so the
+      strip isn't smoother than the rest of the frame.</li>
+    <li><span class="set">Match Detail</span> sharpens the fill to the picture's own fine detail: ROSE works
+      the edge smaller than the frame, so its fill comes back softer. How much is measured on each clip, where
+      ROSE repainted real picture just past the strip, and nothing is sharpened when the fill is already as
+      sharp.</li>
+    <li>The fill follows the splat mask row by row, frame by frame -- each row is filled only as far as its
+      hole reached, as Inpainting's Hi-Res Blend does -- so the real picture next to a narrower hole is kept.</li>
+    <li>Each clip's files are written again in their own format (DNxHR stays DNxHR; H.264 / H.265 with
+      Merging's encoder settings) with only the strip changed; the originals go to the Recycle Bin (on a
+      drive without one, to <code>edge_fill_originals</code>, a second fill's under a numbered name). A clip
+      with a file open in another program -- a player -- isn't touched: close it and fill again. A strip
+      narrower than about 12 px (at 1920 wide) is left to Inpainting's own fill.</li>
+    <li><span class="btn">Fill</span> runs the ticked clips as a job of its own: the bar shows it,
+      <span class="btn">Stop</span> leaves the clip being filled as it was -- all its files: they're
+      only swapped in once every one is written -- and the grid looks again when it
+      ends. A short scene takes about half a minute, most of it ROSE starting. The console's Extra tab
+      follows it: each clip's strip, ROSE's size and steps, the grain and detail, the files written, a bar for
+      each stretch (reading, each ROSE window's steps with their s/it, blend and write) and the time it took.</li>
+  </ul>
+  <div class="tip"><b>Needs ROSE</b><span>Edge Fill uses the same ROSE as the Depth Map Editor's Erase:
+     set it up there once (<span class="btn">Set Up ROSE</span>).</span></div>
+
+  <h3>In Settings</h3>
+  <p><b>Save Preview Frame</b> and <b>Save Preview as SBS</b> save the frame on screen as a picture.
+     There's also <b>Load / Save Settings</b>, <b>Reset to Default</b>, <b>Restore Finished</b>,
+     <b>Enable Debug Logging</b> and a <b>User Guide</b>.</p>
+
+  <h3>When something isn't right</h3>
+  <table class="keys">
+    <tr><td><b>Thin dark lines around the fills</b></td><td>Raise <span class="set">Dilate
+      Kernel</span>.</td></tr>
+    <tr><td><b>Hard edges where the fills start</b></td><td>Raise <span class="set">Blur
+      Kernel</span>.</td></tr>
+    <tr><td><b>Fills look smoother than the film</b></td><td>Turn on the film grain, and check it in the
+      <span class="btn">Grain Match Preview…</span>.</td></tr>
+    <tr><td><b>Fills a different colour</b></td><td>Turn on <span class="set">Enable Color
+      Transfer</span>.</td></tr>
+    <tr><td><b>The player shows it squashed or stretched</b></td><td>Try <b>Half SBS</b>, or
+      <span class="set">Pad to 16:9</span>.</td></tr>
+    <tr><td><b>Out of memory, or the VRAM meter full during a merge</b></td><td>Turn off
+      <span class="set">Use GPU for Mask Processing</span>, or lower <span class="set">Batch Chunk
+      Size</span>.</td></tr>
+    <tr><td><b>The batch won't start: no original</b></td><td>The <span class="set">Original Video
+      Folder</span> is wrong, or the clips it names aren't in it. Fix the path and start again.</td></tr>
+  </table>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="part1.html">‹ Part 1 · Getting started</a>
+  <a class="next" href="part3.html">Part 3 · Depth Map Editor ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

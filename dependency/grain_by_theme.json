@@ -1,0 +1,87 @@
+{
+  "_about": "Film grain per Studio v2 theme, saved by prototypes/grain_tuner. enabled: grain on. amount: opacity of the dark grains at one standard deviation, percent. light: the white grains relative to the dark ones, percent. size: grain size in screen pixels.",
+  "Graphite": {
+    "enabled": true,
+    "amount": 3.6,
+    "light": 60.0,
+    "size": 1.0
+  },
+  "Light": {
+    "enabled": true,
+    "amount": 4.0,
+    "light": 100.0,
+    "size": 1.0
+  },
+  "True Black": {
+    "enabled": true,
+    "amount": 0.0,
+    "light": 0.0,
+    "size": 1.0
+  },
+  "The Nile": {
+    "enabled": true,
+    "amount": 4.9,
+    "light": 40.0,
+    "size": 1.0
+  },
+  "Ink": {
+    "enabled": true,
+    "amount": 2.3,
+    "light": 100.0,
+    "size": 1.0
+  },
+  "Nord": {
+    "enabled": true,
+    "amount": 6.1,
+    "light": 30.0,
+    "size": 1.0
+  },
+  "Warm Carbon": {
+    "enabled": true,
+    "amount": 2.0,
+    "light": 85.0,
+    "size": 1.0
+  },
+  "Plum": {
+    "enabled": true,
+    "amount": 1.5,
+    "light": 100.0,
+    "size": 1.0
+  },
+  "Teal Slate": {
+    "enabled": true,
+    "amount": 3.9,
+    "light": 50.0,
+    "size": 1.0
+  },
+  "Paper": {
+    "enabled": true,
+    "amount": 4.7,
+    "light": 95.0,
+    "size": 1.0
+  },
+  "Frost": {
+    "enabled": true,
+    "amount": 3.5,
+    "light": 100.0,
+    "size": 1.0
+  },
+  "Orchid": {
+    "enabled": true,
+    "amount": 2.9,
+    "light": 100.0,
+    "size": 1.0
+  },
+  "Sea Glass": {
+    "enabled": true,
+    "amount": 4.0,
+    "light": 100.0,
+    "size": 1.4
+  },
+  "Bone": {
+    "enabled": true,
+    "amount": 3.7,
+    "light": 100.0,
+    "size": 1.4
+  }
+}

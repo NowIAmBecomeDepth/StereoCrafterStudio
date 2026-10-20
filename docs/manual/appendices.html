@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appendices · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Appendices</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html" class="current">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Appendices</div>
+  <h1>Reference</h1>
+  <p>Things to look up when you need them.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="cards">
+  <h2><span class="num">A</span> Recommended settings by graphics card <a class="anchor" href="#cards">#</a></h2>
+
+  <p>Studio's defaults are set for a card with <b>16 GB</b> of graphics memory (VRAM). With less, a few
+     settings need turning down; with more, a few can go up for speed. Any NVIDIA RTX card can run Studio
+     (<a href="part1.html#install">Part 1</a>); what changes with the card is how much fits at once.</p>
+  <div class="tip"><b>Tested on</b><span>Studio has been tested on a machine with an <b>RTX 5060 Ti</b> with
+     <b>16 GB</b> of VRAM and <b>32 GB</b> of system RAM. The 16 GB settings below are what runs there;
+     the others are where to start on other cards.</span></div>
+  <div class="note"><b>Starting points</b><span>Every movie is different, and long or high-resolution clips
+     need more memory than short ones. Use these as a place to start: if a stage runs out of memory, turn
+     the next setting in its list down one step and try again. The <b>VRAM</b> meter at the top right
+     (<a href="part4.html#gpu">Part 4</a>) shows how close a job comes to the limit.</span></div>
+
+  <h3>How much each stage needs</h3>
+  <table class="keys">
+    <tr><td><b>Scene Cut</b></td><td>Light. Any RTX card.</td></tr>
+    <tr><td><b>DepthCrafter</b></td><td>Heavy. Grows with the Resolution Preset and the Window Size.</td></tr>
+    <tr><td><b>Splatting</b></td><td>Moderate. Grows with the Batch size.</td></tr>
+    <tr><td><b>Inpainting (V1)</b></td><td>Heavy. Grows with the frame size and Frames Chunk.</td></tr>
+    <tr><td><b>Inpainting V2</b></td><td>Very heavy. Needs 20 GB or more on the card, or lots of
+      system memory instead (below).</td></tr>
+    <tr><td><b>Merging</b></td><td>Light to moderate -- unless <b>Use GPU for Mask Processing</b> is on with a
+      large <b>Batch Chunk Size</b>: then it can hold most of a 16 GB card for the whole batch. Off, it stays
+      at a couple of GB, and most of a merge is the encode anyway.</td></tr>
+    <tr><td><b>Depth Map Editor</b></td><td>SAM 3 takes about <b>4 GB</b>, and stays loaded until you
+      unload it. Erase's ROSE needs more at larger <b>Size</b> and longer <b>Window</b> settings.</td></tr>
+  </table>
+
+  <h3>16 GB: the defaults</h3>
+  <ul>
+    <li><b>DepthCrafter</b>: the <b>768</b> presets, <span class="set">CPU Offload Mode</span>
+      <b>model</b>.</li>
+    <li><b>Splatting</b>: a full-size <span class="set">Batch</span> of <b>10</b> is safe; up to about
+      <b>20</b> works, and about <b>30</b> for the low-res pass.</li>
+    <li><b>Inpainting</b>: <span class="set">Frames Chunk</span> <b>25</b>,
+      <span class="set">Tile Number</span> <b>2</b> (the defaults).</li>
+  </ul>
+
+  <h3>12 GB and less</h3>
+  <p>Turn these down, in this order, until the stage runs:</p>
+  <ul>
+    <li><b>DepthCrafter</b>
+      <ol>
+        <li><span class="set">CPU Offload Mode</span> to <b>sequential</b> (slower, much less memory).</li>
+        <li>Turn on <span class="set">Process as Segments</span> (the low-VRAM mode,
+          <a href="part2.html#dc-segments">Part 2</a>), and lower the <span class="set">Window Size</span>.</li>
+        <li>Stay on the <b>768</b> presets.</li>
+      </ol></li>
+    <li><b>Splatting</b>: lower the full-size <span class="set">Batch</span>, halving it each time
+      until it runs; a smaller low-res size helps too.</li>
+    <li><b>Inpainting</b>
+      <ol>
+        <li><span class="set">CPU Offload</span> to <b>sequential</b>.</li>
+        <li>Lower <span class="set">Frames Chunk</span> below 25.</li>
+        <li>Raise <span class="set">Tile Number</span> above 2 (3 fills each frame in nine pieces).</li>
+      </ol></li>
+    <li><b>Depth Map Editor</b>: unload SAM 3 (<b>Settings</b> → <b>SAM 3</b>) before starting another
+      stage's job, so its 4 GB are free.</li>
+  </ul>
+
+  <h3>24 GB and more</h3>
+  <ul>
+    <li><b>DepthCrafter</b>: <span class="set">CPU Offload Mode</span> <b>none</b> (no offloading) is the
+      fastest. Don't go to the bigger presets just because they fit: 768 still gives the best depth for
+      most scenes (<a href="part2.html#depthcrafter">Part 2</a>).</li>
+    <li><b>Splatting</b>: bigger batches, if the job gets faster with them.</li>
+    <li><b>Inpainting</b>: stay on V1. V2 is experimental on any card, even a 32 GB RTX 5090: use it
+      only for problem scenes V1 can't handle, never for a whole conversion.</li>
+  </ul>
+
+  <h3>Inpainting V2's offload modes</h3>
+  <p>For the problem scenes you try it on (V2 is experimental, <a href="part2.html#inp-v2">Part 2</a>),
+     V2's <b>VRAM / Performance</b> panel decides where its big model lives while it works. Pick by your
+     card, and by your system memory (RAM):</p>
+  <table class="keys">
+    <tr><td><b>None</b></td><td>Everything on the card. The fastest, but needs about <b>28 GB</b> of
+      VRAM.</td></tr>
+    <tr><td><b>Transformer only</b></td><td>The largest part streams from RAM. For <b>24 GB</b> cards
+      and up.</td></tr>
+    <tr><td><b>FP8 resident</b></td><td>A smaller 8-bit copy, all on the card. Fastest when it fits:
+      about <b>20 GB</b> of VRAM, an RTX 40 or 50 series card, and the separate
+      StereoCrafter2-FP8 download.</td></tr>
+    <tr><td><b>Group offload</b></td><td>Everything streams from RAM. Runs on little VRAM, slowly, and
+      needs about <b>28 GB</b> of RAM.</td></tr>
+    <tr><td><b>Group offload (disk)</b></td><td>The same, from disk: the least RAM, the slowest. Keep its
+      cache on a fast NVMe drive.</td></tr>
+    <tr><td><b>MMGP streaming (int8)</b></td><td>Shrinks the model to 8-bit as it loads, then streams it
+      from RAM. About 30% faster than Group offload on about <b>4 GB</b> of VRAM, so it suits
+      <b>8 and 12 GB</b> cards too. It holds about <b>28-31 GB</b> of RAM while it runs (Windows locks
+      at most 40% of your RAM for it; the rest stays ordinary memory), so <b>32 GB</b> of RAM runs it;
+      loading briefly spills into the page file.</td></tr>
+  </table>
+  <p>Remember V2's model files take <b>46.6 GB</b> of disk space, and FP8 resident another 17.4 GB
+     (<a href="part2.html#inp-v2">Part 2</a>).</p>
+
+  <h3>System memory (RAM)</h3>
+  <p>Offloading moves work from the graphics card to your computer's own memory, so a card with less
+     VRAM leans on RAM more. If the whole computer slows to a crawl during a job, it has run out of RAM:
+     close other programs, or offload less. Inpainting V2's streaming modes want <b>48 GB</b> of RAM or
+     more.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="files">
+  <h2><span class="num">B</span> File names <a class="anchor" href="#files">#</a></h2>
+
+  <h3>In your Studio folder</h3>
+  <table class="keys">
+    <tr><td><code>StereoCrafter Studio.exe</code></td><td>Starts Studio.</td></tr>
+    <tr><td><code>StereoCrafter Studio.bat</code></td><td>Starts Studio too, as a script.</td></tr>
+    <tr><td><code>config/</code></td><td>Your settings: <code>studio.json</code> for the theme, the window and
+      your projects, and one file per stage (<code>depthcrafter_auto_sizes.json</code> holds DepthCrafter's
+      Auto Size picks). To put a stage back to its defaults, use
+      <b>Reset to Default</b> (<a href="part5.html#saving">Part 5</a>).</td></tr>
+    <tr><td><code>weights/</code></td><td>The AI models' files. <code>weights/ROSE</code> holds Erase's ROSE and
+      its own environment (<a href="part3.html#erasing">Part 3</a>).</td></tr>
+    <tr><td><code>studio_last_run.log</code></td><td>Everything from the last time Studio ran; the run before it
+      is <code>studio_last_run.prev.log</code> (<a href="#troubleshooting">Appendix C</a>).</td></tr>
+    <tr><td><code>last_jobs.json</code></td><td>What each stage made last, for the
+      <span class="btn">Import from …</span> buttons.</td></tr>
+    <tr><td><code>dependency/grain_by_theme.json</code></td><td>The film grain, tuned for each theme.</td></tr>
+    <tr><td><code>studio/</code></td><td>Studio's own program files. <code>studio/shell.py</code> holds the extra
+      themes (<a href="part5.html#themes">Part 5</a>).</td></tr>
+    <tr><td><code>THIRD_PARTY_NOTICES.md</code></td><td>The licences of the code included with Studio.</td></tr>
+  </table>
+
+  <h3>In your project</h3>
+  <p>The folders are in <a href="part1.html#project">Part 1</a>. Each stage names its files after the clip,
+     and adds an ending:</p>
+  <table class="keys">
+    <tr><td><b>DepthCrafter</b></td><td><code>&lt;clip&gt;_depth.mp4</code>: the depth map. While it works in
+      segments, the pieces are <code>&lt;clip&gt;_depth_1of4.npz</code> and so on.</td></tr>
+    <tr><td><b>Splatting</b></td><td>In <code>hires</code> and <code>lowres</code>:
+      <code>&lt;clip&gt;_&lt;width&gt;_splatted4</code> holds four pictures in one frame (the original, the depth,
+      the holes and the shifted eye); <code>_splatted2</code> holds two (the holes and the shifted eye), with
+      <b>Dual Output Only</b>. A <code>D</code> after the number means Dual Eye, an <code>F</code> a flipped
+      clip. With DNxHR on, the full-size file is a <code>.mov</code>.</td></tr>
+    <tr><td><b>Inpainting</b></td><td>Ends in <code>_inpainted_sbs</code> (both eyes side by side),
+      <code>_inpainted_right_eye</code> (from a two-picture splat) or <code>_inpainted_dual_sbs</code>
+      (Dual Eye).</td></tr>
+    <tr><td><b>Merging</b></td><td>Ends in the format you chose: <code>_merged_full_sbs</code>,
+      <code>_merged_half_sbs</code>, <code>_merged_full_sbsx</code> (cross-eye), <code>_merged_right_eye</code>,
+      or <code>_merged_anaglyph</code>.</td></tr>
+  </table>
+
+  <h3>Beside your clips</h3>
+  <table class="keys">
+    <tr><td><code>.fssidecar</code></td><td>A clip's own settings (<a href="part2.html#splat-sidecars">Part 2,
+      8f</a>): <code>&lt;clip&gt;_depth.fssidecar</code> beside the depth map, or
+      <code>&lt;clip&gt;.fssidecar</code> beside the source clip.</td></tr>
+    <tr><td><code>&lt;clip&gt;_submask.mp4</code></td><td>The clip's Detect Text mask, beside the source clip
+      (<a href="part2.html#detect-text">Part 2, 8e</a>). It's never treated as a clip.</td></tr>
+    <tr><td><code>.partial</code></td><td>A file still being written. If a job is stopped, it's thrown away,
+      so a half-made file never looks finished.</td></tr>
+    <tr><td><code>finished/</code></td><td>Clips a stage has already used (<a href="part1.html#project">Part 1</a>).</td></tr>
+    <tr><td><code>edit_history/</code></td><td>What an edit replaced: depth maps the Depth Map Editor's render
+      replaced, beside the depth maps, and the original of a clip <b>Erase from Clip</b> changed, with its
+      erase mask, beside the clip (<a href="part3.html#rendering">Part 3</a>).</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="troubleshooting">
+  <h2><span class="num">C</span> Troubleshooting and log files <a class="anchor" href="#troubleshooting">#</a></h2>
+
+  <p>Each stage has its own "When something isn't right" table in <a href="part2.html">Part 2</a>, and
+     the Depth Map Editor's is at the end of <a href="part3.html">Part 3</a>. This appendix covers
+     Studio as a whole, and where to look when something goes wrong.</p>
+
+  <h3>Where to look</h3>
+  <table class="keys">
+    <tr><td><b>The message</b></td><td>When a batch ends, a message says how many clips were done and
+      how many failed, or why nothing could be made.</td></tr>
+    <tr><td><b>The console</b></td><td><kbd>Ctrl</kbd>+<kbd>`</kbd>. The whole run, line by line, one tab
+      per stage (<a href="part1.html#tour">Part 1</a>). A failed clip says why here.</td></tr>
+    <tr><td><b>Debug Logging</b></td><td>In each stage's <b>Help</b> group in Settings. The console then
+      shows much more detail. Turn it on, run the problem again, and the extra lines usually show
+      where it went wrong.</td></tr>
+    <tr><td><b>The log file</b></td><td><code>studio_last_run.log</code> in your Studio folder has
+      everything from the last time Studio ran. The run before that is kept as
+      <code>studio_last_run.prev.log</code>.</td></tr>
+  </table>
+
+  <h3>Common problems</h3>
+  <table class="keys">
+    <tr><td><b>Studio won't start</b></td><td>A window says what went wrong and offers to open the log.
+      If it says the graphics card can't be used, update the NVIDIA driver (version 580 or newer,
+      <a href="part1.html#install">Part 1</a>).</td></tr>
+    <tr><td><b>"Studio could not be started"</b></td><td>Another Studio is probably still running and
+      holding the log file. If you can't see its window, check Task Manager for
+      <b>StereoCrafter Studio</b> or <b>python</b> and end it, then start Studio again.</td></tr>
+    <tr><td><b>The chapter list is empty</b></td><td>The project folder isn't laid out the way Studio
+      expects: check the stage folders' names and that the chapter folders start with
+      <code>Chapter</code> and a number (<a href="part1.html#project">Part 1</a>).</td></tr>
+    <tr><td><b>A stage says there are no clips</b></td><td>They may all be in its
+      <code>finished</code> folder already. <b>Restore Finished</b> in the stage's File group brings them
+      back.</td></tr>
+    <tr><td><b>A stage says its model files are missing</b></td><td>The weights aren't where the stage looks: check the
+      <code>weights</code> folder (<a href="part1.html#install">Part 1</a>, and Scene Cut's in
+      <a href="part2.html">Part 2</a>).</td></tr>
+    <tr><td><b>"Driver does not support the required nvenc API version"</b></td><td>Your copy of ffmpeg is
+      newer than your NVIDIA driver supports for video encoding (the message names the driver it needs).
+      Update the driver, or use an ffmpeg build from before it, and check with
+      <code>ffmpeg -version</code> which one Windows finds first. Choosing the CPU encoder in Encoding
+      Options works meanwhile, more slowly.</td></tr>
+    <tr><td><b>Out of memory</b></td><td><a href="#cards">Appendix A</a>, and the stage's own table in
+      Part 2.</td></tr>
+    <tr><td><b>Everything is slow</b></td><td>Look at the VRAM meter: another program may be using the
+      graphics card. A computer that runs out of system memory slows to a crawl too.</td></tr>
+    <tr><td><b>Another stage won't start</b></td><td>Only one job runs at a time
+      (<a href="part4.html#gpu">Part 4</a>). Wait for it, or stop it.</td></tr>
+    <tr><td><b>Videos won't encode</b></td><td>FFmpeg must be installed and on your PATH
+      (<a href="part1.html#install">Part 1</a>).</td></tr>
+  </table>
+
+  <h3>Asking for help</h3>
+  <p>Send these, and the problem can usually be found quickly:</p>
+  <ol>
+    <li>The log file, <code>studio_last_run.log</code> (or <code>.prev.log</code> if you've started
+      Studio again since).</li>
+    <li>What you did, and what you expected to happen.</li>
+    <li>Your graphics card and how much memory it has.</li>
+    <li>For one stage, the console lines from that stage's tab, with Debug Logging on. Select the lines
+      and press <kbd>Ctrl</kbd>+<kbd>C</kbd>, or use the copy button for the whole tab.</li>
+  </ol>
+  <div class="careful"><b>Before you send</b><span>Logs contain your folders' names, such as your
+     movie's title. Look through the file first if that matters to you.</span></div>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="views">
+  <h2><span class="num">D</span> Preview views <a class="anchor" href="#views">#</a></h2>
+
+  <p>Splatting's and Merging's previews can show the same frame in many ways. You pick two of them,
+     <span class="set">Front</span> and <span class="set">Back</span>, and click the picture to flip between
+     them. None of the views change what is saved: they are ways of looking at the frame.</p>
+
+  <h3>Judging the 3D</h3>
+  <table class="keys">
+    <tr><td><b>Dubois Anaglyph</b></td><td>Red/cyan 3D with the least ghosting and the best colour an
+      anaglyph can give. Wear red/cyan glasses. The usual Front, and the best everyday view on an ordinary
+      screen.</td></tr>
+    <tr><td><b>Optimized Anaglyph</b></td><td>Red/cyan 3D that keeps more of the colour, with a little
+      more ghosting. For glasses or screens where Dubois looks too dark.</td></tr>
+    <tr><td><b>Anaglyph 3D</b></td><td>The plain red/cyan mix: the left eye in grey, the right eye in
+      colour. Strong depth, little colour. Good for checking the depth alone.</td></tr>
+    <tr><td><b>ColorCode (Amber/Blue)</b> and <b>(Blue/Amber)</b></td><td>3D for amber/blue ColorCode
+      glasses. The two put the amber on different eyes; pick the one that matches your glasses.</td></tr>
+    <tr><td><b>Side-by-Side</b></td><td>Both eyes next to each other at full size, left then right, so the
+      picture is twice as wide. For viewing on a 3D TV or monitor (see <span class="btn">Full
+      Preview</span>), or with the parallel free-viewing method. <kbd>X</kbd> swaps the eyes.</td></tr>
+    <tr><td><b>Side-by-Side (Cross-eye)</b></td><td>The same with the eyes swapped, for the cross-eyed
+      free-viewing method.</td></tr>
+    <tr><td><b>Wigglegram</b></td><td>The picture flips between the two eyes, so depth shows as motion
+      without any glasses. <span class="set">Wiggle Speed</span> sets how fast it flips. It holds still
+      while a job runs.</td></tr>
+    <tr><td><b>Glasses-Free 3D</b></td><td>Real 3D on a glasses-free 3D monitor, each eye at full
+      resolution. Read the section below before you rely on it.</td></tr>
+  </table>
+
+  <h3>Looking at the pieces (Splatting)</h3>
+  <table class="keys">
+    <tr><td><b>Splat Result</b></td><td>The new right eye on its own, as Splatting makes it. The black
+      gaps are the holes: places the left eye never saw, which Inpainting fills later. The usual Back.
+      <span class="set">Highlight Holes</span> paints them.</td></tr>
+    <tr><td><b>Splat Result(Low)</b></td><td>The same at the Low Res size, the copy Inpainting works
+      on.</td></tr>
+    <tr><td><b>Occlusion Mask</b> and <b>(Low)</b></td><td>The holes alone, in white: exactly what
+      Inpainting will be asked to fill.</td></tr>
+    <tr><td><b>Original (Left Eye)</b></td><td>The source frame, untouched. It is the left eye of the
+      result.</td></tr>
+    <tr><td><b>Depth Map</b> and <b>Depth Map (Color)</b></td><td>The depth map as Splatting reads it,
+      after its depth settings. The colour version makes small steps and noise easier to see. Both show
+      the depth's lowest and highest values.</td></tr>
+    <tr><td><b>Boost Zone</b></td><td>Where Pop Out Boost acts, and how strongly. Orange is boost in
+      use; cyan shows what would be boosted while its Amount is 0. An all-dark picture means the
+      threshold is above anything in the clip.</td></tr>
+    <tr><td><b>Mesh Warp</b></td><td>A different way to make the right eye: the picture laid on a 3D
+      mesh shaped by the depth, filmed by two virtual cameras. It stretches instead of leaving holes. For
+      comparison; its settings are in Splatting &amp; Output Settings.</td></tr>
+    <tr><td><b>SBS + Mesh</b></td><td>Side-by-Side above Mesh Warp, to compare the two.</td></tr>
+  </table>
+
+  <h3>Looking at the pieces (Merging)</h3>
+  <table class="keys">
+    <tr><td><b>Blended Image</b></td><td>The finished right eye: the splatted eye with the inpainted fills
+      blended into its holes. The usual Back.</td></tr>
+    <tr><td><b>Warped (Right BG)</b></td><td>The splatted right eye before filling, holes and
+      all.</td></tr>
+    <tr><td><b>Inpainted Right Eye</b></td><td>Inpainting's result on its own.</td></tr>
+    <tr><td><b>Processed Mask</b></td><td>Where the fills go, after Merging's mask settings.
+      <span class="set">Highlight Mask in Preview</span> draws it over the picture instead.</td></tr>
+    <tr><td><b>Original (Left Eye)</b></td><td>The source frame.</td></tr>
+    <tr><td><b>Depth Map</b></td><td>The depth, when the splatted clip carries it (the four-panel
+      layout).</td></tr>
+    <tr><td><b>Mesh Warp</b></td><td>As in Splatting, for comparison.</td></tr>
+  </table>
+  <p>Merging also has the anaglyphs, Side-by-Side, Wigglegram and Glasses-Free 3D, built from the original
+     left eye and the blended right eye.</p>
+
+  <h3>Overlays</h3>
+  <p><span class="set">Crosshair</span> (with <span class="set">White</span> and
+     <span class="set">Multi</span>) marks the screen centre, on the anaglyph views and Glasses-Free 3D,
+     to help set Convergence: anything that lines up with it sits at screen depth.
+     <span class="set">Highlight Holes</span> (Splatting) and <span class="set">Highlight Mask in
+     Preview</span> (Merging) paint the holes or the mask on the views that show the right eye.</p>
+
+  <h3 id="views-glasses">Glasses-Free 3D</h3>
+  <p>On a glasses-free 3D monitor built on Leia's SR platform (Samsung's Odyssey 3D, for one), this view
+     shows the preview in real 3D with no glasses. Only the picture turns 3D; the rest of the window stays
+     as it is. Each eye goes to the monitor at full resolution, not squeezed into half a side-by-side. It is
+     also in Full Preview, and in the Depth Map Editor's 3D view.</p>
+  <p>It works differently from the other views, so a few things are worth knowing.</p>
+  <ul>
+    <li><b>It needs the monitor, and the window on it.</b> With no compatible monitor connected, or with its
+      SR software not running, the view is greyed out in the list, and its tip says so. With the monitor
+      connected but Studio's window on another screen, it is greyed out too: move the window onto the 3D
+      monitor. Full Preview has to open on that monitor as well.</li>
+    <li><b>The 3D lens is the whole monitor's.</b> These monitors switch a lens layer on over the entire
+      screen. While the view is showing, everything else on that monitor (Studio's controls, other windows)
+      is seen through the lens and can look jagged. The lens switches off when you choose another view or
+      leave the page.</li>
+    <li><b>The camera follows your eyes, only while it is live.</b> The monitor's eye-tracking camera keeps
+      the 3D lined up as you move. Studio runs it only while the view is showing and no job is running.
+      Choose another view, or leave the page, and the camera turns off a second later.</li>
+    <li><b>During a job it holds still.</b> While any stage is running a job, nothing in the preview may
+      redraw, so the 3D freezes on its last frame and the camera turns off. The frozen picture is lined up
+      for where you sat when it froze; move and it can ghost until the job ends. It goes live again after
+      the job. If the picture changes or the window moves during a job, the plain picture shows instead
+      until then.</li>
+    <li><b>Where you sit matters.</b> Sit roughly centred, at a normal distance. Far to one side, very
+      close, or moving quickly, the eyes can ghost or swap for a moment while the tracking catches up.</li>
+    <li><b>What full resolution means here.</b> Studio sends each eye at the clip's full size. The monitor
+      itself divides its pixels between your two eyes, so what each eye sees is less sharp than the same
+      monitor in 2D; that is how these monitors work. For the closest look at the pixels, set Preview
+      Scale to 100%. Fit and zoom resize the picture, as they do in 2D.</li>
+    <li><b>Some things stay 2D.</b> Drop-down lists, tips, dialogs and notifications that sit over the
+      picture show normally: the 3D gets a hole where they are. Turning the card over shows the plain
+      picture for a moment.</li>
+    <li><b>It shows what will be saved.</b> Borders and Frame Break are in it, as in the output. The
+      <kbd>X</kbd> eye swap doesn't apply (it would turn the depth inside out on the monitor).
+      Highlight Holes and Highlight Mask are drawn on the right eye only, so one eye sees them; they
+      shimmer, which is expected.</li>
+    <li><b>A little slower than an anaglyph.</b> Two full eyes leave the graphics card instead of one
+      mixed picture, so sliders update a little more slowly than in Dubois. After Studio starts it takes a
+      few seconds to find the monitor; until then the view is greyed out.</li>
+  </ul>
+  <div class="note"><b>For checking, not grading</b><span>Glasses-Free 3D is the closest thing to watching
+     the result, but judge colour and fine detail in 2D, and check the final files on the screen they are
+     made for.</span></div>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="glossary">
+  <h2><span class="num">E</span> Glossary <a class="anchor" href="#glossary">#</a></h2>
+
+  <table class="keys">
+    <tr><td><b>Batch</b></td><td>A stage working through a folder of clips, one after another. Also: how
+      many frames go to the graphics card at once.</td></tr>
+    <tr><td><b>Chapter</b></td><td>A part of the movie with a folder of its own in each stage folder
+      (<a href="part1.html#project">Part 1</a>).</td></tr>
+    <tr><td><b>Chunk</b></td><td>A run of frames worked on together. Inpainting fills a clip one chunk
+      at a time.</td></tr>
+    <tr><td><b>Clip</b></td><td>One shot of the movie, in a file of its own. Scene Cut makes them.</td></tr>
+    <tr><td><b>Convergence</b></td><td>The depth that sits exactly on the screen. Nearer things pop out
+      of it; farther things sit behind it.</td></tr>
+    <tr><td><b>CRF</b></td><td>The quality setting of a video encoder. Lower is better quality and bigger
+      files.</td></tr>
+    <tr><td><b>Depth map</b></td><td>A black-and-white video where brightness is distance: white is near,
+      black is far. DepthCrafter makes them.</td></tr>
+    <tr><td><b>Disparity</b></td><td>How far the two eyes' pictures are shifted apart: the strength of the
+      3D.</td></tr>
+    <tr><td><b>DNxHR</b></td><td>A video format made for editing that keeps the picture visually
+      lossless. Very large files.</td></tr>
+    <tr><td><b>Dual Eye</b></td><td>Building both eyes from your video, the shift split between them,
+      instead of keeping the original as the left eye.</td></tr>
+    <tr><td><b>Finished folder</b></td><td>Where a stage moves a clip once it has used it, so a restart
+      carries on with the clips left (<a href="part1.html#project">Part 1</a>).</td></tr>
+    <tr><td><b>Hole</b></td><td>A gap in the shifted picture where the other eye sees something the
+      original camera didn't. Inpainting fills the holes.</td></tr>
+    <tr><td><b>Inference steps</b></td><td>How many passes an AI model makes over each piece. More is
+      slower and, up to a point, better.</td></tr>
+    <tr><td><b>Inpainting</b></td><td>Filling the holes with picture that fits around them.</td></tr>
+    <tr><td><b>Keyframe</b></td><td>A setting's value at one frame of a clip. After a static keyframe the value
+      holds; into a dynamic one it travels from the keyframe before, along the shape set in the
+      <b>Shaper</b> (a ramp, an ease, an LFO or your own curve).</td></tr>
+    <tr><td><b>Mask</b></td><td>A black-and-white picture marking an area: white is in, black is out.</td></tr>
+    <tr><td><b>Offload</b></td><td>Keeping part of an AI model in the computer's own memory instead of the
+      graphics card's, to fit a smaller card. Slower.</td></tr>
+    <tr><td><b>Put back</b></td><td>Laying an object Erase took out back into the finished 3D, at a depth of its
+      own, in Merging.</td></tr>
+    <tr><td><b>Project folder</b></td><td>One folder per movie or show, with a folder for each stage
+      inside (<a href="part1.html#project">Part 1</a>).</td></tr>
+    <tr><td><b>Rain</b></td><td>Splatting's Rain section: the rain separated from the scene and put back at
+      depths of its own (<a href="part2.html#splat-particles">Part 2</a>).</td></tr>
+    <tr><td><b>ROSE</b></td><td>The AI video model the Depth Map Editor's Erase uses to take an object, and
+      its shadow or reflection, out of a clip.</td></tr>
+    <tr><td><b>SBS</b></td><td>Side-by-side: the left and right eye's pictures next to each other in one
+      frame. <b>Full SBS</b> keeps each at full width; <b>Half SBS</b> squeezes both into one frame's
+      width.</td></tr>
+    <tr><td><b>Seed</b></td><td>The starting point of an AI model's randomness. The same seed and
+      settings give the same result again.</td></tr>
+    <tr><td><b>Shaper</b></td><td>Where you set how a dynamic keyframe's values travel into it: Linear,
+      an ease, an LFO or Custom points.</td></tr>
+    <tr><td><b>Segment</b></td><td>A piece of a long clip that DepthCrafter works on separately, then
+      joins back (<a href="part2.html#dc-segments">Part 2</a>).</td></tr>
+    <tr><td><b>Sidecar</b></td><td>A small <code>.fssidecar</code> file beside a clip, holding that clip's
+      own settings (<a href="part2.html#splat-sidecars">Part 2</a>).</td></tr>
+    <tr><td><b>Splatting</b></td><td>Shifting each pixel by its depth to make the other eye's picture.</td></tr>
+    <tr><td><b>VRAM</b></td><td>The graphics card's own memory. Most of Studio's limits come from it.</td></tr>
+    <tr><td><b>Weights</b></td><td>An AI model's files: what it has learned. They're downloaded
+      separately and go in the <code>weights</code> folder.</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="credits">
+  <h2><span class="num">F</span> Credits <a class="anchor" href="#credits">#</a></h2>
+
+  <p>Studio stands on the work of many people. Thank you to all of them.</p>
+
+  <h3>The research</h3>
+  <ul>
+    <li><b>StereoCrafter</b>: Sijie Zhao, Wenbo Hu, Xiaodong Cun, Yong Zhang, Xiaoyu Li, Zhe Kong,
+      Xiangjun Gao, Muyao Niu and Ying Shan, Tencent AI Lab and ARC Lab, Tencent PCG.
+      <a href="https://stereocrafter.github.io/">stereocrafter.github.io</a></li>
+    <li><b>DepthCrafter</b>, Tencent: the depth maps.
+      <a href="https://github.com/Tencent/DepthCrafter">github.com/Tencent/DepthCrafter</a></li>
+    <li><b>Stable Video Diffusion</b>, Stability AI: the model Inpainting V1 is built on.</li>
+    <li><b>Wan 2.1 VACE</b>: the model Inpainting V2 is built on.</li>
+    <li><b>SAM 3</b>, Meta: the Depth Map Editor's object selection and tracking.
+      <a href="https://github.com/facebookresearch/sam3">github.com/facebookresearch/sam3</a></li>
+    <li><b>TransNetV2</b>, <b>AutoShot</b>
+      (<a href="https://github.com/wentaozhu/AutoShot">wentaozhu/AutoShot</a>) and <b>OmniShotCut</b>
+      (<a href="https://github.com/UVA-Computer-Vision-Lab/OmniShotCut">UVA Computer Vision Lab</a>):
+      Scene Cut's shot detection.</li>
+    <li><b>U²-Net</b>: the small network behind Splatting's Auto-Converge.</li>
+    <li><b>ROSE</b>, Kunbyte AI, built on Alibaba PAI's Wan2.1-Fun: the Depth Map Editor's Erase.
+      <a href="https://github.com/Kunbyte-AI/ROSE">github.com/Kunbyte-AI/ROSE</a></li>
+  </ul>
+
+  <h3>The tools before Studio</h3>
+  <ul>
+    <li><b>enoky</b>: the StereoCrafter GUI suite and installer
+      (<a href="https://github.com/enoky/StereoCrafter">github.com/enoky/StereoCrafter</a>), and
+      SceneCutGUI (<a href="https://github.com/enoky/SceneCutGUI">github.com/enoky/SceneCutGUI</a>),
+      which Scene Cut is ported from.</li>
+    <li><b>Billynom8</b>: DepthCrafter GUI Seg
+      (<a href="https://github.com/Billynom8/DepthCrafter_GUI_Seg">github.com/Billynom8/DepthCrafter_GUI_Seg</a>).</li>
+  </ul>
+
+  <h3>StereoCrafter Studio</h3>
+  <p>Built by <b>subtlewubs</b>.</p>
+
+  <h3>The example footage</h3>
+  <p>Most of the screenshots show frames from <b>Tears of Steel</b>, (CC) Blender Foundation |
+     <a href="https://mango.blender.org">mango.blender.org</a>, used under the
+     <a href="https://creativecommons.org/licenses/by/3.0/">Creative Commons Attribution 3.0</a> licence.
+     The film was cut into short clips and run through Studio for these pages, so what you see has been
+     changed: converted to 3D, its depth edited, and in one clip a man erased.</p>
+
+  <h3>Built with</h3>
+  <p>PyTorch, Qt and PySide6, FFmpeg, Hugging Face Diffusers and Transformers, decord, OpenCV,
+     SageAttention and MMGP. The licences of the code included with Studio are listed in
+     <code>THIRD_PARTY_NOTICES.md</code> in your Studio folder.</p>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="part5.html">‹ Part 5 · Customising</a>
+  <a class="next" href="index.html">Contents ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

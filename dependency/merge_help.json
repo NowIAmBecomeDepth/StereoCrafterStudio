@@ -1,0 +1,43 @@
+{
+    "inpainted_folder": "Folder containing the inpainted videos. The tool will look for files ending in '_inpainted_right_eye.mp4' or '_inpainted_sbs.mp4'.",
+    "original_folder": "Folder containing the original 2D source videos. This is required for dual-splatted inputs to provide the left-eye view.",
+    "mask_folder": "Folder containing the high-resolution splatted files (e.g., '_splatted4.mp4' or '_splatted2.mp4') which contain the mask and warped background.",
+    "output_folder": "Folder where the final merged videos will be saved.",
+
+    "binarize_thresh_(<0=off)": "Converts the grayscale mask to pure black and white before other processing. Values of 0.0 or higher act as the threshold. Set to a negative value (e.g., -0.01) to disable and use the original grayscale mask.",
+    "dilate_kernel": "Expands the white areas of the mask. Useful for covering up thin black lines at the edge of the inpainted region. Set to 0 to disable.",
+    "blur_kernel": "Applies a Gaussian blur to the mask, creating a softer, more feathered blend between the original and inpainted content. Set to 0 to disable.",
+    "shadow_shift": "The number of pixels to shift the 'shadow' to the right in each step of the shadow blur effect. Set to 0 to disable.",
+    "shadow_gamma": "Controls the fade-out curve of the shadow. >1.0 starts slow and fades fast. <1.0 starts fast and fades slow. 1.0 is a linear fade.",
+    "shadow_opacity_start": "The starting opacity of the first shadow 'echo'. A value of 1.0 is fully opaque.",
+    "shadow_opacity_decay": "The amount of opacity to subtract from the shadow at each step. A larger value creates a shorter, faster fade.",
+    "shadow_opacity_min": "The opacity at which the shadow effect will stop generating new echoes.",
+
+    "output_format": "Selects the 3D format for the final video. Full SBS is highest quality. Half SBS is more compatible but lower resolution. Double SBS is a vertically stretched format for some 3D displays. Anaglyph is for Red/Cyan glasses.",
+    "use_gpu": "If checked, mask processing will be performed on the GPU for speed. Uncheck to use the CPU, which is slower but uses very little VRAM.",
+    "pad_to_16_9": "If checked, adds black bars to the top and bottom of the video to force a 16:9 aspect ratio. Useful for non-standard resolutions (e.g., 1920x800) to ensure compatibility with 3D players.",
+    "add_borders": "If checked, applies borders from sidecar files to mask edge artifacts. Uncheck to disable border application for testing.",
+    "resume": "If checked, moves processed files to a 'finished' subfolder after successful encoding and skips them on subsequent runs. Useful for resuming interrupted batch processing.",
+    "enable_color_transfer": "Transfers the color palette from the original left-eye view to the inpainted right-eye view to correct color shifts from the inpainting model.",
+    "batch_chunk_size": "The number of frames to process in memory at one time during batch processing. Lower this value if you run out of RAM on long videos.",
+    "encoding_settings": "Opens a dialog to configure video encoding options including encoder, quality preset, tune, CRF, and NVENC-specific options.",
+
+    "encoding_encoder": "Select encoder mode.\n• Auto: uses NVENC if CUDA/NVENC is available; otherwise CPU (libx264/libx265).\n• NVENC: prefer the GPU encoder. If this machine has no usable NVENC it falls back to CPU rather than failing the export.\n• Force CPU: always uses CPU encoding.\nQuality (CRF/QP) is still controlled by the CRF field.",
+    "encoding_quality": "Controls encoder speed/efficiency preset.\n• CPU (libx264/libx265): maps to ultrafast → veryslow.\n• NVENC (h264_nvenc/hevc_nvenc): maps Fastest→p1 ... Slowest→p7.\nSlower presets usually improve compression efficiency at the same CRF/QP, but take longer.\nDefault is Medium.",
+    "encoding_tune": "Optional tune for CPU encoding (libx264/libx265). None means no tune flag.\nCommon tunes:\n• Film / Still Image (libx264 only)\n• Grain / Animation / PSNR / SSIM\n• Fast Decode / Zero Latency\nNote: Tune is ignored when NVENC is used.",
+    "output_crf": "Constant Rate Factor (CRF) for video quality control. Lower values = higher quality, larger file size.\n• 18-23: Good quality range for x264\n• 23-28: Good quality range for x265\n• 15-20: Good quality range for NVENC",
+    "encoding_nvenc_lookahead_enabled": "Enable lookahead for NVENC. Allows the encoder to look ahead to improve compression efficiency. Useful for slower moving content but adds encoding latency.",
+    "encoding_nvenc_lookahead": "Number of frames to look ahead when lookahead is enabled. Higher values improve compression but increase encoding time and memory usage.",
+    "encoding_nvenc_spatial_aq": "Enable Spatial Adaptive Quantization for NVENC. Allows the encoder to allocate more bits to complex areas within each frame.",
+    "encoding_nvenc_temporal_aq": "Enable Temporal Adaptive Quantization for NVENC. Allows the encoder to allocate more bits to frames that need it based on previous frames.",
+    "encoding_nvenc_aq_strength": "Strength of Adaptive Quantization (1-15). Higher values allocate more bits to complex areas.",
+
+    "start_blending": "Starts the batch process to merge all found videos using the current settings.",
+    "stop_blending": "Stops the batch process after the current video chunk is finished.",
+    "process_current_clip": "Processes only the currently selected clip in the preview. Useful for testing settings on a single video without processing the entire batch.",
+    "move_to_finish": "Moves the current clip's source files (inpainted, splatted, original, sidecars) to a 'finished' subfolder and advances to the next clip. Does not re-scan the folder, making it fast for large clip lists.",
+    "processing_clip_count": "Which clip of the batch is being merged, and how many there are in total. Stays put for the whole clip, unlike the status line underneath, which is rewritten with per-frame progress as soon as the merge starts.",
+    "open_output_folder": "Open the output folder in Explorer. Handy for checking what has been written so far without leaving the app.",
+    "current_total_frames": "How many frames the clip has. While a batch is running this is the clip being merged, not the one loaded in the previewer.",
+    "reset_mask_parameters": "Put the eight sliders above back to their defaults: Binarize 0.30, Dilate 3, Blur 5, Shadow Shift 5, Gamma 1.30, Opacity Start 0.87, Decay 0.08, Min 0.14. Affects only this panel; nothing else in the Options or Encoding panels is touched."
+}

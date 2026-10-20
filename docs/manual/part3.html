@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Depth Map Editor · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Part 3 of 5</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html" class="current"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Part 3</div>
+  <h1>The Depth Map Editor</h1>
+  <p>Fix a depth map by hand, object by object, before Splatting uses it. An AI called SAM 3 picks
+     out the object for you and follows it through the clip; you decide how its depth should change.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="when">
+  <h2><span class="num">11</span> When to fix a depth map <a class="anchor" href="#when">#</a></h2>
+
+  <p>DepthCrafter gets most shots right, but sometimes an object comes out wrong: a sign that should be
+     flat bulges, a person merges into the wall behind them, a road that should run into the distance
+     is flat, or something is missing from the depth altogether. In 3D that object then sits at the
+     wrong depth, or bends.</p>
+  <p>You'll usually notice it in Splatting's preview. From there, the round trip is:</p>
+  <ol>
+    <li>In Splatting, with the clip in the preview, press <span class="btn">Edit Depth Map</span>.
+      The editor opens on the <span class="btn">Extra</span> tab with that clip and its depth map loaded.</li>
+    <li>Select the object, track it through the clip, and change its depth (sections 13 and 14).</li>
+    <li>Press <span class="btn">Render Edited Depth</span>. Studio asks whether to use it in Splatting:
+      choose <span class="btn">Use in Splatting</span>.</li>
+    <li>You're back in Splatting, on the same clip, now reading the edited map. Its clip in Upcoming Jobs
+      gets a pencil badge.</li>
+  </ol>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/20_de_page.webp" alt="The Depth Map Editor with a clip loaded">
+      <span class="marker" style="left:1%;top:12.6%">1</span>
+      <span class="marker" style="left:1%;top:22.6%">2</span>
+      <span class="marker" style="left:1%;top:28.2%">3</span>
+      <span class="marker" style="left:1%;top:93%">4</span>
+      <span class="marker" style="left:64.5%;top:22.4%">5</span>
+      <span class="marker" style="left:64.5%;top:50.5%">6</span>
+    </div></div>
+    <figcaption><b>1</b> Clip · <b>2</b> View and Tool · <b>3</b> the picture · <b>4</b> frames ·
+      <b>5</b> Layers and tracking · <b>6</b> the pages: Segment, Layer, Gradient, Global, Output.</figcaption>
+  </figure>
+
+  <h3>Opening a clip yourself</h3>
+  <p>In the <b>Clip</b> panel, pick the <span class="set">Source video</span> (the colour clip) and the
+     <span class="set">Depth map</span> (filled in for you when <code>&lt;clip&gt;_depth.mp4</code> is
+     found beside it), then press <span class="btn">Load Clip</span>.
+     <span class="btn">Pick From Last DepthCrafter Job</span> lists the clips DepthCrafter made last.
+     If you've edited a clip before, your edit opens again with it.</p>
+
+  <h3>Looking at the clip</h3>
+  <ul>
+    <li><span class="set">View</span>: <b>RGB</b> (the colour clip), <b>Depth</b> (the original map),
+      <b>Edited</b> (the map with your changes) and <b>3D</b> (section 15).</li>
+    <li><span class="set">Masks</span> tints each object you've selected in its layer's colour;
+      <span class="set">Outline only</span> draws just its edge. <span class="set">Colour depth</span> shows
+      depth in colour instead of grey, where small steps are much easier to see; it uses the map's full 10 bits, so
+      even one level of difference changes the colour. <span class="set">Dither</span> (on by default) shows the
+      grey in the same detail: the map has about 900 shades but the screen only 256, so a gentle slope like a wall
+      or floor would show as flat bands; a faint fixed pattern brings back the shades in between. Only the picture
+      changes: the rendered map is always the full 10 bits.
+      <span class="set">RGB/D</span> (RGB over depth) lays the colour clip over the depth, to check that edges
+      line up. <span class="set">Specks</span> tints the bright specks DepthCrafter leaves on the left edges of
+      things -- see <a href="#despeck">Taking out left-edge specks</a>, below.</li>
+    <li>Step through frames with the slider, the <span class="btn">&lt;</span>
+      <span class="btn">&gt;</span> buttons, or the arrow keys.</li>
+    <li>Zoom in with the mouse wheel, about the point under the pointer, as in Splatting and Merging;
+      drag with the middle button to move around. The <span class="set">Zoom</span> box after the frame counter
+      picks a size, or <span class="set">Fit</span> for the whole frame again. In the 3D view, which takes no
+      clicks, the left button drags too and a double-click zooms in, or back to Fit.</li>
+  </ul>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/21_de_depth.webp" alt="The depth map in colour"></div></div>
+    <figcaption>The same frame as <b>Depth</b>, with <span class="set">Colour depth</span> on.</figcaption>
+  </figure>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="sam3">
+  <h2><span class="num">12</span> Setting up SAM 3 <a class="anchor" href="#sam3">#</a></h2>
+
+  <p>SAM 3 is the AI that finds and follows objects. It isn't installed with Studio, because its model
+     file is large and its makers ask you to request access first. Set it up once, from the
+     <b>Segment</b> page:</p>
+  <ol>
+    <li><b>Packages.</b> Press <span class="btn">Install Packages</span>. It shows what it will add
+      before doing anything, and never removes anything.</li>
+    <li><b>Access.</b> SAM 3's model is <i>gated</i>: request access on its Hugging Face page,
+      <code>huggingface.co/facebook/sam3</code>, then sign in on this computer by running
+      <code>hf auth login</code> in a terminal.</li>
+    <li><b>The model.</b> Press <span class="btn">Download Weights</span>. About 3.4 GB lands in
+      <code>weights/SAM3</code>.</li>
+  </ol>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/24_de_sam_panel.webp" alt="The Segment page before SAM 3 is set up"></div></div>
+    <figcaption>Before SAM 3 is set up, the Segment page opens with its <b>SAM 3</b> panel: what's still needed, and
+      <span class="btn">Install Packages</span> / <span class="btn">Download Weights</span>. Here the packages
+      are in and only the weights are missing. Once both are done the panel goes away.</figcaption>
+  </figure>
+
+  <h3>Graphics memory</h3>
+  <ul>
+    <li>SAM 3 needs about <b>4 GB</b> of graphics memory. It loads on your first click and stays loaded;
+      <span class="btn">Unload Model</span> frees it straight away, and Studio frees it by itself when
+      another stage starts a job.</li>
+    <li><span class="set">Keep video frames in system RAM</span> saves graphics memory on long clips
+      (each frame otherwise takes about 6 MB on the card), at some cost in speed.</li>
+  </ul>
+  <p>The same three things are in <b>Settings</b> (with the Depth Map Editor showing, under
+     <b>Extra → SAM 3</b>), along with <b>Uninstall SAM 3…</b>. It moves the model file (several GB) to the
+     Recycle Bin, so you can restore it from there; the small packages stay installed. To use SAM 3 again,
+     press <span class="btn">Download Weights</span>.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="masking">
+  <h2><span class="num">13</span> Masking objects <a class="anchor" href="#masking">#</a></h2>
+
+  <p>Every change you make lives in a <b>layer</b>. A layer is one selection (one or more objects, its
+     <b>mask</b>) plus the depth change applied inside it. Layers apply from the bottom of the list up,
+     so a layer sees the changes of the layers below it.</p>
+
+  <h3>Selecting an object</h3>
+  <p>On the <b>Segment</b> page, pick a <span class="set">Tool</span> above the picture:</p>
+  <ul>
+    <li><b>Add</b>: click the object. Click again elsewhere on it to add to the selection;
+      <kbd>Ctrl</kbd>+click starts a second object in the same layer.</li>
+    <li><b>Remove</b>: click an area to cut it out of the mask. Right-click removes with any tool.</li>
+    <li><b>Box</b>: drag a box around the object.</li>
+    <li><b>Find</b>: type what it is, such as <i>person</i>, <i>car</i> or <i>road</i>, and press
+      <span class="btn">Find</span>. SAM 3 selects every one on the frame, and while tracking it also
+      picks up new ones that come into the shot.</li>
+    <li><b>Shape</b>: draw the mask yourself, for a <b>static camera shot</b> -- it holds on every frame and
+      nothing is tracked. See <a href="#shapes">Drawing a mask with Shape</a> below.</li>
+  </ul>
+  <p>Clicking with no layer selected starts a new one; so does <span class="btn">New</span>.
+     <span class="set">Segment on</span> chooses which picture SAM 3 looks at: <b>RGB</b> (the usual, and
+     the only way to catch an object the depth map missed) or <b>Depth</b> (for shapes that are clear in
+     depth but busy in colour).</p>
+  <p>A click that went wrong can come out again: click its dot on the picture to pick it (a yellow ring
+     shows it), <kbd>Shift</kbd>+click to pick more, and press <kbd>Delete</kbd>. SAM 3 works the mask out again
+     from the clicks that are left; delete a frame's last clicks and its mask goes with them. Undo puts them back,
+     and <kbd>Esc</kbd> lets go of the pick. A click on a dot only picks it -- it adds no new click.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/25_de_click.webp" alt="A man selected with three clicks"></div></div>
+    <figcaption>Three clicks with <b>Add</b> (the green dots: face, shirt, jacket) and SAM 3 has the whole person: the
+      mask is tinted over the picture, and <b>Layer 1</b> is in the Layers list, not tracked yet.</figcaption>
+  </figure>
+
+  <h3 id="shapes">Drawing a mask with Shape</h3>
+  <p>Use <b>Shape</b> on <b>static camera shots</b> -- a locked-off camera on a tripod, or one that rides
+     with what it films (a car's interior seen from the dashboard). Anything that holds still on screen there
+     sits in the same place on every frame, so there's nothing to track: you draw its outline once and the
+     layer uses it on <i>every</i> frame. SAM 3 doesn't run at all, so it's instant and never drifts or
+     flickers the way a tracked mask can on something hard to follow -- a window, a wall, a sign, a doorway,
+     a TV screen. If the camera moves (a pan, a push-in, a shake), the shape stays put while the picture moves
+     under it; track those with SAM 3 instead.</p>
+  <p>Pick <b>Shape</b> in the <span class="set">Tool</span> row; a row under it chooses the kind:</p>
+  <ul>
+    <li><b>Points</b>: click each corner of any outline. A line from the last point follows the pointer.
+      Close it by clicking the first point again, double-clicking, or pressing <kbd>Enter</kbd>; it needs three
+      points or more. Right-click or <kbd>Backspace</kbd> takes the last point back, and <kbd>Esc</kbd> drops
+      the shape.</li>
+    <li><b>Rectangle</b> and <b>Ellipse</b>: drag one out.</li>
+  </ul>
+  <p>Hold <kbd>Ctrl</kbd> as you start a shape to <b>cut</b> its area out of the layer instead (it draws red
+     while you place it, yellow when it adds) -- a window frame's centre bar, a hole in a sign. Shapes apply in
+     the order they were drawn, so a cut takes out what was drawn before it. A layer can hold any number of
+     shapes; <span class="btn">Clear Shapes</span> takes them all off it (Undo brings them back, and every shape
+     is its own Undo step). Changing the tool, the kind or the layer drops a shape you've started but not
+     closed.</p>
+  <p>A shape goes on the selected layer when it's a shape layer or still empty. With a tracked layer selected,
+     the shape starts a new layer of its own (<b>Shape 1</b>, <b>Shape 2</b>...), so tracking never wipes a
+     shape and a shape is never tracked. Draw in the 2D views (zoom in with the wheel for a close outline; the
+     middle button pans). From there a shape layer works like any other: Alter, Add or Erase on the
+     <b>Layer</b> page, its edge and depth settings, keyframes, and its frame range if the change should only
+     apply to part of the clip. The shapes are saved with the project as outlines, not pictures, so they stay
+     sharp at any size -- after <span class="btn">Upscale Map</span> and in a render at the source's
+     resolution. For dust or reflections on glass, draw the windows with Shape and use Erase from Clip's
+     <b>Dust</b> or <b>Static</b> (below).</p>
+
+  <h3>Tracking it through the clip</h3>
+  <p>A selection starts on one frame. Press <span class="btn">Start Tracking</span> and SAM 3 follows the
+     layer's objects through every frame, forwards and backwards from where you selected them. The edit
+     only applies to the whole clip once the layer is tracked.</p>
+  <p><span class="btn">Start Here</span>, beside it, tracks from the frame you're on in one direction only, and
+     leaves every other frame's mask as it is. The arrow next to it picks the direction: on over the
+     <b>next</b> frames (this one included), or back over the <b>previous</b> ones. Use it when the start of a
+     shot is already right and only the rest needs tracking again, or the other way round. The thin line
+     under the buttons shows how far tracking has got.</p>
+  <div class="tip"><b>If the mask drifts</b><span>Go to a frame where it's wrong, fix it there with Add or
+     Remove clicks, and track again -- with Start Here, only from that frame on. SAM 3 uses every frame you've
+     corrected, not just the first.</span></div>
+  <p><b>Patches.</b> On a layer that's already tracked, an <b>Add</b> click or a <b>Box</b> outside its mask --
+     a piece the tracking missed -- is tracked on its own and added to the layer's masks. The layer's own
+     tracking, a text search's included, isn't redone around it.</p>
+  <figure class="shot pair">
+    <div class="frame"><div class="canvas"><img src="shots/26_de_track_a.webp" alt="The tracked mask on frame 9"></div>
+      <span class="label">Frame 9</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/26_de_track_b.webp" alt="The tracked mask on frame 91"></div>
+      <span class="label">Frame 91</span></div>
+    <figcaption>After <span class="btn">Start Tracking</span>, the mask clicked on frame 50 follows him through
+      the clip, as he walks over the bridge and the camera pans with him.</figcaption>
+  </figure>
+
+  <h3>Managing layers</h3>
+  <ul>
+    <li><span class="btn">Up</span> and <span class="btn">Down</span> change the order layers apply in;
+      <span class="btn">Delete</span> removes one.</li>
+    <li>On the <b>Layer</b> page, <b>On</b> switches a layer's edit off without losing it, and
+      <b>Name</b> labels it.</li>
+    <li><span class="btn">Clear Layer Prompts</span> forgets a layer's clicks, boxes and text and its mask,
+      but keeps its depth settings.</li>
+    <li><b>Undo</b> and <b>Redo</b>, the two arrows after the frame counter (or <kbd>Ctrl</kbd>+<kbd>Z</kbd> and
+      <kbd>Ctrl</kbd>+<kbd>Y</kbd>), step back and forth through your edits: clicks and boxes, tracking, new and
+      deleted layers, every dial, keyframes, gradients and the whole-frame settings. Hover over an arrow to see which
+      edit it will undo or redo. A whole drag of a dial counts as one step, and so does typing a layer's name. They
+      wait while a job such as tracking is running, and <span class="btn">Load Clip</span> or
+      <span class="btn">Upscale Map</span> starts the history afresh. While you're typing in a box,
+      <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes the typing instead.</li>
+  </ul>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="changing">
+  <h2><span class="num">14</span> Changing depth inside a mask <a class="anchor" href="#changing">#</a></h2>
+
+  <p>With a layer selected, the <b>Layer</b> page sets what happens to the depth inside its mask. Watch the
+     <b>Edited</b> view (or <b>3D</b>) as you go.</p>
+  <div class="note"><b>Dials and pixels</b><span>Every setting is a dial: drag it, scroll on it, or use
+     the arrow keys, and right-click or double-click to reset it. <b>Top</b>, <b>Bottom</b>, <b>Left</b> and <b>Right edge</b>,
+     <b>Grow</b>, <b>Feather</b> and <b>Smooth</b> count pixels of your <b>video</b>, the same pixels
+     Splatting's Dilate settings use, and move in <b>half-pixel</b> steps. (The depth map is usually
+     smaller than the video; Studio works out the difference for you.)</span></div>
+
+  <h3>Mask Edge</h3>
+  <ul>
+    <li><span class="set">Edge snap</span>: pulls the mask's edge onto the depth map's own edges, so the
+      change lands exactly where the depth changes.</li>
+    <li><span class="set">Grow</span>: widens (+) or narrows (−) the area the change applies to, to cover a
+      halo of wrong depth or keep off the background. <span class="set">Feather</span> fades the change in at
+      the edge; <span class="set">Fill holes in the mask</span> fills gaps SAM 3 left, such as between an arm
+      and a body.</li>
+    <li><span class="set">Close gaps</span>: seals tears and notches up to about twice this wide where they reach
+      the mask's edge -- gaps Fill holes can't close, since it only fills holes the mask surrounds. The outline
+      elsewhere stays where it is.</li>
+    <li><span class="set">Steady</span>: evens out a tracked mask over this many frames either side. A pixel
+      stays in the mask when at least half the frames around it have it, so an outline that SAM 3 draws a little
+      differently every frame -- the foot of a post with no strong edge to hold on to -- stops shimmering in 3D.
+      Best on a locked-off shot or a slow object; on fast movement keep it low, or the mask trails a little.</li>
+  </ul>
+
+  <h3>Depth Inside the Mask</h3>
+  <p>First choose what the mask is for, with the <b>Mask</b> switch at the top:</p>
+  <ul>
+    <li><b>Alter</b> (the usual): the mask picks out an object, and the settings below change the depth that's
+      already there.</li>
+    <li><b>Add</b>: the mask <i>is</i> the object. Use it when the depth map missed something, or made it a blob,
+      like a mannequin that came out as a few polygons. Inside the mask, the depth is replaced by
+      <span class="set">Depth</span>; <span class="btn">Sample</span> takes it from the object itself, the nearest
+      part of what the depth map has there. <span class="set">Push / pull</span> and the gradient still work on
+      top, to give the shape some roundness. Edge snap is off in Add, since the mask's outline is the point;
+      segment on the <b>RGB</b> so the outline is the real one. The rest of Alter's settings work in Add too:
+      <span class="set">Top edge</span>, <span class="set">Bottom edge</span>, <span class="set">Left edge</span>
+      and <span class="set">Right edge</span> move that edge of the shape, and <span class="set">Smooth</span>,
+      <span class="set">Contrast</span> and <span class="set">Flatten</span> shape a gradient's depth (a shape
+      without one is flat, so they have nothing to change).</li>
+    <li><b>Erase</b>: the object is taken out. Its depth is filled from the depth around it, and
+      <span class="btn">Erase from Clip</span> takes it out of the video itself -- see
+      <a href="#erasing">Erasing an object</a>, below.</li>
+  </ul>
+  <p>In Alter, the settings are:</p>
+  <ul>
+    <li><span class="set">Despeck</span> (with its <span class="set">Strength</span>): the bright specks
+      DepthCrafter leaves just inside the left edges in the mask come down to the object's own depth -- see
+      <a href="#despeck">Taking out left-edge specks</a>, below. Off until you turn it on.</li>
+    <li><span class="set">Brightness</span>: moves the object nearer (+) or further (−).</li>
+    <li><span class="set">Contrast</span>: stretches or squashes the depth differences inside the object.
+      0× makes it perfectly flat.</li>
+    <li><span class="set">Flatten</span>: pulls the object toward one depth without moving it. Good for
+      screens, signs and walls.</li>
+    <li><span class="set">Smooth</span>: blurs the depth inside the object only, removing noise without
+      softening its edge.</li>
+    <li><span class="set">Opacity</span>: how strongly the whole change applies.</li>
+    <li><span class="set">Top edge</span>, <span class="set">Bottom edge</span>, <span class="set">Left edge</span>
+      and <span class="set">Right edge</span> move only that edge of the object's depth; the opposite edge stays
+      put. Negative pulls the edge in (the depth behind shows there), positive pushes it out. A negative Top edge
+      fixes, for example, a beam that Splatting's Dilate Y bent upward; Left and Right do the same sideways, for
+      depth that spills past an object on one side.</li>
+  </ul>
+
+  <h3>Example: vertical warping</h3>
+  <p>Splatting only ever shifts pixels sideways, but its <span class="set">Dilate Y</span> spreads a near
+     object's depth up and down into whatever is behind it. Here the railing's depth has spread into the
+     wall, so the wall's slats shift with the railing and <b>bend around it</b>. The fix is in the depth
+     map: select the railing, track it, and pull its depth edges back in with a negative
+     <span class="set">Top edge</span> and <span class="set">Bottom edge</span>, so the wall keeps its own
+     depth. The slats then come out straight. In a static shot, where the camera and the railing stay put,
+     draw the railing with the <b>Shape</b> tool instead (<a href="#shapes">Drawing a mask with Shape</a>):
+     one mask covers the whole clip, with no SAM 3 and nothing to track.</p>
+  <figure class="shot pair">
+    <div class="frame"><div class="canvas"><img src="shots/22_warp_before.webp" alt="Before: the wall's slats bend around the railing"></div>
+      <span class="label">Before</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/22_warp_after.webp" alt="After: the slats are straight"></div>
+      <span class="label">After</span></div>
+    <figcaption>The same frame of the right eye, before and after fixing the railing's depth.</figcaption>
+  </figure>
+
+  <h3>Frames</h3>
+  <p>Limit a layer to part of the clip: <span class="btn">In</span> starts it at the current frame,
+     <span class="btn">Out</span> ends it there, <span class="btn">All</span> uses every frame.</p>
+  <h3>Keyframes</h3>
+  <p>A layer's settings can change over the clip, as in Splatting. On a frame, set the layer's sliders and press
+     <kbd>S</kbd> for a <b>static</b> key (the values hold from here until the next key) or
+     <kbd>D</kbd> for a <b>dynamic</b> key (the values slide smoothly to these from the key before) --
+     a mannequin's depth that comes nearer as the camera passes it, say. The keys show on the frame slider, blue
+     static and orange dynamic, and the sliders follow them as you scrub. On a key, moving a slider changes that
+     key; between keys, a change isn't kept until you add a key. <span class="btn">‹</span> and
+     <span class="btn">›</span> jump between keys, <span class="btn">Delete</span> removes the one on this frame and
+     <span class="btn">Clear</span> removes them all. The number settings are keyed (Depth, Push / pull, Contrast,
+     Flatten, Smooth, the edge moves, Grow, Edge snap, Feather, Opacity and the gradient's ends, curve and detail);
+     the choices -- Alter / Add / Erase, Fill holes, the gradient's shape -- and the frame range stay the layer's
+     own. Keys are saved with the project.</p>
+  <p>The <span class="btn">∿</span> button beside the key buttons opens the <b>Shaper</b> for the dynamic key the
+     playhead is heading for: how the values travel into it -- a steady ramp, an ease, an LFO swinging between the
+     two keys' looks, or your own points and bends. It works as in Splatting
+     (<a href="part2.html#splat-fx">Part 2, 8d</a>).</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/27_de_layer.webp" alt="The Layer page with Push / pull at +30%"></div></div>
+    <figcaption>The Layer page with <span class="set">Push / pull</span> at +30%, masks hidden: in the <b>Edited</b> view
+      he is lighter than the map around him, so nearer.</figcaption>
+  </figure>
+
+  <h3>Gradients, for things that recede</h3>
+  <p>A road, a floor, a long wall or a table seen at an angle should run from near to far, but depth
+     models often flatten them. On the <b>Gradient</b> page, tick <span class="set">Paint a depth gradient
+     inside the mask</span>, pick the <b>Gradient</b> tool, and drag on the picture from the object's
+     <b>near</b> end to its <b>far</b> end.</p>
+  <ul>
+    <li><span class="set">Shape</span>: <b>Linear</b> along your line, or <b>Radial</b> outward from its near
+      end, for round objects.</li>
+    <li><span class="set">Blend</span>: <b>Replace</b> makes the ramp the new depth; <b>Only nearer</b> and
+      <b>Only further</b> can only move pixels one way; <b>Add</b> tilts the existing depth.</li>
+    <li><span class="set">Near</span>, <span class="set">Far</span> and <span class="set">Curve</span> set the
+      ramp; <span class="set">Detail</span> keeps some of the object's own surface on top of it.
+      <span class="btn">Sample From Object</span> fills Near and Far from the object itself, a good start.</li>
+    <li><span class="set">Follow the object as it moves</span> pins the ramp to the object, so it moves and
+      scales with it.</li>
+  </ul>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/28_de_gradient.webp" alt="A gradient drawn along a cobbled street"></div></div>
+    <figcaption>A cobbled street clicked as its own layer, then a gradient dragged with the <b>Gradient</b>
+      tool from <b>N</b> (near, at the bottom) to <b>F</b> (far, where the street meets the railings). The <b>Edited</b> view
+      runs from light to dark along it; <span class="set">Outline only</span> shows the mask's edge.</figcaption>
+  </figure>
+
+  <h3 id="despeck">Taking out left-edge specks</h3>
+  <p>Now and then DepthCrafter leaves a bright speck, or a soft bright glow, just inside the <b>left</b> edge of
+     an object -- the tip of a horn, a shoulder, the corner of a chair -- most often when nothing nearer is in
+     front of it. In 3D it pokes out of the object into the background as a spike. To take them out:</p>
+  <ul>
+    <li>Turn on <span class="set">Specks</span> beside the View. Every speck on the frame is tinted by how far
+      it would come down: <b>cyan</b> where no layer with Despeck on covers it yet, <b>orange</b> where one
+      does.</li>
+    <li>Make a layer for the object with the cyan speck (or use the one you have), track it, and in Alter turn
+      on <span class="set">Despeck</span>. The speck turns orange and, in the <b>Edited</b> view, comes down to
+      the object's depth. Step through the clip to check it holds. It goes first, so the rest of Alter --
+      Brightness, Contrast and so on -- works on the cleaned depth.</li>
+    <li>There is no level to pick: on every frame, each speck is lowered to the depth of the object just beside
+      it, so a glow that fades in and out, or an object that moves, needs nothing more than the tracked
+      mask. Only the left edges inside the mask change.</li>
+    <li><span class="set">Strength</span> is how far they come down (100% all the way). A thing whose left side
+      really is nearer, like a face turned three-quarters, can lose a little there -- lower Strength, or keep
+      the layer to the frames that need it. Turn <span class="set">Despeck</span> off and on again to compare;
+      off, its specks show cyan under Specks.</li>
+    <li>A small thing with a white dot inside a grey body -- a floating particle -- has nothing beside it for
+      Despeck to go by. Mask the particle snugly and turn on <span class="set">Level to edge</span>: anything in
+      the mask brighter than the grey around its outer edge comes down to that grey, on every frame. A particle
+      that really is near is white all the way to its edge, so it stays as it is. Strength works on it too.</li>
+  </ul>
+  <figure class="shot pair wide">
+    <div class="frame"><div class="canvas"><img src="shots/33_despeck_before.webp" alt="A bright speck at a figure's left edge"></div>
+      <span class="label">Before</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/33_despeck_after.webp" alt="The speck gone"></div>
+      <span class="label">After</span></div>
+    <figcaption>A speck DepthCrafter left just inside a figure's left edge (the arrow): a bright patch, nearer than the figure itself, that would poke out of it in 3D. After Despeck it is down at the figure's own depth, and the rest of the figure is as it was.</figcaption>
+  </figure>
+
+  <h3 id="erasing">Erasing an object</h3>
+  <p>Some things are better out of the shot than at the wrong depth: a sign, a pole, a logo, a mark on the
+     lens, or reflections on glass. Make a layer for them, set its <b>Mask</b> switch to <b>Erase</b>, and
+     track it through the clip. In the depth map, the object's depth is then filled from the depth around it.
+     To take it out of the <b>video</b> as well, use the Erase panel on the <b>Layer</b> page:</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/34_de_erase.webp" alt="The Depth Map Editor with an Erase layer and the Erase panel"></div></div>
+    <figcaption>A man tracked in one layer, its <b>Mask</b> switch on <b>Erase</b>. The Erase panel is under it: <span class="btn">Erase from Clip</span>, the Method (ROSE), and ROSE's settings, with Pre-fill on <b>Auto</b> and <span class="set">Refine at full size</span> ticked.</figcaption>
+  </figure>
+  <ul>
+    <li><span class="set">Method</span>: <b>ROSE</b> takes an object out, along with its shadow, reflection or
+      glow, and fills its place with an AI video model. <b>Static</b> takes off reflections that hold still on
+      glass in a locked-off shot -- a TV screen or a shop window, where the camera and the lights don't move but
+      what's seen through the glass does. Static needs no model and no graphics card, and takes seconds.
+      <b>Dust</b> takes dust and specks off glass the camera rides with -- a windshield seen from inside a car --
+      where they hold still on screen while the world moves behind. Each frame's own dust comes off, however the
+      light on it changes, and Merging's Put Back lays it back on the glass (<b>Add</b>, <b>Glass Plane</b>).
+      Draw the windows with the <b>Shape</b> tool; <span class="set">Size px</span> is the widest speck taken
+      (9 for a 1920-wide clip). It reads the clip twice and uses the graphics card briefly.
+      With Dust or Static the Erase layers leave the depth map as it is -- the glass is seen through, so the
+      depth behind it stays; only ROSE fills the depth where its object was.</li>
+    <li><span class="btn">Erase from Clip</span> takes every enabled Erase layer's object out of the clip. Only
+      the frames with something to erase are processed, and only the area inside the mask changes; every other
+      pixel stays the original. The clip is replaced where it is, so Splatting and DepthCrafter use the erased
+      one; the original and the erase mask are kept in <code>edit_history</code> beside it. With ROSE it's slow,
+      minutes per 81 frames; <span class="btn">Stop</span> ends it.</li>
+    <li>ROSE's settings: <span class="set">Steps</span> (fewer is faster and softer; 50 is ROSE's own, 20 to 30
+      is enough to judge a mask), <span class="set">Seed</span> (another seed gives another fill to compare),
+      <span class="set">Grow px</span> (how far past the object it repaints -- a little takes its soft edge, more
+      reaches a shadow the mask missed), <span class="set">Feather px</span> (how softly the result blends in),
+      <span class="set">Size</span> (480p is what ROSE was trained at; larger is sharper but slower and needs more
+      memory) and <span class="set">Window</span> (frames per pass: 81 keeps the fill steadiest, shorter needs
+      less memory -- a shorter clip runs at its own length). Static has one, <span class="set">Size px</span>: the
+      widest reflection shape it takes.</li>
+    <li><span class="set">Pre-fill</span>: ROSE normally sees the object under its mask, which is how it takes
+      the object's shadow and reflection along. A big object -- a person filling a close-up -- can come back
+      <i>redrawn</i> instead of removed. Pre-fill blends the object out from around it first, so ROSE invents
+      what's behind it. <b>Auto</b> turns it on when the object covers 10% of the frame or more.</li>
+    <li><span class="set">Refine at full size</span> runs ROSE a second time at the clip's own size, in tiles
+      (3&times;2 at 1080p, only those with something to erase), over the first pass: sharper, with the colour
+      kept from the first pass. It takes about as long again, or longer.</li>
+  </ul>
+  <figure class="shot pair wide">
+    <div class="frame"><div class="canvas"><img src="shots/34_erase_before.webp" alt="A man on the street"></div>
+      <span class="label">Before</span></div>
+    <div class="frame"><div class="canvas"><img src="shots/34_erase_after.webp" alt="The street with the man erased"></div>
+      <span class="label">After</span></div>
+    <figcaption>Erase from Clip on that layer: the man taken out of a 120-frame street shot with ROSE at 720p, 50 steps, Pre-fill on <b>Auto</b> (it stays off: he covers only 9% of the frame) and Refine at full size. ROSE fills in the street behind him from what it sees around him and in the other frames -- the lamp post he walked in front of is its guess too, so check a fill like this in 3D before you use it.</figcaption>
+  </figure>
+  <p><b>Setting up ROSE.</b> ROSE runs in its own environment, in <code>weights/ROSE</code>, because it needs
+     older libraries than Studio. Until it's there, the panel offers <span class="btn">Set Up ROSE</span>,
+     which fetches ROSE and about <b>3.7 GB</b> of model files (it needs git and uv). Static doesn't need it.</p>
+  <p><b>Putting it back at its own depth.</b> Once a clip is erased, <span class="set">Put back</span> lays
+     what came off back into the finished 3D, at a depth of its own, in <a href="part2.html#merging">Merging</a>:</p>
+  <ul>
+    <li><b>Add</b> adds back what erasing took away -- for glass, reflections, rain, smoke: anything seen
+      through. <b>Over</b> lays the original's pixels inside the object's own outline -- for a solid object.</li>
+    <li>The parallax, in <b>%</b> of the picture's width, sets where it sits: 0 is the screen, + in front of it,
+      − behind it.</li>
+    <li><span class="btn">Sample</span> sets the parallax from the depth under the mask on <b>every frame</b>,
+      so it follows the surface as the camera or the object moves. The factor beside it scales that depth:
+      <b>×1.0</b> puts it on the surface (a mark, dirt, rain on the glass); <b>×0.5</b> puts it about twice as
+      far, where a mirror image sits (a reflection in a screen or window). Press Sample again after changing
+      it. Typing a parallax uses that one on every frame instead.</li>
+    <li>Erasing keeps the clip's depth map as it was -- the object in it -- so Merging's Put Back can use
+      <b>Depth Map</b>: the object at its own depth, pixel by pixel. Run DepthCrafter on the erased clip as
+      usual afterwards; the kept copy is in the clip's <b>edit_history</b> folder.</li>
+  </ul>
+
+  <h3>The whole frame</h3>
+  <p>The <b>Global</b> page changes the entire depth map before any layer: <span class="set">Invert</span>
+     (for maps where dark means near), <span class="set">Levels</span>, <span class="set">Gamma</span>,
+     <span class="set">Contrast</span> and <span class="set">Brightness</span>.
+     <span class="set">Despeck the whole frame</span> (with its <span class="set">Strength</span>) is Alter's
+     <a href="#despeck">Despeck</a> on every left edge in the frame, no layer needed; it goes first, before
+     Invert and the rest. Check the whole shot with <span class="set">Specks</span> on: something whose left side
+     really is nearer can lose a little -- lower Strength, or use Despeck in a layer for just that object.
+     Its dials: <span class="set">Threshold</span> (how far a spot must stand above its object to be taken --
+     each spot judged whole), <span class="set">Reach</span> (how far in from an edge it works),
+     <span class="set">Edge</span> (how sharp a drop counts as an edge -- raise it to leave the steps inside an
+     object alone), and <span class="set">Left</span> / <span class="set">Right</span> /
+     <span class="set">Top</span> / <span class="set">Bottom</span>, the box it works in (drawn on the picture
+     while this page is open): keep it to where the specks are, away from things that are fine.
+     <span class="btn">Reset Whole Frame</span> undoes them.</p>
+  <p><span class="set">Local Match (locked-off shots)</span> is for a shot where the camera doesn't move but
+     DepthCrafter changed its mind part-way about how far one part of it is -- a hedge grey at the start and
+     black at the end, which slowly pushes in or out in 3D. Scrub to a frame that looks the way the whole shot
+     should, press <span class="btn">Use This Frame</span>, and every frame's depth is matched to it area by
+     area, its fine detail kept. Whatever moves is left as it is -- outlines that shifted get no glow, and a
+     frame where something comes right up to the lens is skipped -- and <span class="set">Strength</span>
+     below 100% only lessens the drift. It goes first of all. Don't use it on pans, dollies or zooms: there
+     everything changes, and it would drag the picture back toward the frame you picked.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="rendering">
+  <h2><span class="num">15</span> Rendering and edit history <a class="anchor" href="#rendering">#</a></h2>
+
+  <h3>Checking it in 3D first</h3>
+  <p>Before you render, switch <span class="set">View</span> to <b>3D</b>. It shows the edited depth map
+     through Splatting's own preview, with the clip's own settings, sidecar and effects, exactly as
+     Splatting will make it. Choose <b>Anaglyph</b> for red/cyan glasses, or <b>Right Eye + Holes</b> to
+     see the gaps your change opens. With a glasses-free 3D monitor connected (see Splatting's
+     preview), <b>Glasses-Free 3D</b> shows the picture in 3D on it. A clip that isn't in Splatting's folders
+     -- a single edit, or a depth map from another program -- is shown too: with Splatting's settings as they are
+     on its page (or the clip's sidecar beside the map, if it has one). Splatting goes back to its own clips,
+     where it was, when you open it again.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/29_de_3d.webp" alt="The 3D view, Anaglyph"></div></div>
+    <figcaption>The <b>3D</b> view, <b>Anaglyph</b>: the frame through Splatting's own preview with the edit in, before
+      anything is rendered. Red/cyan glasses show him nearer than the railings and houses behind him.</figcaption>
+  </figure>
+
+  <h3>Rendering</h3>
+  <p>On the <b>Output</b> page, press <span class="btn">Render Edited Depth</span>. The new map is saved in
+     exactly the same format DepthCrafter uses, so every pixel your layers didn't touch stays exactly as
+     it was. <span class="btn">Save Project</span> saves your layers without rendering; rendering saves
+     them too, and they reopen with the clip next time.</p>
+  <p><span class="set">Render at source resolution</span> (on by default) writes the edited map at the source
+     video's size, 1920 wide for a 1080p clip, instead of the depth map's. RGB layers then use SAM 3's full-size
+     masks, so an object's real outline reaches Splatting at full detail, the way Detect Text's masks do, instead
+     of being squeezed onto the depth map's much coarser pixels. The file is bigger and the render takes a little
+     longer; Splatting runs as fast as before. A layer tracked before this option existed has no full-size masks
+     yet: press <span class="btn">Start Tracking</span> once more to make them.</p>
+  <p>The <b>RGB</b> view is shown at up to 720p, finer than the depth map, so you can see what SAM 3 is
+     outlining; with Render at source resolution on, the mask drawn on it is the full-size one Render uses.
+     A clip too long to hold at 720p (over about a thousand frames of 1080p) is shown at the depth map's size
+     instead. The Depth and Edited views stay at the depth map's size.</p>
+  <p><span class="btn">Upscale Map</span> goes one step further and lets you <i>edit</i> at the source's
+     resolution too -- see the next section.</p>
+
+  <h3 id="upscale">Upscale Map: editing at the source's resolution</h3>
+  <p>DepthCrafter makes its depth maps much smaller than the video -- 768x448 is typical, for a 1920x1080 clip. Each
+     pixel of the map then covers about 2.5 x 2.5 pixels of the picture, and a clip opens in the editor at the map's
+     own size. Every edit works in those coarse pixels: a mask's edge can only sit on the map's grid, and Grow,
+     Feather and the edge dials move it in steps of about 2.5 picture pixels at a time. That's fine for big, simple
+     objects. It isn't for thin or detailed ones -- fingers, hair, a railing, a pole, the gap under an arm -- which
+     fall between the map's pixels and come out blocky or smeared into what's behind them.</p>
+  <p><span class="btn">Upscale Map</span>, beside <span class="btn">Load Clip</span>, reads the loaded clip's depth
+     map again, enlarged to the <b>source video's resolution</b> (1920x1080 for a 1080p clip). From then on every edit
+     works in the clip's own pixels:</p>
+  <ul>
+    <li><b>Masks</b> follow the object's real outline: RGB layers take SAM 3's full-size masks, which it already
+      makes from the picture, instead of their copy squeezed onto the map's grid.</li>
+    <li><b>The dials get finer.</b> Grow, Feather and the edge dials step one picture pixel at a time,
+      so you can tighten an edge by a single pixel instead of two or three.</li>
+    <li><b>What you see is what renders.</b> The Depth and Edited views show the map at the size it will be written,
+      so there's no surprise when the render is enlarged afterwards.</li>
+  </ul>
+  <p>Nothing is invented by upscaling: the map is enlarged the same way Splatting enlarges every depth map to the
+     video's size before it splats (smoothly, bilinear), so anything you don't edit splats exactly as it did. What you
+     gain is room to make your edits fine -- the extra resolution is filled by your masks and dials, not by guesswork.</p>
+  <p><b>How to use it:</b></p>
+  <ol>
+    <li>Load the clip with its <b>Source video</b> -- Upscale Map needs it, both for its size and for SAM 3's
+      full-size masks. Without one the button stays greyed.</li>
+    <li>Press <span class="btn">Upscale Map</span>. The status line counts the frames as they're read; the button
+      then reads <b>Map Upscaled</b>, and the status line says the new size and the old one.</li>
+    <li>Layers you already made come along. RGB layers switch to SAM 3's full-size masks; others (Depth layers, a
+      layer tracked before full-size masks existed) are enlarged, and the status line names them -- press
+      <span class="btn">Start Tracking</span> on those once more for SAM 3's full-detail outline. Shapes are drawn
+      again at the new size, so they stay sharp.</li>
+    <li><b>Check the pixel dials of layers made before upscaling.</b> They keep their numbers, but the numbers now
+      count picture pixels instead of map pixels: a Grow of 6 that reached about 15 picture pixels at 768x448
+      now reaches 6. Raise them to taste -- usually it's the chance to set them tighter than you could before.</li>
+    <li>Edit, then <span class="btn">Render Edited Depth</span> as usual. The map is written at the source's
+      size; Splatting runs as fast as before.</li>
+  </ol>
+  <p><b>Use it when</b> the object's outline matters: a person against a busy background, anything thin or
+     see-through, an edge that shows as a stair-step or a halo in Splatting's preview. For a broad depth change
+     (pushing a wall back, the whole frame's gamma) the map's own size is plenty, and quicker.</p>
+  <p><b>What it costs.</b> The whole map is held in memory, two bytes a pixel: about 3 GB for 750 frames of 1080p,
+     against about 0.5 GB at 768x448, and each preview frame takes longer to draw. Up to 6 GB is allowed -- about
+     1,500 frames of 1080p, or about 380 of a 4K clip; a clip longer than that stays at the map's size and the status
+     line says so. Upscaling starts the Undo history afresh (Undo can't go back to the smaller map), and
+     <span class="btn">Load Clip</span> goes back to the map's own size. A clip always opens at the map's size, so
+     press Upscale Map again when you come back to it.</p>
+
+  <h3>Use in Splatting, and the edit history</h3>
+  <p>If you came from Splatting, Studio asks whether to use the render there.
+     <span class="btn">Use in Splatting</span> puts the edited map in place of the original, so
+     Splatting's preview and its batch both read it.</p>
+  <p>Nothing is lost: the map it replaces, the original or an earlier edit, is kept in an
+     <code>edit_history</code> folder beside the depth maps. To go back, edit again from the original
+     or copy it back from there. Multi-Map ignores that folder.</p>
+  <div class="note"><b>Good to know</b><span>Editing a clip that's already been edited starts from its
+     original, so your saved layers are never applied twice.</span></div>
+
+  <h3>When something isn't right</h3>
+  <table class="keys">
+    <tr><td><b>Erase leaves a smear or the object's edge</b></td><td>Raise <span class="set">Grow px</span> so
+      ROSE repaints a little past the object, or try another <span class="set">Seed</span>; check the mask
+      covers the whole object first.</td></tr>
+    <tr><td><b>ROSE runs out of memory</b></td><td>Use a shorter <span class="set">Window</span> or a smaller
+      <span class="set">Size</span>, and close other GPU jobs first.</td></tr>
+    <tr><td><b>The mask drifts off the object</b></td><td>Fix it on a frame where it's wrong, with Add or
+      Remove, and track again.</td></tr>
+    <tr><td><b>A halo of wrong depth around the object</b></td><td>Raise <span class="set">Grow</span> a
+      little, or use <span class="set">Edge snap</span>.</td></tr>
+    <tr><td><b>The change shows a hard line</b></td><td>Raise <span class="set">Feather</span>.</td></tr>
+    <tr><td><b>Holes inside the selection</b></td><td>Tick <span class="set">Fill holes in the
+      mask</span>.</td></tr>
+    <tr><td><b>Out of graphics memory</b></td><td>Tick <span class="set">Keep video frames in system
+      RAM</span>, or <span class="btn">Unload Model</span> when you're done selecting.</td></tr>
+    <tr><td><b>Find doesn't find it</b></td><td>Try another word, or click the object instead.</td></tr>
+  </table>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="part2.html">‹ Part 2 · The pipeline</a>
+  <a class="next" href="part4.html">Part 4 · Running jobs ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

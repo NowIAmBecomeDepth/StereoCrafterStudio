@@ -1,0 +1,177 @@
+{
+  "general_gui_overview": {
+    "title": "GUI Overview",
+    "text": "Welcome to the DepthCrafter GUI!\n\nThis interface allows you to process videos to generate depth maps using the DepthCrafter model. Here's a quick rundown:\n\n- Directories: Specify your input video folder and where the output depth maps should be saved.\n\n- Main Parameters: Control core model settings like guidance, steps, resolution, and seed. 'CPU Offload' helps manage VRAM. 'cuDNN Benchmark' can speed up processing on Nvidia GPUs (requires restart if changed during processing). 'Save Sidecar JSON' creates metadata files for your outputs.\n\n- Frame & Segment Control: Manage how videos are read and processed. 'Window Size' and 'Overlap' are crucial for how the model sees the video, especially in segment mode. 'Process as Segments' is vital for long videos or low VRAM, breaking the video into manageable chunks. 'Target FPS' and 'Max Frames' control the input video length and speed.\n\n- Merged Output Options: If 'Process as Segments' is active, these options control how individual processed segments are combined into a final depth map video/sequence. You can choose output format, normalization methods, dithering (for 8-bit video), and more. 'Keep intermediate NPZ' allows you to retain the raw segment data and their visual outputs.\n\n- Buttons:\n  - Start: Begins processing videos from the input folder.\n  - Cancel: Stops the current processing batch after the current file/segment.\n  - Re-Merge Segments: Allows you to re-combine previously processed segments using different merge settings without re-processing the depth estimation.\n  - Generate Seg Visuals: Creates visual representations (MP4, PNGs, etc.) for already processed segment NPZ files, based on the 'Segment Visual Format' setting.\n\n- Status Bar: Displays current operation status.\n\n- File Menu: Load/Save GUI settings, Reset to defaults, Restore Input Files, Exit.\n\nMouse over any input field or button to see its specific help tooltip!"
+  },
+  "input_dir_or_file": {
+    "text": "Specify the folder containing your input video files or image sequences for batch processing, or select a single video file, image sequence folder, or single image file for individual processing."
+  },
+  "browse_input_folder": {
+    "text": "Click to select a directory for input. If it contains multiple video files or subfolders with image sequences, they will be processed in batch mode. If it is an image sequence itself, it will be processed as a single input."
+  },
+  "browse_single_file": {
+    "text": "Click to select a single video file, a single image file, or an image sequence folder. This activates single-file processing mode."
+  },
+  "output_dir": {
+    "text": "Specify the directory where output depth maps (merged videos, NPZ segments, or single video outputs) will be saved."
+  },
+  "browse_output": {
+    "text": "Click to select the output directory."
+  },
+  "guidance_scale": {
+    "text": "Controls how strongly the generation should adhere to the input image features for depth estimation.\nHigher values mean stricter adherence but can sometimes lead to less natural-looking depth if the model becomes too constrained.\nDefault is often low (e.g., 1.0) for this type of model as it's primarily image-to-depth, not text-to-image guided. Experimentation might be needed for optimal results."
+  },
+  "inference_steps": {
+    "text": "Number of denoising steps during the depth estimation process.\nMore steps can potentially lead to higher quality and more detailed depth maps but will increase processing time.\n5 gives a quick result for testing; 10-15 is recommended for real runs. 25 is the model's limit: more can sometimes improve quality, but too many steps introduce artifacts of their own."
+  },
+  "target_height": {
+    "text": "Set your vertical resolution, must be a multple of 64."
+  },
+  "target_width": {
+    "text": "Set your Horizonat resolution, must be a multple of 64."
+  },
+  "seed": {
+    "text": "Random seed for the generation process. Using the same seed with identical parameters and input should ideally produce the same depth map output.\nSet to -1 for a random seed each time, leading to slight variations in output if other stochastic processes are involved."
+  },
+  "cpu_offload": {
+    "text": "Moves parts of the model (like UNet, VAE) to CPU RAM when not actively used to save VRAM on the GPU.\n- 'model': Offloads the entire main model pipeline when it's idle between certain operations. Can save significant VRAM but introduces latency when moving data back and forth.\n- 'sequential': More fine-grained offloading of components within the model's execution flow. Balances VRAM savings and speed.\n- '': No offloading. Fastest if you have ample VRAM, but may cause out-of-memory errors on VRAM-constrained systems.\nThis option primarily affects the Diffusers pipeline components."
+  },
+  "cudnn_benchmark": {
+    "text": "Enables cuDNN auto-tuner. When enabled, cuDNN will try to find the optimal algorithms for the specific hardware and input sizes at the beginning of processing.\nThis can lead to faster execution after an initial warm-up period, but the warm-up itself can take time. Best for consistent input sizes.\nOnly applicable for Nvidia GPUs. If you change this setting, a full restart of the script might be needed for it to take effect properly for the model initialization."
+  },
+  "save_final_json": {
+    "text": "If checked:\n- For 'Full Video' processing: A .json file with processing metadata will be saved alongside the final output depth video/sequence.\n- For 'Process as Segments' mode: \n    - Individual .json files are saved for each raw segment NPZ *during processing* (if this option is on AND keep_intermediate_npz is on, these might be kept, otherwise they are usually deleted after master_meta is created).\n    - A _master_meta.json is always created in the segment subfolder.\n    - If a final merged output is created, a .json sidecar will be saved for that merged output, summarizing settings and pointing to the master_meta.json."
+  },
+  "window_size": {
+    "text": "This value has a dual role depending on the 'Process as Segments' setting:\n\n- Full Video Mode (Unchecked 'Process as Segments'): Defines the size of the processing window (number of frames) that slides over the video. The model processes the video in these chunks.\n\n- Segment Mode (Checked 'Process as Segments'): Defines the number of output frames in each generated segment NPZ file. This is the target length of each chunk before overlap is considered for processing.\n\nTypically 60-110 frames. Larger values can improve temporal consistency but require more VRAM and processing time per window/segment. Must be larger than 'Overlap'."
+  },
+  "overlap": {
+    "text": "This value also has a dual role:\n\n- Full Video Mode (Unchecked 'Process as Segments'): Number of frames that consecutive processing windows overlap. This helps maintain temporal consistency across window boundaries.\n\n- Segment Mode (Checked 'Process as Segments'): Number of frames that overlap between consecutive segments when they are defined and processed. For example, if Window Size is 100 and Overlap is 20, segment 1 might be frames 0-99, segment 2 might be frames 80-179 internally for processing, leading to an output overlap for smoother merging.\n\nCommon values: 15-30 frames. Should be less than 'Window Size'."
+  },
+  "process_as_segments": {
+    "text": "Check this to process long videos or on systems with limited VRAM.\nWhen enabled, the input video is divided into smaller segments based on 'Window Size' and 'Overlap'. Each segment is processed individually to generate a raw depth data file (NPZ).\nAfter all segments are processed, they can be merged into a single, continuous depth map video or image sequence using the 'Merged Output Options'.\nThis mode creates a subfolder named '[original_basename]_seg' in your output directory to store these intermediate NPZ files and a _master_meta.json file detailing the segments."
+  },
+  "target_fps": {
+    "text": "Desired frames per second for the output depth map. The input video will be sampled (frames possibly skipped or duplicated if necessary, though typically strided/downsampled) to approximate this FPS before processing.\nSet to -1 to use the original video's FPS. If the original FPS is very high, consider reducing it to save processing time."
+  },
+  "process_length": {
+    "text": "Maximum number of frames to process from the input video. This count is applied *after* any 'Target FPS' adjustment.\nFor example, if an input video is 300 frames at 30fps, and Target FPS is 15, the video becomes effectively 150 frames long for processing. If 'Process Max Frames' is set to 100, only the first 100 of these 150 frames will be processed.\nSet to -1 to process all available frames (up to the video's natural end or as limited by segment definitions if 'Process as Segments' is active)."
+  },
+  "keep_npz": {
+    "text": "Only active if 'Process as Segments' is checked.\nIf this option is checked, the individual segment NPZ files (raw depth data) and any generated intermediate visual outputs (like segment MP4s or PNG sequences, based on 'Segment Visual Format') will be kept in the '[basename]_seg' subfolder even after merging is complete.\nIf unchecked (default), this subfolder and its contents are usually deleted after a successful merge to save space, leaving only the final merged output.\nThe 'Min Orig. Vid Frames to Keep NPZ' setting can override this to delete for short videos."
+  },
+  "min_frames_npz": {
+    "text": "Only active if 'Process as Segments' and 'Keep intermediate NPZ files' are both checked.\nThis sets a threshold based on the *original* video's total frame count. If the original video has fewer frames than this number, the intermediate segment folder will be deleted even if 'Keep intermediate NPZ files' is checked.\nSet to 0 or a negative value to always respect the 'Keep intermediate NPZ files' checkbox, regardless of video length."
+  },
+  "segment_visual_format": {
+    "text": "Only active if 'Process as Segments' is checked and 'Keep intermediate NPZ files' is also checked (or visuals are generated manually via button).\nDetermines the format for saving visual representations of each individual processed segment's depth map. These are saved alongside the NPZ files in the segment subfolder.\n\n- 'png_sequence': Saves each frame as a PNG image in a sub-subfolder.\n\n- 'main10_mp4': Saves a playable HDR10(10 bit) MP4 video of the segment's depth map.\n\n- 'mp4': Saves a playable MP4 video of the segment's depth map.\n\n- 'exr_sequence': (If OpenEXR available) Saves each frame as an EXR image (often 32-bit float) in a sub-subfolder. Good for high dynamic range.\n\n- 'exr': (If OpenEXR available) Saves only the first frame of the segment as a single EXR file.\n\n- 'none': No visual representation is saved for segments, only the NPZ data files.\n\nThese visuals are for previewing or debugging individual segments."
+  },
+  "merge_dither": {
+    "text": "For 8-bit maps only (Output Format 'mp4'). A 10-bit map (main10_mp4, the default) has four times the depth steps and doesn't band, so it doesn't need this.\n\nWhen enabled, applies dithering when converting the (often higher bit-depth) depth data to an 8-bit MP4 video. Dithering adds patterned noise to reduce visible banding artifacts that can occur in smooth gradients when color depth is reduced.\n\nHigher values mean stronger dithering noise.\nTypical range: 0.1 to 1.0. Experiment to find a good balance between reducing banding and avoiding excessive noise.\n\nEnable this if you see banding in your merged MP4 outputs."
+  },
+  "merge_dither_strength": {
+    "text": "Strength of the dithering effect when converting to 8-bit MP4. Higher values result in more noticeable dithering (more noise, less banding). Range 0.0 to 1.0."
+  },
+  "merge_gamma": {
+    "text": "When enabled and 'Merged Output Format' is 'mp4'.\n\nApplies gamma adjustment to the depth map values before saving as MP4. This can help adjust the perceived brightness and contrast of the depth map, boosting depth in the background while crushing in the forground.\nUseful if the default MP4 output appears too dark or too washed out.\n\n- Values > 1.0 will generally make mid-tones brighter (pulling midground closer).\n- Values < 1.0 will generally make mid-tones darker (pushing midground away).\nDefault 1.5"
+  },
+  "merge_gamma_value": {
+    "text": "The gamma value to apply if gamma correction is enabled. Values > 1.0 brighten mid-tones, values < 1.0 darken mid-tones."
+  },
+  "merge_percentile_norm": {
+    "text": "Only active if 'Process as Segments' is checked.\n\nWhen merging segments, this option normalizes the depth values based on percentiles across all segments rather than simple min/max. This can help to reduce the impact of extreme outliers (e.g., a few very bright or very dark pixels) on the overall brightness and contrast of the final merged output, leading to a more balanced result.\nIf unchecked, a simpler global min/max normalization across all segments is typically used."
+  },
+  "merge_norm_low_perc": {
+    "text": "Specifies the lower percentile of depth values that will be mapped to black (or the minimum output value) if Percentile Normalization is enabled. Helps ignore extreme dark outliers.\nTypical value: 0.1 to 1.0."
+  },
+  "merge_norm_high_perc": {
+    "text": "Specifies the upper percentile of depth values that will be mapped to white (or the maximum output value) if Percentile Normalization is enabled. Helps ignore extreme bright outliers.\nTypical value: 99.0 to 99.9."
+  },
+  "merge_alignment_method": {
+    "text": "Only active if 'Process as Segments' is checked.\nDetermines the method used to align and blend overlapping regions between consecutive depth segments during merging.\n- 'Shift & Scale': Attempts to globally adjust the brightness (shift) and contrast (scale) of one segment to match the overlapping part of the previous segment. Good for consistent lighting.\n- 'Linear Blend': Performs a simple linear cross-fade (alpha blend) in the overlapping region. Can be smoother but might lose some contrast if segments have very different overall brightness levels.\nExperiment to see which works best for your content."
+  },
+  "merge_output_format": {
+    "text": "Only active if 'Process as Segments' is checked.\nDetermines the file format of the final output after all processed segments are merged together.\n\n- 'mp4': Creates a standard MP4 video file (typically 8-bit).\n\n- 'main10_mp4': Creates a 10-bit SDR HEVC MP4 (Main10, BT.709 limited). 1024 levels instead of 256 across a depth gradient, roughly 6x more accurate than 8-bit at similar size. NVENC at qp 0, falling back to libx265 if unavailable.\n\n- 'png_sequence': Creates a sequence of PNG images, one for each frame, in a new subfolder.\n\n- 'exr_sequence': (If OpenEXR available) Creates a sequence of EXR images (often 32-bit float) in a new subfolder. Best for preserving full depth precision.\n\n- 'exr': (If OpenEXR available) Creates a single multi-channel EXR file containing all frames (if supported by library) or potentially just the first frame if merging to a single EXR is complex/not supported by the merge script for all frames. *Note: The merge script typically outputs EXR sequences, not single multi-frame EXRs.*"
+  },
+  "merge_output_suffix": {
+    "text": "This suffix will be appended to the original video's basename to form the merged output filename (before the extension).\n\nDefault is '_depth'.\nExample: If original is 'my_video.mp4' and suffix is '_custom_depth', merged output might be 'my_video_custom_depth.mp4'."
+  },
+  "remerge_button": {
+    "text": "This button allows you to re-run the segment merging process using existing processed segment data (NPZ files and their _master_meta.json).\nUse this if you have already processed a video in segments and want to try different 'Merged Output Options' (like format, normalization, dithering) without re-calculating the depth for each segment from scratch.\nYou will be prompted to select the '_master_meta.json' file from a previous segmented run, and then specify a new output location/filename for the re-merged result. The current settings in the 'Merged Output Options' frame will be used for this re-merge."
+  },
+  "generate_visuals_button": {
+    "text": "This button allows you to generate or regenerate visual representations (e.g., MP4s, PNG sequences) for individual segments from their raw NPZ data files.\nUse this if:\n- You initially processed segments with 'Segment Visual Format' set to 'none' and now want visuals.\n- You want to change the format of existing segment visuals.\n- Segment visuals were somehow corrupted or deleted.\nYou will be prompted to select the '_master_meta.json' file for the video. The visuals will be generated based on the current 'Segment Visual Format' setting in the 'Merged Output Options' frame and saved into the segment subfolder, potentially overwriting existing visuals of the same type."
+  },
+  "use_local_models_only": {
+    "text": "If checked, the model will only attempt to load files from the local Hugging Face cache and will NOT attempt to connect to the Hugging Face Hub for verification or download. This can significantly speed up startup time if models are already cached locally.\nIf a model is not found in the local cache, an error will occur."
+  },
+  "start_button": {
+    "text": "Click to begin processing videos from the specified input folder/file based on the current settings."
+  },
+  "cancel_button": {
+    "text": "Click to stop the current batch processing. The current video or segment will finish processing before the batch halts."
+  },
+  "current_filename": {
+    "text": "The name of the video or image sequence currently being processed."
+  },
+  "current_resolution": {
+    "text": "The resolution (width x height) that the model is actively processing frames at. If unavailable, the original source resolution is shown."
+  },
+  "current_frames": {
+    "text": "The number of frames in the current job. For segments, this includes segment window/overlap info and the total frames of the original input. For full videos, it shows processed frames and total if limited."
+  },
+  "enable_debug_logging": {
+    "text": "Check to enable verbose debug logging in the console output. This provides much more detailed information about internal processes, which is useful for troubleshooting. Uncheck to revert to standard information-level logging."
+  },
+  "enable_secondary_output": {
+    "text": "If enabled, a second depth map video/sequence will be generated using a robust, global normalization method. This can help stabilize depth appearance by ignoring extreme outliers, preventing flicker caused by objects entering/exiting the scene."
+  },
+  "robust_norm_output_min": {
+    "text": "The minimum value (0-1) that the normalized secondary output depth map will be clamped to. Typically 0.0 (black/far)."
+  },
+  "robust_norm_output_max": {
+    "text": "The maximum value (0-1) that the normalized secondary output depth map will be clamped to. Typically 1.0 (white/close). Lowering this (e.g., to 0.25) can compress the entire scene to a darker visual range, emphasizing relative changes more subtly."
+  },
+  "robust_norm_low_percentile": {
+    "text": "The lower percentile of raw depth values to consider for robust normalization. Depths numerically smaller than this percentile will be mapped to the 'Low' output range. Helps ignore extreme closest outliers (e.g., 0.5 for 0.5%)."
+  },
+  "robust_norm_high_percentile": {
+    "text": "The upper percentile of raw depth values to consider for robust normalization. Depths numerically larger than this percentile will be mapped to the 'High' output range. Helps ignore extreme farthest outliers (e.g., 99.5 for 99.5%). Setting a lower value (e.g., 75.0) can aggressively compress the far background to black."
+  },
+  "robust_output_suffix": {
+    "text": "The suffix added to the filename of the second (robustly normalized) output. E.g., '_clipped_depth' will result in 'video_name_clipped_depth.mp4'."
+  },
+  "stabilize_depth": {
+    "text": "Stabilize Depth Scale.\n\nDepthCrafter normalizes each window independently, so the same object can sit at a slightly different depth from one window to the next. Over a long clip that reads as the whole scene slowly breathing toward or away from the viewer.\n\nWhen enabled, every frame is rescaled onto a common reference frame's depth range, which removes that drift. Leave it off for short clips processed in a single window, where there is no drift to correct."
+  },
+  "stabilize_ref_mode": {
+    "text": "How the reference frame for stabilization is chosen.\n\n'auto' picks the frame with the most robust depth spread, which is usually a frame with clear foreground and background separation and is the right choice almost always.\n\n'manual' lets you name the frame yourself in the field alongside. Useful when the clip opens on a blank wall or a fade, where the automatically chosen frame may not represent the scene well.\n\nDefault: auto."
+  },
+  "stabilize_ref_index": {
+    "text": "Frame number used as the depth reference when Ref is set to 'manual'.\n\nCounts from 0 for the first frame. Values below 0 are clamped to 0. Ignored entirely in 'auto' mode, which is why this field is disabled there.\n\nPick a frame that shows the scene's full depth range -- a wide shot rather than a close-up or a transition.\n\nDefault: 0."
+  },
+  "stabilize_smooth_window": {
+    "text": "Number of frames used to smooth the per-frame scale correction.\n\nThe correction is averaged across this many frames so it changes gradually. Larger values give a steadier result but respond more slowly to genuine depth changes, such as a hard cut within the clip. Smaller values track changes faster at the cost of some residual flicker.\n\nSet to 0 to apply each frame's correction with no smoothing at all.\n\nDefault: 5."
+  },
+  "full_percentile_norm": {
+    "text": "Percentile Output Norm.\n\nBy default the depth range is normalized using the absolute minimum and maximum values found, which means a single bright speckle or a stray dark pixel can compress the entire useful range.\n\nWhen enabled, the low and high percentiles below are used as the range instead, so outliers are clipped rather than allowed to dominate. This generally gives better contrast across the depth map.\n\nApplies to the final output whether the clip was processed as segments or as a full video."
+  },
+  "full_norm_low_perc": {
+    "text": "Lower percentile mapped to black in the output depth map.\n\nAny depth value below this percentile is clipped. 0.1 discards the darkest one tenth of one percent of pixels, which is normally enough to remove isolated outliers without losing real detail. Raise it if the far background still looks washed out.\n\nOnly used when Percentile Output Norm is enabled.\n\nDefault: 0.1."
+  },
+  "full_norm_high_perc": {
+    "text": "Upper percentile mapped to white in the output depth map.\n\nAny depth value above this percentile is clipped. 99.9 discards the brightest one tenth of one percent of pixels. Lower it if a small bright highlight is compressing the rest of the foreground.\n\nOnly used when Percentile Output Norm is enabled.\n\nDefault: 99.9."
+  },
+  "full_norm_auto_top": {
+    "text": "Auto Top: works out the High % for you, for clips where something comes right up to the camera for a moment -- a person walking past the lens, a hand reaching in.\n\nWithout it, that brief close object becomes the brightest thing in the whole clip, so it sets white for every frame and the rest of the scene is squeezed into the dark end of the range: less 3D for the scene the clip is really about.\n\nWith it on, the Low % and High % are measured only on the frames that look like the clip's usual scene. The brief close object then simply clips to white while it passes (it is right at the lens, so white is where it belongs), and the scene keeps its full depth range for the whole clip.\n\nSomething close that stays for most of the clip counts as part of the usual scene and keeps its place in the range. A clip with nothing like that comes out exactly as without Auto Top.\n\nOnly used when Percentile Output Norm is enabled, on full-video jobs (segment jobs use the merge's own settings).\n\nDefault: off."
+  },
+  "output_crf": {
+    "text": "Constant Rate Factor for the encoded output -- the quality/size trade-off.\n\nLower is higher quality and a larger file. Valid range is 0 to 51; values outside it are clamped.\n\nLeave as 'auto' (or blank) to let the chosen Output Format use its own default, which is the right choice unless you have a specific size target. Anything that is not a number is treated as 'auto' rather than failing, so a typo here cannot discard a finished denoising run at the save step.\n\nIgnored by image sequence and EXR formats, which are not CRF-encoded.\n\nDefault: auto."
+  },
+  "output_preset": {
+    "text": "Encoder speed preset for the output video.\n\nSlower presets spend more CPU time looking for compression savings, producing a smaller file at the same CRF. They do not change the visual quality target, only how efficiently it is reached.\n\n'veryslow' is a reasonable default here because encoding time is small next to the denoising pass that produced the frames. Choose a faster preset if you are iterating on settings and want quicker turnaround.\n\nIgnored by image sequence and EXR formats.\n\nDefault: veryslow."
+  },
+  "open_output_folder": {
+    "text": "Opens the Output Folder above in Windows Explorer.\n\nStays clickable while a batch is running, so you can check clips that have already finished without waiting for the rest or stopping the run. If the folder does not exist yet, the nearest existing parent is opened instead."
+  }
+}

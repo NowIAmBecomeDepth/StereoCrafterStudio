@@ -1,0 +1,458 @@
+"""JobStats (audit 2026-09-28, minor): the ring read 100% at the start of
+every Inpainting clip -- chunk 0 of N ("none started") counted as landed --
+and the stats kept reading other stages' progress bars after a job ended."""
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from PySide6.QtCore import QCoreApplication  # noqa: E402
+
+import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
+from studio.job_stats import JobStats  # noqa: E402
+
+from studio.tests._qt import app as _qt_app
+_app = _qt_app()   # a GUI app: the whole suite shares it (tests/_qt.py)
+
+
+class RingTests(unittest.TestCase):
+    def test_a_new_clip_starts_the_ring_at_zero(self):
+        s = JobStats()
+        s.begin("inpainting")
+        s._on_chunk("inpainting", 5, 5, True)          # the last clip's last chunk landed
+        self.assertEqual(s.property("part"), 1.0)
+        s._on_chunk("inpainting", 0, 4, False)         # the next clip: nothing run yet
+        self.assertEqual(s.property("part"), 0.0, "the ring read full before the clip's first step")
+        self.assertEqual(s.property("fraction"), 0.0)
+
+    def test_a_landed_chunk_is_still_full(self):
+        s = JobStats()
+        s.begin("inpainting")
+        s._on_chunk("inpainting", 2, 4, True)
+        self.assertEqual(s.property("part"), 1.0)
+
+    def test_a_second_one_window_clip_starts_again(self):
+        # user, 2026-10-05: clip 40 after clip 39, both "Window 1/1" -- the
+        # bar and ring sat at 100% while clip 40 ran
+        s = JobStats()
+        s.begin("depthcrafter")
+        s._on_bar("Window 1/1: 100%|####| 15/15 [00:43<00:00,  2.88s/it]")
+        self.assertEqual(s.property("fraction"), 1.0)
+        s._on_bar("Window 1/1:   0%|    | 0/15 [00:00<?, ?it/s]")
+        self.assertEqual(s.property("fraction"), 0.0, "the next clip's window read as the last one's")
+        s._on_bar("Window 1/1:  73%|### | 11/15 [00:53<00:20,  5.04s/it]")
+        self.assertAlmostEqual(s.property("fraction"), 11 / 15)
+        self.assertAlmostEqual(s.property("part"), 11 / 15)
+        s._on_bar("Window 1/1:  73%|### | 11/15 [00:53<00:20,  5.04s/it]")    # a redraw changes nothing
+        self.assertAlmostEqual(s.property("fraction"), 11 / 15)
+
+    def test_the_next_clip_loading_is_not_the_last_ones_full_bar(self):
+        """user, 2026-10-15: the clip list's bar for the next clip read 100% -- the clip before's --
+        while it loaded, until its first inference step."""
+        from types import SimpleNamespace
+        from studio.stages.inpainting.controller import InpaintingController
+        s = JobStats()
+        s.begin("inpainting")
+        s._on_chunk("inpainting", 4, 4, True)                    # the clip before: done
+        self.assertEqual(s.property("fraction"), 1.0)
+        ctl = SimpleNamespace(_clip=["a.mp4"] + ["N/A"] * 4, job_stats=s, infoChanged=SimpleNamespace(emit=lambda: None))
+        InpaintingController._on_clip(ctl, ["a.mp4", "1", "2", "3", "4"])     # the same clip's details
+        self.assertEqual(s.property("fraction"), 1.0)
+        InpaintingController._on_clip(ctl, ["b.mp4", "N/A", "N/A", "N/A", "N/A"])   # the next clip, loading
+        self.assertEqual(s.property("fraction"), 0.0)
+
+    def test_depthcrafters_next_clip_too(self):
+        s = JobStats()
+        s.begin("depthcrafter")
+        s._on_bar("Window 3/3: 100%|####| 15/15 [00:43<00:00,  2.88s/it]")
+        self.assertEqual(s.property("fraction"), 1.0)
+        s._on_dc("clip", None)
+        self.assertEqual(s.property("fraction"), 0.0)
+
+
+class EtaTests(unittest.TestCase):
+    """Inpainting's ETA (user, 2026-10-09): the running chunk's steps left x
+    their mean s/it, the previous chunk's start-to-start time for the chunks
+    after it, and the previous clip's render + encode per frame."""
+
+    def setUp(self):
+        self.now = [0.0]
+        self.s = JobStats()
+        self.s._clock = lambda: self.now[0]
+        self.s.begin("inpainting")
+
+    def clip(self, frames, chunks, at):
+        self.now[0] = at
+        s = self.s
+        s._on_frames(frames, 0, -1, -1)
+        s._on_phase("inpaint", 0, 0)
+        s._on_per_chunk(4, 2)                   # 2 tiles x 2 steps
+        s._on_chunk("inpainting", 0, chunks, False)
+
+    def steps(self, rates):
+        for r in rates:                         # tiles of two steps: 1/2, 2/2, 1/2, ...
+            self.k = getattr(self, "k", 0) + 1
+            self.s._on_bar(f"{(self.k - 1) % 2 + 1}/2 [00:01<00:01, {r:.2f}s/it]")
+
+    def eta(self):
+        return self.s.property("eta"), self.s.property("etaPartial")
+
+    def test_two_clips(self):
+        s = self.s
+        self.clip(50, 3, at=0)
+        self.assertEqual(self.eta(), (-1.0, True), "no step yet: unknown")
+        s._on_chunk("inpainting", 1, 3, False)
+        self.steps([2.0])
+        self.assertEqual(self.eta(), (-1.0, True), "a pass's first step carries its setup: still N/A")
+        self.steps([2.0])
+        self.assertAlmostEqual(self.eta()[0], 2 * 2 + 2 * 4 * 2)      # untimed: chunks from steps alone
+        self.steps([2.0, 2.0])
+        s._on_chunk("inpainting", 1, 3, True)
+        self.now[0] = 10                                              # chunk 2 starts 10 s after chunk 1
+        s._on_chunk("inpainting", 2, 3, False)
+        self.assertAlmostEqual(self.eta()[0], (4 * 2 + 2) + 1 * 10, msg="steps + overhead (10 - 8) + a 10 s chunk")
+        self.steps([9.0, 2.0])                                        # the first (9 s) is no sample
+        self.assertAlmostEqual(self.eta()[0], 2 * 2 + 2 + 10)
+        self.steps([2.0, 2.0])
+        self.now[0] = 20
+        s._on_chunk("inpainting", 3, 3, False)                        # the last: its decode is in the tail
+        self.steps([2.0])
+        self.assertAlmostEqual(self.eta()[0], 3 * 2)
+        self.assertTrue(self.eta()[1], "first clip: no render time known yet")
+        self.steps([2.0, 2.0, 2.0])
+        self.now[0] = 28
+        s._on_chunk("inpainting", 3, 3, True)
+        s._on_phase("render", 0, 50)
+        self.assertEqual(self.eta(), (-1.0, True))
+
+        self.clip(100, 2, at=48)
+        s._on_tail(0.44)                        # InpaintingChunks: this size's blend + encode, a frame
+        self.now[0] = 50
+        s._on_chunk("inpainting", 1, 2, False)
+        self.steps([2.0])
+        tail = 0.44 * 100
+        self.assertAlmostEqual(self.eta()[0], 3 * 2 + 2 + 1 * 10 + tail)
+        self.assertFalse(self.eta()[1])
+        self.steps([2.0, 2.0, 2.0])
+        self.now[0] = 60
+        s._on_chunk("inpainting", 2, 2, False)
+        self.steps([2.0, 2.0, 2.0, 2.0])
+        self.now[0] = 70
+        s._on_chunk("inpainting", 2, 2, True)
+        self.now[0] = 80
+        s._on_phase("render", 10, 100)
+        self.assertAlmostEqual(self.eta()[0], tail - 10, msg="the render counts down from the last chunk")
+
+    def test_cached_chunks_are_not_timed(self):
+        s = self.s
+        self.clip(50, 3, at=0)
+        s._on_chunk("inpainting", 1, 3, False)                        # resumed: landed at once
+        s._on_chunk("inpainting", 1, 3, True)
+        self.now[0] = 1
+        s._on_chunk("inpainting", 2, 3, False)
+        self.steps([2.0, 2.0])
+        self.assertAlmostEqual(self.eta()[0], 2 * 2 + 1 * 4 * 2, msg="a 1 s cached chunk is not a chunk time")
+
+    def test_a_loading_bar_is_not_a_step(self):
+        # user, 2026-10-09: "ETA < 1 min" and 130 it/s while the model loaded
+        s = self.s
+        s._on_bar("Loading pipeline components...: 100%|#####| 5/5 [00:00<00:00, 130.66it/s]")
+        self.assertEqual((s.property("rate"), s.property("step")), (0.0, 0), "read before the clip")
+        self.clip(50, 3, at=0)
+        s._on_chunk("inpainting", 1, 3, False)
+        s._on_bar("Loading checkpoint shards: 100%|#####| 5/5 [00:00<00:00, 130.66it/s]")
+        self.assertEqual(self.eta(), (-1.0, True))
+        self.assertEqual(s.property("rate"), 0.0, "a loading bar's rate shown as the steps'")
+
+    def test_a_warm_up_chunk_is_not_a_chunk_time(self):
+        # Optimise Model: the first step compiles for minutes, and so does the first decode
+        s = self.s
+        self.clip(50, 3, at=0)
+        s._on_chunk("inpainting", 1, 3, False)
+        self.steps([300.0, 2.0, 2.0, 2.0])
+        s._on_chunk("inpainting", 1, 3, True)
+        self.now[0] = 900
+        s._on_chunk("inpainting", 2, 3, False)
+        self.assertAlmostEqual(self.eta()[0], 4 * 2 + 1 * 4 * 2, msg="the 900 s warm-up chunk counted")
+
+    def test_a_known_tail_counts_from_the_first_clip(self):
+        s = self.s
+        self.clip(50, 2, at=0)
+        s._on_tail(2.0)
+        s._on_chunk("inpainting", 1, 2, False)
+        self.steps([2.0, 2.0])
+        self.assertAlmostEqual(self.eta()[0], 2 * 2 + 1 * 4 * 2 + 2.0 * 50)
+        self.assertFalse(self.eta()[1], "a known size's render left out")
+
+
+class TailTimingTests(unittest.TestCase):
+    """InpaintingChunks times the hi-res blend + encode per frame and keeps it
+    per resolution (config/inpainting_eta.json -- a temp config here)."""
+
+    def test_timed_kept_and_used_for_the_next_clip(self):
+        import json
+        import logging
+        import time as _t
+        import types
+        from unittest import mock
+        from studio import job_stats as J
+        from studio import settings_store as ss
+
+        log = logging.getLogger("test.inpaint.tail")
+        log.setLevel(logging.INFO)
+        clock = [100.0]
+        rates = []
+        fake = types.SimpleNamespace(logger=log)
+        fake.spatial_tiled_process = lambda *a, **k: "latents"
+        fake.encode_frames_to_mp4 = lambda *a, **k: True
+
+        class FakeEngine:
+            def process_single_video(self, **kw):
+                log.info("Hi-Res blending enabled. Target resolution: 1920x1038")
+                fake.spatial_tiled_process()            # one 25-frame chunk
+                clock[0] += 30                          # the blend + encode: 30 s
+                fake.encode_frames_to_mp4()
+                return True, None
+
+        fake.InpaintingEngine = FakeEngine
+        stats = JobStats()
+        stats.tail_rate = rates.append
+        path = ss.CONFIG_DIR / "inpainting_eta.json"
+        path.unlink(missing_ok=True)
+        with mock.patch.object(J.InpaintingChunks, "_count_frames", staticmethod(lambda p, l: 25)), \
+                mock.patch.object(J.time, "monotonic", lambda: clock[0]):
+            hook = J.InpaintingChunks(fake, stats)
+            try:
+                FakeEngine().process_single_video(input_video_path="x.mp4", frames_chunk=25, overlap=3)
+                self.assertEqual(rates[:2], [0.0, 0.0], "nothing known at first: lowres, then 1920x1038")
+                self.assertAlmostEqual(rates[-1], 30 / 25)
+                kept = json.loads(path.read_text(encoding="utf-8"))["tail_seconds_per_frame"]
+                self.assertAlmostEqual(kept["1920x1038"], 1.2)
+                clock[0] += 5
+                FakeEngine().process_single_video(input_video_path="y.mp4", frames_chunk=25, overlap=3)
+                self.assertAlmostEqual(rates[-2], 1.2, msg="the next clip of that size starts with it")
+            finally:
+                hook.restore()
+        hook2 = J.InpaintingChunks(fake, JobStats())
+        self.assertAlmostEqual(hook2._tail_for("1920x1038"), 1.2, msg="kept for the next run")
+        hook2.restore()
+
+    def test_an_uncounted_clip_never_runs_backwards(self):
+        # bug sweep 2026-10-09 (A2): cv2 (and ffprobe) can't count the frames: the
+        # total grew one chunk at a time, so the bar read 100% after each chunk
+        # and dropped when the next began. Now: progress unknown, no fraction.
+        import logging
+        import types
+        from unittest import mock
+        from studio import job_stats as J
+
+        fake = types.SimpleNamespace(logger=logging.getLogger("test.inpaint.uncounted"))
+        fake.spatial_tiled_process = lambda *a, **k: "latents"
+
+        class FakeEngine:
+            def process_single_video(self, **kw):
+                for _ in range(3):
+                    fake.spatial_tiled_process()
+                return True, None
+
+        fake.InpaintingEngine = FakeEngine
+        stats = JobStats()
+        stats.begin("inpainting")
+        seen = []
+        stats.changed.connect(lambda: seen.append((stats.property("fraction"), stats.property("chunks"),
+                                                   stats.property("frames"))))
+        with mock.patch.object(J.InpaintingChunks, "_count_frames", staticmethod(lambda p, l: 0)):
+            hook = J.InpaintingChunks(fake, stats)
+            try:
+                FakeEngine().process_single_video(input_video_path="x.mkv", frames_chunk=25, overlap=5)
+            finally:
+                hook.restore()
+        self.assertTrue(seen)
+        self.assertEqual({(f, c, n) for f, c, n in seen}, {(0.0, 0, 0)}, "a fraction shown for an uncounted clip")
+
+    def test_ffprobe_counts_what_cv2_cannot(self):
+        from unittest import mock
+        from studio import job_stats as J
+        from studio.tests.checks import _fixtures
+        clip = _fixtures.path("small") / "src" / "clipA.mp4"           # 48 frames
+        with mock.patch("cv2.VideoCapture", side_effect=RuntimeError("no count")):
+            self.assertEqual(J.InpaintingChunks._count_frames(str(clip), -1), 48)
+        self.assertEqual(J.InpaintingChunks._probe_frames(str(clip.with_name("missing.mp4"))), 0)
+
+    def test_depthcrafter_has_none(self):
+        s = JobStats()
+        s.begin("depthcrafter")
+        s._on_bar("Window 1/3:  40%|##  | 2/5 [00:05<00:07,  2.50s/it]")
+        self.assertEqual(s.property("eta"), -1.0)
+
+
+class EndTests(unittest.TestCase):
+    def _pump(self):
+        for _ in range(5):
+            _app.processEvents()
+
+    def test_bars_after_the_job_ended_are_not_read(self):
+        s = JobStats()
+        s.begin("depthcrafter")
+        s.feed_bar("Window 1/3  4/10 [00:01<00:01,  2.00it/s]")
+        self._pump()
+        self.assertEqual(s.property("step"), 4)
+        s.end("depthcrafter")
+        s.feed_bar("Splatting  7/48 [00:03<00:10,  5.00it/s]")      # another stage's bar, later
+        self._pump()
+        self.assertEqual(s.property("step"), 4, "a later bar of another stage was read as this job's")
+        self.assertEqual(s.property("rate"), 0.5)
+
+    def test_a_merge_bar_after_merging_ended_is_not_read(self):
+        s = JobStats()
+        s.begin("merging")
+        s.end("merging")
+        s.feed_bar("Encoding clip: |####      | 40.0% clip.mp4")
+        self._pump()
+        self.assertEqual(s.property("mergePercent"), 0.0)
+
+    def test_ending_another_stage_leaves_this_one(self):
+        s = JobStats()
+        s.begin("inpainting")
+        s.end("depthcrafter")
+        self.assertEqual(s.property("stage"), "inpainting")
+
+
+class DcEtaTests(unittest.TestCase):
+    """DepthCrafter's ETA (user, 2026-10-12): head + r x frames per window still to
+    run + tail, r live from the bar, head / tail / r kept per size. The user's
+    A test clip: 257 frames, window 120 / overlap 100, 10 steps, 768x448 --
+    8 windows at ~6.17 s/it, 583 s in all (head 22.7 s, tail ~52 s)."""
+
+    RATES = {"head": {"768x448": 0.088}, "tail": {"768x448": 0.203}, "step": {"768x448": 0.0514}}
+
+    def setUp(self):
+        from studio import settings_store as ss
+        self.ss = ss
+        self.ss.save("depthcrafter_eta", {})
+        self.now = [0.0]
+        self.s = JobStats()
+        self.s._clock = lambda: self.now[0]
+
+    def window(self, a, b, rates, steps=10):
+        for n, r in enumerate(rates, 1):
+            self.s._on_bar(f"Window {a}/{b}:  {10 * n}%|#  | {n}/{steps} [00:10<00:30, {r:.2f}s/it]")
+
+    def test_the_windows_as_the_pipeline_steps_them(self):
+        from studio.job_stats import dc_windows
+        self.assertEqual(dc_windows(257, 120, 100), [120] * 7 + [117])     # the user's clip: 8 windows
+        self.assertEqual(dc_windows(160, 120, 100), [120] * 3)              # the speed study's clip
+        self.assertEqual(dc_windows(100, 120, 100), [100])                  # shorter than a window
+        self.assertEqual(dc_windows(300, 110, 25), [110, 110, 110, 45])
+        self.assertEqual(dc_windows(0, 120, 100), [])
+
+    def test_the_users_clip_from_known_rates(self):
+        from studio.job_stats import DcEta
+        e = DcEta(self.RATES)
+        e.clip_started(0.0)
+        e.plan(257, 10, 120, 100, "768x448")
+        eta, partial = e.eta(0.0)
+        self.assertFalse(partial)
+        self.assertAlmostEqual(eta, 0.088 * 257 + 10 * 0.0514 * 957 + 0.203 * 257, places=3)
+        self.assertLess(abs(eta - 583.2) / 583.2, 0.03)             # within 3% of what it took
+
+    def test_live_through_a_clip(self):
+        s = self.s
+        s.begin("depthcrafter")
+        s._dc.rates = {k: dict(v) for k, v in self.RATES.items()}
+        s._on_dc("clip", None)
+        s._on_dc("plan", {"frames": 257, "steps": 10, "window": 120, "overlap": 100, "key": "768x448"})
+        self.now[0] = 22.0
+        self.window(1, 8, [10.55] + [6.17] * 9)                       # window 1: its first step is the warm-up
+        self.assertEqual(s._dc.samples[0], 6.17 / 120)                # ...and no sample
+        self.now[0] = 86.0
+        self.window(2, 8, [6.4] + [6.17] * 4)                         # window 2, 5 steps done
+        r = 6.17 / 120
+        overhead = 86.0 - 22.0 - 10 * r * 120                         # window 1's start-to-start, less its steps
+        want = 5 * r * 120 + 10 * r * (5 * 120 + 117) + 6 * overhead + 0.203 * 257
+        self.assertAlmostEqual(s.property("eta"), want, places=3)
+        self.assertFalse(s.property("etaPartial"))
+        for w in range(3, 9):                                         # the rest, then the tail
+            self.now[0] += 62.0
+            self.window(w, 8, [6.4] + [6.17] * 9)
+        self.assertAlmostEqual(s.property("eta"), 0.203 * 257, places=3)
+        self.now[0] += 20.0
+        s._on_bar("Window 8/8: 100%|##| 10/10 [01:00<00:00,  6.07s/it]")   # a redraw: nothing new
+        self.assertAlmostEqual(s.property("eta"), 0.203 * 257 - 20.0, places=3)
+
+    def test_learned_and_kept_for_the_next_run(self):
+        s = self.s
+        s.begin("depthcrafter")                                      # nothing kept yet
+        s._on_dc("clip", None)
+        s._on_dc("plan", {"frames": 100, "steps": 2, "window": 120, "overlap": 100, "key": "640x384"})
+        self.assertEqual(s.property("eta"), -1.0)                    # no rate at all yet: N/A
+        self.now[0] = 10.0                                           # head: 10 s for 100 frames
+        self.window(1, 1, [9.0, 5.0], steps=2)
+        self.assertTrue(s.property("etaPartial"))                    # tail unknown: "+ encode/decode"
+        self.now[0] = 40.0
+        s._on_dc("done", None)                                       # tail: 30 s
+        kept = self.ss.load("depthcrafter_eta")
+        self.assertAlmostEqual(kept["head_seconds_per_frame"]["640x384"], 0.1, places=6)
+        self.assertAlmostEqual(kept["tail_seconds_per_frame"]["640x384"], 0.3, places=6)
+        self.assertAlmostEqual(kept["step_seconds_per_frame"]["640x384"], 0.05, places=6)
+        t = JobStats()                                               # the next run, a size not timed:
+        t._clock = lambda: 0.0
+        t.begin("depthcrafter")
+        t._on_dc("clip", None)
+        t._on_dc("plan", {"frames": 100, "steps": 2, "window": 120, "overlap": 100, "key": "1280x768"})
+        self.assertAlmostEqual(t.property("eta"), 4 * (0.1 * 100 + 2 * 0.05 * 100 + 0.3 * 100), places=3)
+        self.assertFalse(t.property("etaPartial"))                   # scaled by pixels from 640x384
+
+    def test_without_a_plan_there_is_none(self):
+        s = JobStats()
+        s.begin("depthcrafter")
+        s._on_bar("Window 1/3:  40%|##  | 2/5 [00:05<00:07,  2.50s/it]")
+        self.assertEqual(s.property("eta"), -1.0)
+
+
+class DepthCrafterTimelineTests(unittest.TestCase):
+    """The run's clips reach JobStats from DepthCrafterDemo's own calls, put back after."""
+
+    def make(self):
+        import numpy as np
+
+        class Demo:
+            def _internal_infer(self, path, frames, steps):
+                return self._perform_inference(frames, 1.0, steps, 120, 100, None, 448, 768)
+
+            def _perform_inference(self, actual_frames_to_process, guidance_scale, num_denoising_steps,
+                                   pipe_call_window_size, pipe_call_overlap, segment_job_info,
+                                   actual_processed_height, actual_processed_width, **kw):
+                return "depth"
+
+        self.Demo = Demo
+        self.events = []
+        stats = type("S", (), {"dc_event": lambda _s, k, d=None: self.events.append((k, d))})()
+        from types import SimpleNamespace
+        from studio.job_stats import DepthCrafterTimeline
+        self.originals = (Demo._internal_infer, Demo._perform_inference)
+        return DepthCrafterTimeline(SimpleNamespace(DepthCrafterDemo=Demo), stats), np.zeros((257, 4, 4, 3))
+
+    def test_a_clip_planned_and_restored(self):
+        tl, frames = self.make()
+        self.assertEqual(self.Demo()._internal_infer("clip.mp4", frames, 10), "depth")
+        self.assertEqual(self.events, [("clip", None),
+                                       ("plan", {"frames": 257, "steps": 10, "window": 120, "overlap": 100,
+                                                 "key": "768x448"}),
+                                       ("done", None)])
+        tl.restore()
+        self.assertEqual((self.Demo._internal_infer, self.Demo._perform_inference), self.originals)
+
+    def test_a_segment_is_one_window(self):
+        tl, frames = self.make()
+        self.Demo()._perform_inference(frames[:60], 1.0, 5, 120, 100, {"segment_id": 0}, 448, 768)
+        tl.restore()
+        self.assertEqual(self.events[0][1]["window"], 60)
+        self.assertEqual(self.events[0][1]["overlap"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

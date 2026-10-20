@@ -1,0 +1,157 @@
+[
+ {
+  "id": "navy_blue_matte",
+  "name": "Navy Blue",
+  "finish": "matte"
+ },
+ {
+  "id": "navy_blue_glossy",
+  "name": "Navy Blue",
+  "finish": "glossy"
+ },
+ {
+  "id": "charcoal_coral_matte",
+  "name": "Charcoal Coral",
+  "finish": "matte"
+ },
+ {
+  "id": "charcoal_coral_glossy",
+  "name": "Charcoal Coral",
+  "finish": "glossy"
+ },
+ {
+  "id": "navy_periwinkle_matte",
+  "name": "Navy Periwinkle",
+  "finish": "matte"
+ },
+ {
+  "id": "navy_periwinkle_glossy",
+  "name": "Navy Periwinkle",
+  "finish": "glossy"
+ },
+ {
+  "id": "teal_slate_matte",
+  "name": "Teal Slate",
+  "finish": "matte"
+ },
+ {
+  "id": "teal_slate_glossy",
+  "name": "Teal Slate",
+  "finish": "glossy"
+ },
+ {
+  "id": "plum_matte",
+  "name": "Plum",
+  "finish": "matte"
+ },
+ {
+  "id": "plum_glossy",
+  "name": "Plum",
+  "finish": "glossy"
+ },
+ {
+  "id": "true_black_red_matte",
+  "name": "True Black Red",
+  "finish": "matte"
+ },
+ {
+  "id": "true_black_red_glossy",
+  "name": "True Black Red",
+  "finish": "glossy"
+ },
+ {
+  "id": "ember_matte",
+  "name": "Ember",
+  "finish": "matte"
+ },
+ {
+  "id": "ember_glossy",
+  "name": "Ember",
+  "finish": "glossy"
+ },
+ {
+  "id": "ocean_cyan_matte",
+  "name": "Ocean Cyan",
+  "finish": "matte"
+ },
+ {
+  "id": "ocean_cyan_glossy",
+  "name": "Ocean Cyan",
+  "finish": "glossy"
+ },
+ {
+  "id": "paper_blue_matte",
+  "name": "Paper Blue",
+  "finish": "matte"
+ },
+ {
+  "id": "paper_blue_glossy",
+  "name": "Paper Blue",
+  "finish": "glossy"
+ },
+ {
+  "id": "graphite_gold_matte",
+  "name": "Graphite Gold",
+  "finish": "matte"
+ },
+ {
+  "id": "graphite_gold_glossy",
+  "name": "Graphite Gold",
+  "finish": "glossy"
+ },
+ {
+  "id": "charcoal_cyan_matte",
+  "name": "Charcoal Cyan",
+  "finish": "matte"
+ },
+ {
+  "id": "charcoal_cyan_glossy",
+  "name": "Charcoal Cyan",
+  "finish": "glossy"
+ },
+ {
+  "id": "navy_coral_matte",
+  "name": "Navy Coral",
+  "finish": "matte"
+ },
+ {
+  "id": "navy_coral_glossy",
+  "name": "Navy Coral",
+  "finish": "glossy"
+ },
+ {
+  "id": "black_amber_matte",
+  "name": "Black Amber",
+  "finish": "matte"
+ },
+ {
+  "id": "black_amber_glossy",
+  "name": "Black Amber",
+  "finish": "glossy"
+ },
+ {
+  "id": "midnight_cyan_matte",
+  "name": "Midnight Cyan",
+  "finish": "matte"
+ },
+ {
+  "id": "midnight_cyan_glossy",
+  "name": "Midnight Cyan",
+  "finish": "glossy"
+ },
+ {
+  "id": "wine_red_matte",
+  "name": "Wine Red",
+  "finish": "matte"
+ },
+ {
+  "id": "wine_red_glossy",
+  "name": "Wine Red",
+  "finish": "glossy"
+ },
+ {
+  "id": "classic",
+  "name": "Classic",
+  "finish": ""
+ }
+]

@@ -1,0 +1,36 @@
+{
+  "video_path": "Path to the video file to analyze for scene changes. You can also drop a video onto this box.",
+  "output_dir": "Folder where everything this run produces is written: the scene list, the thumbnails, and the per-scene clips if splitting is on. Drop a folder here to set it.",
+
+  "detector_type": "Which neural network finds the shot boundaries. AutoShot and TransNetV2 score every frame and use the threshold below; OmniShotCut predicts shot ranges directly and has no threshold, but knows about dissolves, wipes and fades. OmniShotCut is the better first try on stylised material (anime, gaming, screen recordings) where the other two over- or under-segment.",
+  "device": "Where the detector runs. 'auto' picks CUDA when it is available and falls back to the CPU, which works but is slow on a long source.",
+  "threshold": "How different two frames must be to count as a cut. Lower is more sensitive and finds more scenes. AutoShot's useful range sits around 0.24-0.30, TransNetV2's around 0.3.",
+  "min_scene_len": "Minimum scene length in frames. Shorter scenes are merged into a neighbour rather than dropped, so the timeline never gains a gap.",
+
+  "omnishot_mode": "clean_shot: keep only hard cuts (transitions like dissolves/fades are absorbed into the previous scene). default: keep every detected shot, including transitions as their own segments.",
+  "omnishot_overlap": "Frames shared between consecutive inference windows. Higher values cost more time but reduce missed cuts at window edges. Default: 20.",
+  "omnishot_confidence": "Minimum confidence a cut must have to be kept (0-1), based on how precisely the model can pin down the cut's exact frame. This is OmniShotCut's equivalent of a threshold: higher values keep fewer, more certain cuts, and rejected cuts merge into the following scene. 0 keeps everything (default). It bites quickly - around 0.5 typically drops a third of cuts - so start near 0.3 and raise it slowly. The log lists the confidence spread for your video after each run.",
+
+  "refinements_enabled": "Show the refinement and validation settings. Unticked, they are hidden AND switched off for the run: no snapping and no AI validation, whatever is ticked inside. Your choices are kept for when you tick this again.",
+  "snap_cuts": "After detection, look a frame or two either side of each boundary for the frame where the picture actually changes most, and move the cut there. Fixes the +/- 2 frame wobble the models leave, which matters because everything downstream chunks these clips.",
+  "ai_validate": "Use DINOv3 AI validation to confirm cuts and filter flashes/fast motion. Requires a CUDA-enabled GPU and the DINOv3 weights in weights/SceneCut/DINOv3.",
+  "ai_window": "Number of frames before and after a cut to analyze for AI validation.",
+  "flash_sensitivity": "Sensitivity for detecting flash spikes versus scene cuts. Lower values (15-25) detect flashes more aggressively. Default: 15.",
+
+  "export_csv": "Generate a CSV file listing detected scenes.",
+  "export_html": "Generate an HTML report of detected scenes.",
+  "export_sc": "Generate a .sc scene cut file, which DaVinci Resolve reads to place cuts on a timeline.",
+  "sc_offset": "Shift every cut in the .sc file by this many frames. Use it when the NLE's frame numbering starts somewhere other than the file's first frame.",
+  "save_images": "Extract and save thumbnail images for each detected scene.",
+  "num_images": "Number of images to extract per detected scene.",
+  "frame_margin": "Number of frames to skip at the start/end of a scene when extracting images.",
+  "split_by_chapter": "Sort the movie's scenes into one folder per chapter, using the chapter markers in the movie file (the chapter list a Blu-ray or DVD rip carries). The output folder becomes the parent: each chapter's clips go into its own folder inside it -- an existing 'Chapter N ...' folder is reused, a new one is named from the marker. A scene that runs across a chapter start is cut there. Off by default; the movie must have chapter markers.",
+  "split_ffmpeg": "Write each scene out as its own clip. This is what the rest of the pipeline consumes: DepthCrafter can import the folder directly once the split finishes.",
+
+  "ffmpeg_codec": "Scene clips are always written as 10-bit HEVC (Main10, p010le). The full pipeline runs on the NVIDIA GPU: NVDEC decode, CUDA 8->10-bit conversion, NVENC encode, with no frame copied to system memory. Falls back to CPU decoding for sources NVDEC cannot handle, and to libx265 10-bit if this FFmpeg build has no NVENC.",
+  "ffmpeg_preset": "NVENC preset. P1 is fastest (lowest quality), P7 is slowest (best quality). P5/P6 is a good balance.",
+  "ffmpeg_cq": "Constant QP level for the 10-bit HEVC encode. Lower values mean higher quality and larger file sizes. 16-24 is a reasonable range for 10-bit HEVC.",
+  "split_ffmpeg_accuracy": "Cuts land on the exact frame the detector chose, never a keyframe-rounded boundary, and clips are re-timed to strict CFR at the source's exact frame rate. On constant-frame-rate sources a keyframe pre-seek keeps the cost per clip flat, so sources with thousands of cuts stay fast; every clip's frame count is verified afterwards.",
+
+  "start_detection": "Start the full process: detect scenes and generate all selected outputs."
+}

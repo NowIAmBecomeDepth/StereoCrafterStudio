@@ -1,0 +1,140 @@
+[project]
+name = "stereocrafter"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accelerate>=1.12.0",
+    "decord>=0.6.0",
+    "diffusers>=0.36.0",
+    # Scene Cut: AutoShot's supernet is written in einops, and OmniShotCut
+    # drives its decode through ffmpeg-python. Both were already here by
+    # transitive luck; a vendored model importing them directly deserves to say
+    # so, or a resolver change upstream silently breaks the Bonus tab.
+    "einops>=0.8",
+    "ffmpeg-python>=0.2",
+    "fire>=0.7.1",
+    "ftfy==6.3.1",
+    # >=0.34 (not 1.x): transformers 4.x requires hub <1.0; 0.34 is where the
+    # `hf` CLI (used by the installer/docs) was introduced.
+    "huggingface-hub>=0.34",
+    "imageio>=2.37.2",
+    "imageio-ffmpeg>=0.6.0",
+    "imath>=0.0.2",
+    # Depth Map Editor: SAM 3 (vendored in third_party/sam3) imports iopath, scipy,
+    # pycocotools and timm directly. Its own package is not installed because it
+    # pins numpy<2; these are the dependencies that pin was sitting on top of.
+    "iopath>=0.1.10",
+    "matplotlib>=3.10.8",
+    "mediapy>=1.2.7",
+    "moderngl>=5.12.0",
+    "moviepy>=2.1.1",
+    "numpy>=2.1,<3",
+    # contrib, not plain. It was originally required because paddleocr (the
+    # removed Subtitle Fixer) depended on it, and two cv2 builds in one
+    # site-packages overwrite each other's files. Kept now that paddle is gone
+    # because contrib is a strict superset -- the same cv2 plus algorithms
+    # nothing here uses yet -- so switching back would force a reinstall to
+    # gain nothing.
+    "opencv-contrib-python>=4.10",
+    "openexr>=3.4.4",
+    # Imported directly across studio/ and core/ (thumbnails, posters, app
+    # icons, the editors); it only arrived through matplotlib / imageio /
+    # moviepy before (bug sweep 2026-10-09, A12).
+    "pillow>=11",
+    # The checks and tests watch ROSE's worker process with it (it only arrived through
+    # another package before; bug sweep 2026-10-14b).
+    "psutil>=5.9",
+    "pycocotools>=2.0.10",
+    "pyperclip>=1.11.0",
+    # StereoCrafter Studio itself: the Qt Quick app (studio/, python -m
+    # studio.app). >=6.9 for QVideoFrame(QImage), PathRectangle and
+    # QStyleHints.setColorScheme. LGPL, shipped as the stock wheels.
+    "pyside6>=6.9",
+    "sageattention",
+    "scipy>=1.14",
+    "timm>=1.0.17",
+    "tkinterdnd2>=0.4.3",
+    # <0.16: newer torchao removes module paths that diffusers 0.36 hard-imports,
+    # breaking ALL diffusers model loading when torchao is merely installed.
+    "torchao>=0.13,<0.16",
+    # mmgp (GPLv3) powers the V2 GUI's "MMGP streaming" offload mode: quantized
+    # int8 streaming with budgeted residency + async shuttle. Pinned to the
+    # Wan2GP-proven combination; quanto 0.2.7 requires transformers <5.
+    "mmgp==3.7.10",
+    "optimum-quanto==0.2.7",
+    "torch==2.13.0",
+    "torchaudio>=2.9.1",
+    "torchvision>=0.28.0",
+    # <5: optimum-quanto (mmgp's quantizer) imports transformers 4.x-era symbols;
+    # transformers 5.x breaks it. All models used by this suite are 4.x-native.
+    "transformers>=4.54,<5",
+    # Scene Cut's third detector. The other two (AutoShot, OmniShotCut) are not
+    # on PyPI and are vendored under third_party/ instead.
+    "transnetv2-pytorch>=1.0.5",
+    "triton-windows>=3.6.0.post25",
+    "ttkthemes>=3.3.0",
+    "customtkinter>=6.0.0",
+]
+
+[tool.uv]
+# Studio is a Windows application: .bat launchers, a native menubar workaround,
+# tkinterdnd2, triton-windows. Saying so lets the resolver ignore the other
+# platforms' wheels entirely, which keeps resolution fast and deterministic.
+#
+# This started as a fix rather than a tidy-up: paddlepaddle-gpu (the removed
+# Subtitle Fixer extra) and torch pinned different nvidia-cudnn-cu13 versions
+# for Linux, and resolving for a platform this program cannot run on made the
+# two mutually exclusive. That conflict is gone with paddle, but the statement
+# is still true and still worth keeping.
+environments = ["sys_platform == 'win32'"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
+sageattention = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post6/sageattention-2.2.0%2Bcu130torch2.10.0andhigher.post6-cp310-abi3-win_amd64.whl" }
+
+[tool.ruff]
+# Global settings go here
+line-length = 120
+# third_party/ holds vendored upstream code (AutoShot, OmniShotCut) kept
+# byte-comparable to its source so it can be re-synced by diff. Reformatting it
+# to this project's rules would make that impossible for no gain.
+exclude = ["third_party"]
+indent-width = 4  # Moved out of [tool.ruff.format]
+
+[tool.ruff.format]
+# Formatter-specific settings go here
+indent-style = "space"
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+# Linter-specific settings go here
+ignore = ["E501"]
+select = ["E", "F", "W"]
+unfixable = ["F841"]
+
+[tool.ruff.lint.per-file-ignores]
+# scripts/checks/ drives the real GUI, which shapes how those files are written.
+#   E402  every check has to put the repo on sys.path and redirect the stage
+#         config paths BEFORE importing anything that would read them -- a
+#         check that imported first would write the user's real settings.
+#   E702  paired "shell.update(); shell.update_idletasks()" lines are one
+#         action, and splitting them doubles the length of every check for no
+#         gain in clarity.
+"scripts/checks/*" = ["E402", "E702"]
+# Studio's checks are written the same way, for the same reasons (and their
+# _fixtures import has to follow the sys.path line).
+"studio/tests/checks/*" = ["E402", "E702"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+]

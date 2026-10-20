@@ -1,0 +1,41 @@
+"""Splatting GUI core modules.
+
+This package contains the modularized components of the Splatting GUI,
+organized by functionality.
+"""
+
+from .batch_processing import BatchProcessor, ProcessingTask, ProcessingSettings, BatchSetupResult
+
+from .border_scanning import BorderScanner
+
+from .config_manager import (
+    ConfigManager,
+    SPLATTER_DEFAULT_CONFIG,
+    load_config,
+    save_config,
+    load_settings_from_file,
+    save_settings_to_file,
+    get_current_config,
+    reset_to_defaults,
+)
+
+from .convergence import ConvergenceEstimatorWrapper
+
+from .depth_processing import (
+    compute_global_depth_stats,
+    load_pre_rendered_depth,
+    DEPTH_VIS_TV10_BLACK_NORM,
+    DEPTH_VIS_TV10_WHITE_NORM,
+)
+
+from .forward_warp import ForwardWarpStereo, execute_forward_warp
+
+from .fusion_export import FusionSidecarGenerator
+
+from .m2s_mask import build_m2s_occlusion_mask_from_disparity
+
+from .preview_rendering import PreviewRenderer
+
+from .analysis_service import AnalysisService
+
+from .convergence_cache import ConvergenceCache

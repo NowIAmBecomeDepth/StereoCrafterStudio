@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Contents</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html" class="current">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">The manual</div>
+  <h1>StereoCrafter Studio</h1>
+  <p>Turn 2D video into 3D, one step at a time. Start with Part 1 if you're new; after that, each
+     stage has a chapter of its own that you can read when you get to it.</p>
+</header>
+
+<section class="section">
+  <h2>Contents</h2>
+  <div class="toc">
+    <div class="part ready">
+      <h3>1 · Getting started</h3>
+      <ol>
+        <li><a href="part1.html#what">What Studio does</a></li>
+        <li><a href="part1.html#install">Installing and starting Studio</a></li>
+        <li><a href="part1.html#tour">A tour of the window</a></li>
+        <li><a href="part1.html#project">Your project folder</a></li>
+        <li><a href="part1.html#beginner">Beginner Mode</a></li>
+      </ol>
+    </div>
+    <div class="part ready">
+      <h3>2 · The pipeline</h3>
+      <ol start="6">
+        <li><a href="part2.html#scenecut">Scene Cut</a></li>
+        <li><a href="part2.html#depthcrafter">DepthCrafter</a></li>
+        <li><a href="part2.html#splatting">Splatting</a></li>
+        <li><a href="part2.html#inpainting">Inpainting</a></li>
+        <li><a href="part2.html#merging">Merging</a></li>
+      </ol>
+    </div>
+    <div class="part ready">
+      <h3>3 · Depth Map Editor</h3>
+      <ol start="11">
+        <li><a href="part3.html#when">When to fix a depth map</a></li>
+        <li><a href="part3.html#sam3">Setting up SAM 3</a></li>
+        <li><a href="part3.html#masking">Masking objects</a></li>
+        <li><a href="part3.html#changing">Changing depth inside a mask</a></li>
+        <li><a href="part3.html#rendering">Rendering and edit history</a></li>
+      </ol>
+    </div>
+    <div class="part ready">
+      <h3>4 · Running jobs</h3>
+      <ol start="16">
+        <li><a href="part4.html#queue">The job queue and progress</a></li>
+        <li><a href="part4.html#stopping">Stopping safely</a></li>
+        <li><a href="part4.html#gpu">GPU memory</a></li>
+        <li><a href="part4.html#unattended">Unattended runs</a></li>
+      </ol>
+    </div>
+    <div class="part ready">
+      <h3>5 · Customising</h3>
+      <ol start="20">
+        <li><a href="part5.html#themes">Settings and themes</a></li>
+        <li><a href="part5.html#saving">Saving and loading settings</a></li>
+      </ol>
+    </div>
+    <div class="part ready">
+      <h3>Appendices</h3>
+      <ol type="A">
+        <li><a href="appendices.html#cards">Recommended settings by graphics card</a></li>
+        <li><a href="appendices.html#files">File names</a></li>
+        <li><a href="appendices.html#troubleshooting">Troubleshooting and log files</a></li>
+        <li><a href="appendices.html#views">Preview views</a></li>
+        <li><a href="appendices.html#glossary">Glossary</a></li>
+        <li><a href="appendices.html#credits">Credits</a></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<nav class="foot">
+  <span></span>
+  <a class="next" href="part1.html">Part 1 · Getting started ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Jobs · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Part 4 of 5</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html" class="current"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Part 4</div>
+  <h1>Running jobs</h1>
+  <p>What happens once you press <span class="btn">Start</span>: following a batch while it works,
+     stopping it without losing anything, how Studio shares your graphics card between stages, and
+     leaving a long chapter to run on its own.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="queue">
+  <h2><span class="num">16</span> The job queue and progress <a class="anchor" href="#queue">#</a></h2>
+
+  <p>A <b>job</b> is one stage working through a folder of clips: a <b>batch</b>. Press
+     <span class="btn">Start</span> and the stage works through every clip in its input folder, one
+     after another, without you doing anything more.</p>
+
+  <h3>The action bar</h3>
+  <p>The bar at the bottom of the page shows the running job:</p>
+  <ul>
+    <li><b>The progress bar</b> fills as the clip is worked on. Some stages work in steps, and the bar
+      starts again for each: Merging, for instance, matches the grain first, then renders, then splits
+      the left and right eyes if you asked for that.</li>
+    <li><b>The line under it</b> says what's happening: which clip, and how far through the batch.
+      DepthCrafter and Inpainting also show the live numbers: which chunk or window of the clip they're
+      on, and how long each step takes (<b>s/it</b>, seconds per step).</li>
+    <li><b>The status line</b> at the very bottom of the window says which stage is busy, whichever
+      tab you're looking at, so you can look around the other stages while a job runs.</li>
+  </ul>
+
+  <h3>Upcoming Jobs</h3>
+  <p>DepthCrafter, Splatting, Inpainting and Merging each list the clips the batch will work through,
+     under <b>Upcoming Jobs</b>, with a <b>Batch Progress</b> counter above them. On DepthCrafter and
+     Inpainting the list sits to the right of the settings.</p>
+  <ul>
+    <li>Each row shows the clip's length and its shape: <i>120 frames · 1.85:1</i>.</li>
+    <li>While a job runs, each row has its own bar: the clips already done are full, the one being
+      worked on fills up, the rest are empty. The clips the run has finished turn <b>light green</b>, and
+      stay green until the next run starts.</li>
+    <li>When nothing is running, click a row to load that clip into the preview (Splatting and Merging:
+      DepthCrafter and Inpainting have no preview).</li>
+    <li>Tick clips to work on just those: <span class="btn">Process Selected</span> runs the batch on
+      the ticked clips only. <span class="btn">Start</span> still runs them all.</li>
+    <li><span class="btn">Move to Finished</span> moves the ticked clips into the
+      <code>finished</code> folders without processing them: handy for clips you've decided to skip.
+      <span class="btn">Restore Finished</span> brings them back.</li>
+    <li><b>Right-click</b> a clip for quick jobs on that clip alone. In DepthCrafter:
+      <b>Process This Clip Now</b> and <b>Move to Finished</b>. In Splatting:
+      <b>Splat This Clip Now</b> (the same as <span class="btn">Single</span>, without loading it first) and
+      <b>Rerun in DepthCrafter</b>, which switches to DepthCrafter with that clip as its input and the
+      folder its depth map lives in as the output: change the settings and press
+      <span class="btn">Start</span>, and the new map replaces the old one. In Inpainting:
+      <b>Inpaint This Clip Now</b> and <b>Move to Finished</b>. In Merging:
+      <b>Merge This Clip Now</b> and <b>Move to Finished</b>.</li>
+    <li><b>Test Render</b>, in every stage's right-click menu, runs that one clip as "This Clip Now" does
+      but into a <code>Test Renders</code> folder inside the stage's output folder, so the real output is
+      never overwritten. It moves nothing to <code>finished</code> and isn't passed on to the next stage as
+      the job's result. Testing the same clip again replaces the earlier test.</li>
+    <li>A clip the job just finished (its row green) also offers <b>Send to Splatting</b>,
+      <b>Send to Inpainting</b> or <b>Send to Merging</b>, to take that one clip on through the pipeline
+      without running the rest of the chapter. The next stage opens with what this one made as its input
+      (DepthCrafter's depth map with its source clip, Splatting's Lo-Res splat, Inpainting's inpainted clip)
+      and, when you're working by chapter, that chapter's folders for its output and its other inputs. Your
+      settings are left alone: check them and press <span class="btn">Start</span>.</li>
+    <li>The same menu plays the files that go with the clip in your usual video player:
+      <b>Play Source Clip</b> (DepthCrafter, Splatting), <b>Play Depth Map</b> (Splatting),
+      <b>Play Lo-Res Splat</b> and <b>Play Hi-Res Splat</b> (Inpainting), and <b>Play Inpainted Clip</b>,
+      <b>Play Original</b> and <b>Play Splat</b> (Merging). These work during a job too.</li>
+    <li>Under them, <b>Open ... in Explorer</b> opens a File Explorer window with that file selected, one
+      for each kind of file that goes with the clip: <b>Open Source Clip in Explorer</b> and <b>Open Depth Map
+      in Explorer</b> in Splatting, the Lo-Res and Hi-Res splats in Inpainting, and so on. Edge Fill's
+      right-click offers the merged clip and its Hi-Res splat the same way.</li>
+  </ul>
+
+  <h3>When a batch ends</h3>
+  <p>A message pops up saying how it went: how many clips were done, and how many failed or were
+     skipped. If nothing could be made at all (an empty folder, missing model files), it says why
+     instead. The next stage's <span class="btn">Import from …</span> button then offers this batch's
+     output, so you can carry straight on. With a project picked in the title bar, an Import only offers
+     that project's jobs, and fills every folder from the same chapter, the output folder included.</p>
+  <p>The line under the progress bar then says how long the whole batch took, from Start to the end:
+     <i>Completed in 1h 02m 13s</i>, or <i>Stopped after …</i> if you stopped it. It stays until that
+     stage's line moves on. The messages that popped up are kept in the bell beside the gear, so one you
+     missed while away can still be read.</p>
+  <p>If Studio's window is <b>minimized</b> when a job finishes, Windows shows a notification with the same
+     message, for every stage, Scene Cut included. Click it to bring Studio back. Nothing extra appears while
+     the window is up.</p>
+  <div class="note"><b>Good to know</b><span>Studio keeps its animations still while a job runs. Every
+     redraw costs the graphics card a little, and on a long job that adds up, so the window stays
+     calm until the job is done.</span></div>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="stopping">
+  <h2><span class="num">17</span> Stopping safely <a class="anchor" href="#stopping">#</a></h2>
+
+  <p>There are two ways to stop: <b>gently</b>, keeping everything finished so far, or <b>now</b>.</p>
+
+  <h3>Stop After Clip: the gentle way</h3>
+  <p>Splatting, Inpainting and Merging have a <span class="btn">Stop After Clip</span> button. Press it
+     and the clip being worked on is finished properly, then the batch stops. It reads
+     <b>Stopping After Clip</b> until then; press it again if you change your mind. The rest of the
+     folder is left for the next <span class="btn">Start</span>.</p>
+
+  <h3>Stop</h3>
+  <p><span class="btn">Stop</span> asks first, and offers a choice:</p>
+  <ul>
+    <li><b>Stop now</b>: the clip being processed is cut off and its unfinished output is thrown away.
+      Clips already finished are kept.</li>
+    <li><b>The safe option</b>, which depends on the stage:
+      <ul>
+        <li>Splatting, Merging, Inpainting: <b>Stop after this clip</b> (the same as Stop After
+          Clip).</li>
+        <li>Inpainting, while it works through a clip in chunks: <b>Stop after this chunk</b>. The piece being worked on is kept,
+          and the next <span class="btn">Start</span> on that clip carries on from there.</li>
+        <li>DepthCrafter: <b>Stop after this segment</b>, when it's processing in segments. Resume
+          carries on from the next segment.</li>
+      </ul></li>
+    <li><b>Keep running</b>: nothing changes.</li>
+  </ul>
+
+  <h3>Carrying on later</h3>
+  <p>You never lose finished work. Every finished clip is moved into a <code>finished</code> folder
+     (<a href="part1.html#project">Part 1</a>), so pressing <span class="btn">Start</span> on the
+     same chapter again carries on with the clips that are left. A clip cut off by <b>Stop now</b> is
+     never left behind looking finished: its unfinished file is thrown away.</p>
+
+  <h3>Closing Studio during a job</h3>
+  <p>Closing the window while a job runs asks first. <b>Quit now</b> stops the job the same way as
+     <b>Stop now</b>, then closes Studio. To let the clip finish first, press
+     <span class="btn">Stop After Clip</span> and close Studio once it has stopped.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="gpu">
+  <h2><span class="num">18</span> GPU memory <a class="anchor" href="#gpu">#</a></h2>
+
+  <p>Every stage runs on your graphics card and needs a lot of its memory (<b>VRAM</b>), so Studio
+     looks after it for you.</p>
+
+  <h3>One job at a time</h3>
+  <p>Only one stage can run a job at once. Start another while one is running and Studio tells you to
+     wait for the first to finish. This includes Scene Cut and the Depth Map Editor's renders.</p>
+  <p>When a job starts, any other stage still holding the graphics card, such as another stage's
+     preview, lets go of it first, so the job has the memory to itself. A preview
+     that was put away comes back once the job is over.</p>
+
+  <h3>The VRAM meter</h3>
+  <p>The <b>VRAM</b> meter at the top right shows how much of your card's memory is in use: by every
+     program, not only Studio. It updates every couple of seconds. Click it for the details: how much
+     is free, and how much Studio itself is using.</p>
+  <div class="tip"><b>Tip</b><span>Games, video players and browsers use graphics memory too. If a job
+     runs out of memory, or crawls, close them, or check the meter to see how much is left.</span></div>
+
+  <h3>Running out of memory</h3>
+  <p>Each stage's "When something isn't right" table in <a href="part2.html">Part 2</a> says which
+     settings to lower. In short: a smaller size or batch, fewer frames at a time, or an offload mode
+     that keeps part of the model in normal memory instead.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="unattended">
+  <h2><span class="num">19</span> Unattended runs <a class="anchor" href="#unattended">#</a></h2>
+
+  <p>A chapter can take hours, and Studio is built to work through it on its own while you're away.</p>
+
+  <h3>Before you leave it</h3>
+  <ol>
+    <li><b>Set every clip up first.</b> Go through the clips in the preview and save each one's sidecar
+      (Splatting, Merging), so the batch uses your settings for every shot.</li>
+    <li><b>Check the first clip.</b> Let one clip finish and look at it before leaving the rest to
+      run: a wrong setting is cheaper to catch on one clip than on fifty.</li>
+    <li><b>Stop Windows from sleeping.</b> A sleeping PC pauses the job. In Windows' power settings, set
+      <i>Sleep</i> to <i>Never</i> while you convert (it is okay for the monitor to be turned off).</li>
+    <li><b>Close what you don't need</b>, especially anything that uses the graphics card.</li>
+  </ol>
+
+  <h3>When you come back</h3>
+  <ul>
+    <li>The message that popped up when the batch ended says how many clips were done and how many
+      failed.</li>
+    <li>The <b>console</b> (<kbd>Ctrl</kbd>+<kbd>`</kbd>) has the whole run, clip by clip, each one
+      starting with a separator line. A failed clip says why there.</li>
+    <li>Studio also writes everything to <code>studio_last_run.log</code> in your Studio folder.
+      The run before that is kept as <code>studio_last_run.prev.log</code>, so a log is still
+      there after Studio is started again.</li>
+    <li>Clips that failed are still in the input folder (they weren't moved to
+      <code>finished</code>), so pressing <span class="btn">Start</span> again tries just those.</li>
+  </ul>
+  <div class="careful"><b>If Studio closed by itself</b><span>When Studio ends because of an error,
+     a window offers to open the log. Keep that file: it's what explains what happened, and the first
+     thing to send when asking for help.</span></div>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="part3.html">‹ Part 3 · Depth Map Editor</a>
+  <a class="next" href="part5.html">Part 5 · Customising ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

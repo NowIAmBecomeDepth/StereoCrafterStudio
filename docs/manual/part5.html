@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customising · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Part 5 of 5</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html" class="current"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Part 5</div>
+  <h1>Customising</h1>
+  <p>Make Studio look the way you like, and keep your settings: how Studio saves them for you, and
+     how to save, share and reset a stage's settings yourself.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="themes">
+  <h2><span class="num">20</span> Settings and themes <a class="anchor" href="#themes">#</a></h2>
+
+  <h3>The theme popout</h3>
+  <p>The theme button at the top of the window, beside the stage tabs, shows the theme you're using.
+     Click it for everything about the look:</p>
+  <ul>
+    <li><b>Themes</b>, in two groups. <b>Dark themes</b>: Graphite, True Black, The Nile, Ink, Nord,
+      Warm Carbon, Plum, Teal Slate and Moss. <b>Light themes</b>: Light, Paper, Frost, Orchid,
+      Sea Glass, Bone and Fern. Click one and the window changes straight away.</li>
+    <li><b>Frosted Glass</b>: your desktop shows through behind the window, blurred. The
+      <b>Opacity</b> knob sets how much of the theme's colour stays over the glass (30 to 90%); lower is
+      more see-through. Double-click it for <b>Auto</b>, the theme's own setting.</li>
+    <li><b>UI Scale</b> makes everything bigger or smaller, from 75% to 100%. Double-click the knob
+      for <b>Auto</b>, which picks a size to suit your screen.</li>
+    <li><b>Section Outlines</b>: a thin outline around each panel.</li>
+    <li><b>Film Grain</b>: a fine film grain over the window and its popups, tuned for each theme.
+      The video previews are always kept clean, so it's never mistaken for grain in the picture.</li>
+    <li><b>App Icon</b>: Studio's icon in fifteen colours, <b>Matte</b> or <b>Glossy</b>, or the
+      <b>Classic</b> one. It changes live on the window, the title bar, the taskbar, the notifications and
+      Studio's shortcuts on the desktop and the taskbar (see <a href="part1.html#install">making a desktop
+      shortcut</a>).</li>
+  </ul>
+  <div class="tip"><b>Tip</b><span>On a light theme, keep the glass Opacity at <b>60% or more</b>: below
+     that, the desktop behind can make the text harder to read.</span></div>
+  <div class="tip"><b>Want other colours?</b><span>You can add as many themes of your own as you like.
+     Studio's extra themes are listed in <code>studio/shell.py</code>, under <code>_EXTRA_THEMES</code>; the notes above it say what each colour is for.
+     Send that file to an AI chat assistant (an LLM) and tell it the colours you'd like, for example
+     "add a dark theme called Forest, deep green with a white accent". Put the file it gives you back in
+     place and restart Studio: the new theme is in the list. Keep a copy of your version, as updating
+     Studio can replace the file.</span></div>
+
+  <h3>The Settings window</h3>
+  <p>The gear (<kbd>Ctrl</kbd>+<kbd>,</kbd>) opens Settings. The list on the left has:</p>
+  <ul>
+    <li>First, the <b>options of the stage you're looking at</b>, so the list changes as you change
+      tabs. Each stage has a <b>File</b> group (see the next section), and most have a <b>Help</b>
+      group with <b>Debug Logging</b>, which writes much more detail to the console, useful when
+      asking for help.</li>
+    <li><b>Studio</b>: <span class="btn">Save All Settings</span>, Set Project Folder, Check for
+      Updates, Open Console and Exit.</li>
+    <li><b>Appearance</b>: <b>Show Tips</b> (the tips above each stage's progress bar),
+      <b>Fit Window to Content</b> (<kbd>Ctrl</kbd>+<kbd>0</kbd>), and the <b>Projects Folder</b> and
+      <b>TV Shows Folder</b> (<a href="part1.html#switch-project">Part 1</a>).</li>
+    <li><b>Keyboard Shortcuts</b>: every shortcut, by where it works.</li>
+    <li><b>GPU</b>: <span class="btn">Release GPU Memory</span> unloads the models the stages are
+      keeping on the graphics card, to free it for something else. It can't be used while a job is
+      running.</li>
+  </ul>
+
+  <h3>The window</h3>
+  <p>Studio remembers the window's size and place, and grows the window when a page needs more room
+     to show everything. If you've resized it by hand and want it back to the page's own size, press
+     <kbd>Ctrl</kbd>+<kbd>0</kbd>.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="saving">
+  <h2><span class="num">21</span> Saving and loading settings <a class="anchor" href="#saving">#</a></h2>
+
+  <h3>Saved for you</h3>
+  <p>You don't have to save anything. Every stage keeps its settings as you change them, and Studio
+     saves them all when you close it, along with the theme, the window, and where each stage was in
+     each project. Next time, everything is as you left it.</p>
+  <p><b>Settings</b> → <b>Studio</b> → <span class="btn">Save All Settings</span> writes them all to
+     disk straight away, if you'd rather not wait.</p>
+
+  <h3>Three kinds of settings</h3>
+  <table class="keys">
+    <tr><td><b>A stage's settings</b></td><td>What you see on the page. They apply to every clip,
+      unless the clip has its own.</td></tr>
+    <tr><td><b>A clip's sidecar</b></td><td>One clip's own settings, saved beside it in a
+      <code>.fssidecar</code> file (<a href="part2.html#splat-sidecars">Part 2, 8f</a>). They win over
+      the stage's settings for that clip, and they travel with it.</td></tr>
+    <tr><td><b>A settings file</b></td><td>A copy of a stage's settings you save yourself, to keep or to
+      share (below).</td></tr>
+  </table>
+
+  <h3>Settings files</h3>
+  <p>Each stage's <b>File</b> group in Settings (Inpainting V2 has the buttons on its page) can:</p>
+  <ul>
+    <li><b>Save Settings</b> to a file: a snapshot of the stage's settings. Keep one for a look you
+      like, or give it to someone else so they get the same result.</li>
+    <li><b>Load Settings</b> from a file: put a saved snapshot back.</li>
+    <li><b>Reset to Default</b>: every setting of that stage back to how Studio came. It asks first.</li>
+  </ul>
+  <div class="tip"><b>Tip</b><span>Before trying something very different on a stage, save its settings
+     to a file first. If you don't like the result, load the file and you're back where you were.</span></div>
+
+  <h3>Sidecar options (Splatting)</h3>
+  <p>Splatting's File group also decides how sidecars are used:</p>
+  <ul>
+    <li><b>Update Slider from Sidecar</b>: when you move to a clip that has a sidecar, the page's
+      knobs show its values.</li>
+    <li><b>Auto Save Sidecar on Next</b>: changes to a clip that already has a sidecar are saved into it
+      as you move to another clip, and keyframe edits straight away. A clip without a sidecar still
+      needs <span class="btn">Create Sidecar</span> the first time.</li>
+    <li><b>Sidecars to Source</b> and <b>Sidecars to Depth</b> move all the sidecars from the Depth Maps
+      folder to the Source Clips folder, or back. Both ask first.</li>
+  </ul>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="part4.html">‹ Part 4 · Running jobs</a>
+  <a class="next" href="appendices.html">Appendices ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>

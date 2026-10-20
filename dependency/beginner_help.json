@@ -1,0 +1,325 @@
+{
+  "_about": "Plain-language hover text, shown only while Studio > Use Beginner Mode is on. Each stage section uses the same keys as that stage's normal help file; a key missing here falls back to the normal text. '_matches' covers hover text written directly in the code rather than in a help file.",
+  "depthcrafter": {
+    "input_dir_or_file": "The video, or folder of videos, to turn into depth maps. A depth map is a black-and-white video showing how far away everything is: white is near, black is far.",
+    "browse_input_folder": "Pick a folder of videos to process them all in one run. A folder of numbered image frames is treated as one video.",
+    "browse_single_file": "Pick just one video, one image, or one folder of image frames.",
+    "output_dir": "Where the finished depth maps are saved.",
+    "browse_output": "Choose where the finished depth maps are saved.",
+    "inference_steps": "How many passes the AI makes while working out depth. 5 gives a quick result for testing; 10-15 is recommended for real runs. 25 is the most the model takes, and too many steps can add artifacts of their own.",
+    "target_width": "The width the video is processed at. Bigger gives more detailed depth but needs more graphics card memory and time. Must be a multiple of 64. The Resolution Preset fills this in for you.",
+    "target_height": "The height the video is processed at. Bigger gives more detailed depth but needs more graphics card memory and time. Must be a multiple of 64. The Resolution Preset fills this in for you.",
+    "seed": "The starting point for the AI's randomness. Keep the same number to get the same result when you rerun a video with the same settings. -1 picks a new one every time.",
+    "cpu_offload": "Saves graphics card memory by parking parts of the AI in regular system memory while they're not in use. If you get out-of-memory errors, try 'model', then 'sequential'. Blank is fastest if your graphics card has plenty of memory.",
+    "merge_output_format": "The file type for the finished depth map. 'mp4' is a normal video that works everywhere. 'main10_mp4' is higher precision, giving smoother depth with less banding. The sequence options save one image per frame and take much more space.",
+    "window_size": "How many frames the AI looks at together. Bigger windows keep depth steadier from frame to frame but need more graphics card memory. 60-110 is typical. Must be bigger than Overlap.",
+    "overlap": "How many frames each chunk shares with the next, so depth blends smoothly where chunks meet instead of jumping. 15-30 is typical. Must be smaller than Window Size.",
+    "target_fps": "The frame rate to process at. -1 keeps the video's own frame rate, which is what you want in almost every case. A lower number skips frames, so the depth map won't line up frame-for-frame with the original video.",
+    "latent_checkpoint": "Saves the AI's slow work on each clip once it's done, before the depth video is written. If something goes wrong after that (or you run the same clip again with the same settings), Studio asks whether to pick up from there instead of doing the slow part again. Takes some disk space until the clip finishes.",
+    "save_final_json": "Saves a small file next to each finished depth map recording the settings used. Handy for keeping track; it doesn't change the depth map.",
+    "process_as_segments": "Splits a long video into pieces, works out depth for each, then joins them back together. Use it for long videos or when your graphics card runs out of memory. Merged Output Options controls how the pieces are joined.",
+    "keep_npz": "When processing in segments, keeps each piece's raw depth data after joining. Turn it on if you might re-join them later with different settings (Re-Merge Segments). Leave it off to save disk space.",
+    "min_frames_npz": "Videos shorter than this many frames have their segment data deleted anyway, even with Keep intermediate NPZ on. 0 keeps it for every video.",
+    "segment_visual_format": "Also saves a viewable copy of each individual segment, useful for checking a piece that looks wrong. Choose 'none' to skip it and save space.",
+    "merge_dither": "For 8-bit maps only (Output Format 'mp4'). Adds a very fine noise pattern when saving, hiding the stepped 'banding' that can show up in smooth depth. A 10-bit map (main10_mp4, the default) doesn't band, so it doesn't need this.",
+    "merge_dither_strength": "How strong the dithering is, from 0 to 1. Higher hides more banding but adds more visible noise.",
+    "merge_gamma": "Reshapes the depth before saving as mp4. Above 1.0 pulls the middle of the scene closer; below 1.0 pushes it farther away.",
+    "merge_gamma_value": "The gamma amount. 1.0 changes nothing. Above 1.0 brings the middle of the scene closer; below 1.0 pushes it back.",
+    "merge_percentile_norm": "When joining segments, ignores a few extreme near and far spots when setting the overall depth range, so a handful of odd pixels can't flatten the depth of the whole video.",
+    "merge_norm_low_perc": "How much of the farthest depth to ignore when setting the range. Around 0.1 to 1 is typical.",
+    "merge_norm_high_perc": "How much of the nearest depth to ignore when setting the range. Around 99 to 99.9 is typical.",
+    "merge_alignment_method": "How neighbouring segments are matched where they overlap. 'Shift & Scale' adjusts each piece to match the one before it; 'Linear Blend' simply crossfades between them. If depth jumps where segments join, try the other option.",
+    "output_crf": "Quality versus file size for the saved video. Lower numbers mean better quality and bigger files. Leave it on 'auto' unless you need a particular file size. Doesn't apply to image sequences.",
+    "output_preset": "How much effort goes into shrinking the file. Slower presets give a smaller file at the same quality; they don't change how it looks. 'veryslow' is fine here, since saving is quick compared to the depth work.",
+    "merge_output_suffix": "Text added to the video's name for the depth map file. With '_depth', my_video.mp4 becomes my_video_depth.mp4. Splatting looks for that naming, so '_depth' is the safe choice.",
+    "open_output_folder": "Opens the output folder in File Explorer. Works while a batch is still running, so you can check finished videos early.",
+    "current_filename": "The video being processed right now.",
+    "current_resolution": "The size the frames are being processed at.",
+    "current_frames": "How many frames are in the current job.",
+    "start_button": "Starts making depth maps for the chosen videos with the current settings.",
+    "cancel_button": "Stops the batch. The video or segment in progress finishes first.",
+    "remerge_button": "Re-joins a video that was already processed in segments, using the current Merged Output Options, without redoing the slow depth work. You'll be asked to pick the _master_meta.json file from that run."
+  },
+  "splatting": {
+    "input_source_clips": "The folder with your original 2D videos.",
+    "input_source_clips_folder": "Pick a folder of videos to work through them all.",
+    "input_source_clips_file": "Pick a single video to work on.",
+    "input_depth_maps": "The folder with the depth maps from DepthCrafter. Each one must be named after its video plus '_depth', e.g. my_video_depth.mp4.",
+    "input_depth_maps_folder": "Pick the folder of depth maps that goes with your videos.",
+    "input_depth_maps_file": "Pick the depth map for the single video you chose.",
+    "output_splatted": "Where the converted files are saved. They still have gaps where hidden background was revealed, which Inpainting fills next.",
+    "multi_map": "Keep several versions of depth maps in subfolders of your depth map folder and switch between them to compare. Keys 7 and 9 switch maps.",
+    "preview_play_pause": "Play or pause the preview. Shortcut: Spacebar.",
+    "preview_fast_forward": "Skip ahead 5 frames at a time. Shortcut: Shift+Spacebar.",
+    "preview_loop": "Start the preview over from the beginning when it reaches the end.",
+    "sbs_preview": "Opens a side-by-side window for watching on a 3D TV or monitor: original on the left, converted view on the right. Only changes what you see, not the saved files.",
+    "preview_brightness": "Brightens the preview so dark scenes are easier to judge. Only affects the preview, never the saved files. 1.00 = no change.",
+    "current_video_count": "Which clip you're viewing, out of how many are loaded (e.g. 3 / 12).",
+    "full_res_batch_size": "How many frames are processed at once for the full-size output. Higher can be faster but uses more graphics card memory. Lower it if you run out.",
+    "low_res_batch_size": "How many frames are processed at once for the smaller copy made for Inpainting. This can usually be higher than the full-size batch.",
+    "low_res_width": "Width of the smaller copy made for Inpainting, which fills gaps at this size. Bigger keeps more detail but makes Inpainting slower and hungrier for memory.",
+    "low_res_height": "Height of the smaller copy made for Inpainting, which fills gaps at this size. Bigger keeps more detail but makes Inpainting slower and hungrier for memory.",
+    "resolution_preset": "Fills in Width and Height with a size Inpainting can use. You can still type your own afterwards.",
+    "depth_boost_amount": "Extra pop-out for whatever is closest to the camera. Meant for one shot at a time: it only sticks for this clip once you click Update Sidecar, and goes back to 0 when you load another clip. 0 = off.",
+    "depth_boost_thresh": "How close something has to be before Boost affects it. 0.85 means only the nearest part of the scene. Does nothing while Strength is 0.",
+    "depth_boost_curve": "How sharply the boost ramps up. Higher focuses the extra pop-out on the very closest things. Does nothing while Strength is 0.",
+    "depth_boost_prefilter": "Shapes the extra pop (Pop Out Boost and Pop-Out) along the picture's own edges, so each boosted object gets one even push right up to its real outline instead of its soft edge being stretched. Edge Clean sets how far it reaches (0 = off); a lower Edge Sens keeps more edges crisp.",
+    "pop_out_boost_enabled": "Tick to use Pop Out Boost on this scene. Unticking hides it and switches it fully off, so it can't carry over to the next scene.",
+    "frame_break_enabled": "Tick to add Frame Break bars to this scene. Unticking hides them and switches them fully off, so they can't carry over to the next scene.",
+    "keyframe_enabled": "Keyframes let settings change partway through a scene: save your settings at one frame, change them, and save again at a later frame. Unticking only hides this box; the keyframes are cleared when you load the next clip.",
+    "frame_break_bars": "Adds black letterbox bars at the top and bottom. Use the Aspect buttons to match a standard movie shape, or drag freely. 0 = no bars.",
+    "frame_break_thresh": "How close something has to be to 'break out' over the bars, for a popping-out-of-the-frame effect. 1.00 = nothing breaks out; lower it to let the nearest objects through. Only matters when bars are on.",
+    "frame_break_edge_lr": "Moves the left or the right edge of the hole the break opens in the bar - the gap your subject shows through. Positive widens that side so more shows; negative narrows it. 0 = unchanged.",
+    "frame_break_edge_global": "Widens (positive) or narrows (negative) both sides of the hole at once. Adds on top of Shift Left and Shift Right.",
+    "frame_break_edge_blur": "Softens the line where the subject meets the bars so it isn't razor sharp. 0 = hard edge.",
+    "edge_alignment": "Tidies up the depth map before the 3D is built, so depth edges line up with the edges of objects in the picture. This helps stop shimmering or ragged outlines. The preview updates as you change these.",
+    "depth_dilate_size_x": "Grows the outlines of near objects sideways in the depth map, so their 3D edge fully covers the object. Below 0 shrinks them instead. 0 = off.",
+    "depth_dilate_size_y": "Same as Expand X, but up and down.",
+    "depth_blur_size_x": "Softens depth edges sideways, smoothing jagged or flickering 3D outlines. Too much makes edges look soft.",
+    "depth_blur_size_y": "Same as Blur X, but up and down.",
+    "depth_dilate_left": "Grows depth edges toward the left only. Good for tidying blocky left-side edges without touching the right side.",
+    "depth_blur_left": "Softens only strong left-facing edges, smoothing jagged left outlines without blurring the whole depth map.",
+    "depth_blur_left_mix": "Which direction Blur Left works in: 0 = sideways only, 1 = up and down only. 0.5 (half and half) is recommended.",
+    "pop_amount": "More pop for whatever is in front of the screen, leaving the rest of the scene where it is: the background, and anything at or behind the screen, don't move at all, and subjects just in front of it barely move. The nearest things get the full extra. In the same units as Depth Strength. 0 = off.",
+    "submask_grow": "Makes the text mask from Detect Text a little bigger (or smaller, below 0), so a glow or outline around the letters stays flat on the screen too.",
+    "submask_soften": "Softens the edge of the text mask from Detect Text, so the flat text blends into the 3D picture around it.",
+    "submask_clean": "Removes the text DepthCrafter put into the depth map, around the Detect Text mask, so no warped text edges stick out past it. Raise it if edges still show; 0 turns it off.",
+    "submask_conv": "Where the subtitle text sits in depth. 0 keeps it flat on the screen; raise it to push the text back behind the screen, lower it to bring the text out toward you.",
+    "depth_gamma": "Reshapes depth in the middle of the scene. Above 1.0 brings the middle distance closer; below 1.0 pushes it back. 1.0 = no change.",
+    "max_disp": "How strong the 3D effect is. Higher gives more depth, but also more gaps for Inpainting to fill, and very high values can be hard on the eyes. Keys 4 and 6 adjust it.",
+    "estimate_dp_total": "Samples 10 frames across the clip to measure how strong the 3D actually gets with your current settings, and shows it in the readout.",
+    "convergence_point": "Where the screen sits in the scene. 1.0 puts everything behind the screen, like looking through a window. Lower values bring things out toward you; 0.0 makes everything pop out. 0.8 is a good starting point. Keys 1 and 3 adjust it.",
+    "move_to_finished_folder": "When on, videos that finish are moved into a 'finished' folder, so if you stop and start again it carries on with the rest.",
+    "dual_eye": "Builds both eyes from your video instead of using the original as the left eye. The 3D shift is shared between them, so each eye has smaller gaps to fill. Inpainting fills both eyes automatically.",
+    "dual_eye_bias": "How Dual Eye splits the 3D shift between the two eyes, as the share given to the right eye. 0.5 splits it evenly, so both eyes move the same amount and both get gaps the same size. Raise it towards 1.0 to leave the left eye closer to your original footage, at the cost of bigger gaps in the right eye. The two eyes always end up the same distance apart whatever you pick — this only decides where the gaps land. Does nothing unless Dual Eye is ticked.",
+    "start_single_button": "Converts only the clip showing in the preview.",
+    "start_button": "Converts every clip in the list with the current settings.",
+    "process_from": "Optional: the clip number to start from. Leave blank to start at the first clip.",
+    "process_to": "Optional: the clip number to stop at. Leave blank to go to the end.",
+    "custom_clip_range": "Tick to convert only some of the clips, from one clip number to another. Leave it unticked to convert them all.",
+    "stop_button": "Stops processing safely.",
+    "preview_auto_converge": "Works out a Converge setting for this clip automatically and moves the slider. Needs Auto-Convergence set to Average or Peak, in the Splatting & Output Settings section (normal mode).",
+    "update_sidecar_button": "Saves this clip's settings (Depth Strength, Converge and so on) with the clip, so its conversion and the later stages use them. Shortcut: Enter.",
+    "encoding_encoder": "Auto encodes on your NVIDIA graphics card when it can, which is much faster. Force CPU always uses the processor instead. The CRF quality setting works either way.",
+    "encoding_quality": "How much time the encoder spends squeezing the file. Slower gives a smaller file at the same quality but takes longer. Medium is the default.",
+    "encoding_tune": "Tunes the encoder for a type of footage, such as Film, Animation or Grain. Only used when encoding on the CPU. None is fine for most videos.",
+    "encoding_nvenc_lookahead_enabled": "Lets the graphics card encoder look at upcoming frames to make better choices. Can improve quality a little, but uses more graphics card resources.",
+    "encoding_nvenc_lookahead": "How many upcoming frames Lookahead looks at. More can help quality but takes more time and memory.",
+    "encoding_nvenc_spatial_aq": "Gives more detail to busy parts of each frame, such as textures and foliage.",
+    "encoding_nvenc_temporal_aq": "Shares detail out across frames based on motion, which helps scenes with a lot of movement.",
+    "encoding_nvenc_aq_strength": "How strongly Spatial and Temporal AQ move detail around, from 1 to 15. Stick to moderate values; very high ones can cause visible artifacts.",
+    "output_crf": "Quality versus file size. Lower numbers mean better quality and bigger files. 18 is high quality; 23 is good quality.",
+    "color_tags_mode": "Labels the video file with its color information so players show the colors correctly. Auto copies it from your source. This only adds labels; it doesn't change the picture.",
+    "dnxhr_fullres_split_tooltip": "Saves the full-size result in DNxHR, a high-quality editing format, instead of the usual compressed video. The picture then stays visually lossless as it moves on to Inpainting and Merging.\n⚠ The files are very large: several gigabytes per minute of footage. Only use it if you have the disk space.\nChoose 8-bit for 1080p Blu-rays and web rips, 10-bit for HDR and 10-bit videos (see DNxHR Profile).",
+    "dnxhr_profile": "Quality level of the DNxHR file. Match it to your video:\n• 8-bit (SQ, HQ): best for 1080p Blu-rays and web rips. HQ looks better; SQ is smaller.\n• 10-bit (HQX, 444): for HDR and 10-bit videos, such as 4K Blu-rays. HQX is the usual choice; 444 makes very large files."
+  },
+  "inpainting": {
+    "input_folder": "The folder of smaller files made by Splatting. Inpainting uses these to fill in the gaps the 3D conversion left behind.",
+    "output_folder": "Where the finished, gap-filled videos are saved.",
+    "num_inference_steps": "How many passes the AI makes when filling gaps. 5 gives a quick result for testing; 10-15 is recommended for real runs. 25 is the most the model takes, and too many steps can add artifacts of their own.",
+    "original_input_blend_strength": "Where chunks of video join, how much to lean on the original picture versus the frames already filled in. Higher sticks closer to the original with less invented detail; lower keeps fills more consistent between chunks. 0 = off.",
+    "tile_num": "Splits each frame into a grid (2 = 2x2) and fills each piece separately, so large videos fit in graphics card memory. 1 = no splitting.",
+    "frame_overlap": "How many frames each chunk shares with the one before, so fills blend smoothly where chunks meet instead of jumping. More is safer on moving shots but slower, since those frames get filled twice. Default 5.",
+    "frames_chunk": "How many frames the AI fills at once. 25 is as high as this one goes well — push it further and pans can come out scrambled. Lower it only if you run out of graphics card memory. Default 25.",
+    "offload_type": "Saves graphics card memory by moving parts of the AI into regular system memory. If you run out of memory, try 'model' first, then 'sequential', which saves the most but is slowest. 'none' is fastest.",
+    "move_to_finished": "When on, finished videos are moved into a 'finished' folder, so the next run skips them and picks up where it left off.",
+    "blend_mask_source": "Which outline of the gaps to use when blending the fills into the full-size picture: 'hires' from the full-size file, 'lowres' scaled up from the small file, or 'hybrid' (full-size where available).",
+    "mask_initial_threshold": "Decides how faint a mark in the gap outline still counts as a gap, before the Kernel settings below are applied. 0 skips this step.",
+    "mask_post_threshold": "After the Kernel settings, turns the softened outline back into a hard edge. 0 keeps it soft, which fades the fill in more gently.",
+    "mask_morph_kernel_size": "Fills tiny holes and specks in the gap outline so the blend covers them cleanly. 0 = off.",
+    "mask_dilate_kernel_size": "Grows the gap outline outward so the fill covers the very edge of each gap, hiding thin leftover lines. 0 = off.",
+    "mask_blur_kernel_size": "Feathers the gap outline so the fill fades into the picture instead of ending in a hard edge. 0 = off.",
+    "encoding_encoder": "Auto encodes on your NVIDIA graphics card when it can, which is much faster. Force CPU always uses the processor instead. The CRF quality setting works either way.",
+    "encoding_quality": "How much time the encoder spends squeezing the file. Slower gives a smaller file at the same quality but takes longer. Medium is the default.",
+    "encoding_tune": "Tunes the encoder for a type of footage, such as Film, Animation or Grain. Only used when encoding on the CPU. None is fine for most videos.",
+    "encoding_nvenc_lookahead_enabled": "Lets the graphics card encoder look at upcoming frames to make better choices. Can improve quality a little, but uses more graphics card resources.",
+    "encoding_nvenc_lookahead": "How many upcoming frames Lookahead looks at. More can help quality but takes more time and memory.",
+    "encoding_nvenc_spatial_aq": "Gives more detail to busy parts of each frame, such as textures and foliage.",
+    "encoding_nvenc_temporal_aq": "Shares detail out across frames based on motion, which helps scenes with a lot of movement.",
+    "encoding_nvenc_aq_strength": "How strongly Spatial and Temporal AQ move detail around, from 1 to 15. Stick to moderate values; very high ones can cause visible artifacts.",
+    "output_crf": "Quality versus file size. Lower numbers mean better quality and bigger files. Good ranges: 18-23 for H.264, 23-28 for H.265, and 15-20 when encoding on an NVIDIA graphics card (NVENC)."
+  },
+  "merging": {
+    "current_total_frames": "How many frames long this clip is. During a batch it follows the clip being merged.",
+    "reset_mask_parameters": "Puts the eight mask sliders above back to their starting values. Nothing else changes.",
+    "inpainted_folder": "The folder of gap-filled videos from Inpainting.",
+    "original_folder": "The folder of your original 2D videos. Needed for the left eye when Inpainting only produced the right eye.",
+    "mask_folder": "The folder of full-size files from Splatting, used to blend the filled-in areas into the full-quality picture.",
+    "output_folder": "Where the finished 3D videos are saved.",
+    "use_gpu": "Uses your graphics card for part of the work, which is faster. Turn it off if your graphics card is short on memory.",
+    "output_format": "The kind of 3D video to make. Full SBS (side by side) is the best quality. Half SBS works with more TVs and players but at lower resolution. Anaglyph is for red/cyan glasses.",
+    "pad_to_16_9": "Adds black bars above and below so the video is a standard 16:9 shape, which some 3D players need. Useful for wide movies such as 1920x800.",
+    "add_borders": "Applies the edge borders saved for each clip in Splatting, which hide messy bits along the edges of the picture.",
+    "resume": "When on, finished videos are moved into a 'finished' folder and skipped next time, so an interrupted batch picks up where it stopped.",
+    "batch_chunk_size": "How many frames are held in memory at once. Lower it if you run out of memory on long videos.",
+    "start_blending": "Merges every video found in the folders with the current settings.",
+    "stop_blending": "Stops once the current piece of video is finished.",
+    "process_current_clip": "Merges only the clip showing in the preview. Good for testing settings before running the whole batch.",
+    "encoding_encoder": "Auto encodes on your NVIDIA graphics card when it can, which is much faster. Force CPU always uses the processor instead. The CRF quality setting works either way.",
+    "encoding_quality": "How much time the encoder spends squeezing the file. Slower gives a smaller file at the same quality but takes longer. Medium is the default.",
+    "encoding_tune": "Tunes the encoder for a type of footage, such as Film, Animation or Grain. Only used when encoding on the CPU. None is fine for most videos.",
+    "encoding_nvenc_lookahead_enabled": "Lets the graphics card encoder look at upcoming frames to make better choices. Can improve quality a little, but uses more graphics card resources.",
+    "encoding_nvenc_lookahead": "How many upcoming frames Lookahead looks at. More can help quality but takes more time and memory.",
+    "encoding_nvenc_spatial_aq": "Gives more detail to busy parts of each frame, such as textures and foliage.",
+    "encoding_nvenc_temporal_aq": "Shares detail out across frames based on motion, which helps scenes with a lot of movement.",
+    "encoding_nvenc_aq_strength": "How strongly Spatial and Temporal AQ move detail around, from 1 to 15. Stick to moderate values; very high ones can cause visible artifacts.",
+    "output_crf": "Quality versus file size. Lower numbers mean better quality and bigger files. Good ranges: 18-23 for H.264, 23-28 for H.265, and 15-20 when encoding on an NVIDIA graphics card (NVENC)."
+  },
+  "scenecut": {
+    "video_path": "The video you want to chop into its separate shots. Drop a file here or use Browse.",
+    "output_dir": "Where the pieces go. Every scene is saved here as its own short video, plus any lists or thumbnails you tick below.",
+    "detector_type": "Which AI finds the cuts. AutoShot is a good all-rounder. OmniShotCut is better for cartoons, anime, gaming and screen recordings, and it also understands fades and dissolves. Try AutoShot first; switch if it misses cuts or finds ones that are not there.",
+    "device": "Where the AI runs. Leave on auto - it will use your graphics card if it can, which is much faster.",
+    "threshold": "How picky the AI is about what counts as a cut. Lower finds more cuts (including some that are not really there); higher finds fewer. The starting value is usually fine - only change it if the results look wrong.",
+    "min_scene_len": "The shortest a scene is allowed to be, in frames. Anything shorter gets joined onto the scene next to it. Stops a flash or a quick flicker becoming its own tiny clip.",
+    "omnishot_mode": "clean_shot keeps only hard cuts - fades and dissolves get folded into the scene before them. default treats each fade or dissolve as its own separate piece. Start with clean_shot.",
+    "omnishot_overlap": "How much the AI re-checks between passes so it does not miss a cut at the join. Higher is slightly slower and slightly safer. 20 is fine.",
+    "omnishot_confidence": "How sure the AI must be before it calls something a cut. 0 keeps everything it finds. Raising it drops the doubtful ones fast, so go up in small steps (try 0.3) and check the results.",
+    "snap_cuts": "Nudges each cut to land on exactly the right frame. Leave this on - it stops a frame of the old shot appearing at the start of the new one.",
+    "ai_validate": "A second, slower AI double-checks every cut and throws away false alarms from camera flashes, fast movement or near-black frames. Needs an NVIDIA graphics card and the extra DINOv3 files. Turn it on if you are getting cuts where nothing actually changed.",
+    "ai_window": "How many frames either side of a cut the checking AI looks at. The default is fine.",
+    "flash_sensitivity": "How eager the checker is to treat a sudden brightness jump as a camera flash rather than a real cut. Lower catches more flashes. Only worth changing on footage full of flashes or strobing.",
+    "export_csv": "Also save a spreadsheet listing every scene with its start and end times.",
+    "export_html": "Also save a web page listing every scene, which you can open in a browser.",
+    "export_sc": "Also save a cut list that DaVinci Resolve can read, so the cuts appear on its timeline.",
+    "sc_offset": "Shifts every cut in that Resolve list by a few frames. Leave at 0 unless your editor counts frames from somewhere else.",
+    "save_images": "Also save a few still pictures from each scene, so you can see what each one contains without opening it.",
+    "num_images": "How many still pictures to save per scene.",
+    "frame_margin": "How many frames to skip at the start and end of a scene before grabbing a still, so you do not get a picture of the cut itself.",
+    "split_ffmpeg": "Actually write out each scene as its own video file. This is the one to tick: those clips are what you feed into DepthCrafter next, and Studio will offer to load them for you when it finishes.",
+    "ffmpeg_codec": "The video format the pieces are saved in. Fixed at high-quality 10-bit, using your NVIDIA card when it can, so nothing is lost before the 3D work starts.",
+    "ffmpeg_preset": "Speed against quality when saving. p1 is fastest and roughest, p7 is slowest and best. The default p7 is worth the wait here.",
+    "ffmpeg_cq": "Quality of the saved pieces - lower numbers mean better quality and bigger files. The default is already high quality.",
+    "split_ffmpeg_accuracy": "The pieces are cut on exactly the frame the AI picked, and every piece is checked afterwards to make sure it has the right number of frames.",
+    "start_detection": "Find the cuts and make everything you have ticked above. Watch the bar at the bottom for progress."
+  },
+  "_matches": [
+    {
+      "starts_with": "Pin the CURRENT Pop Out Boost / Depth Map Pre-processing",
+      "text": "Saves your current settings at the frame you're on in the preview. Static: when the video reaches this frame, the settings snap straight to these.\n\nPreview only for now: the finished video uses the settings as they are when you press Start."
+    },
+    {
+      "starts_with": "Pin the CURRENT values to the frame the scrubber is on",
+      "text": "Saves your current settings at the frame you're on in the preview. Dynamic: the settings change gradually from the last keyframe to these, instead of snapping.\n\nPreview only for now: the finished video uses the settings as they are when you press Start."
+    },
+    {
+      "starts_with": "Remove the keyframe at the frame the scrubber is currently on",
+      "text": "Deletes the keyframe on the frame you're on in the preview, if there is one."
+    },
+    {
+      "starts_with": "Remove every keyframe for this clip.",
+      "text": "Deletes all the keyframes in this clip. It asks you first."
+    },
+    {
+      "starts_with": "Folder containing matching high-resolution splatted files",
+      "text": "The folder of full-size files from Splatting. They're used at the end to blend the filled-in areas back in at full quality."
+    },
+    {
+      "starts_with": "Direction for inpainting:",
+      "text": "Which way through the video to fill gaps: Forward, Reverse, or Both (forward, then reverse)."
+    },
+    {
+      "starts_with": "Fill the Lo-Res and Hi-Res Blend Folders from the most",
+      "text": "Fills in the Lo-Res and Hi-Res Blend Folders from the last Splatting job run on this computer. This replaces whatever is in those boxes now.",
+      "keep_from": "Most recent job:"
+    },
+    {
+      "starts_with": "Fill Input Source Clips and Input Depth Maps from the most",
+      "text": "Fills in Input Source Clips and Input Depth Maps from the last DepthCrafter job run on this computer. This replaces whatever is in those boxes now.",
+      "keep_from": "Most recent job:"
+    },
+    {
+      "starts_with": "Fill the Inpainted, Original and Mask folders from the most",
+      "text": "Fills in the Inpainted, Original and Mask folders from the last Inpainting job run on this computer. This replaces whatever is in those boxes now.",
+      "keep_from": "Most recent job:"
+    },
+    {
+      "regex": "^Snap the Bar Size slider to (?P<ratio>.+?): the bars",
+      "text": "Sets the bars to the {ratio} movie shape for this video. Only shapes wider than the video get a button."
+    },
+    {
+      "starts_with": "After merging, also split each Full SBS output",
+      "text": "Also saves separate left-eye and right-eye videos (_L and _R) for each Full SBS output."
+    },
+    {
+      "starts_with": "Adds 35mm-style grain ONLY where the blend mask is active",
+      "text": "Adds film grain to just the filled-in areas, so they match the grain of the original footage instead of looking too clean. The original picture isn't touched. Fine-tune it in Grain Match Preview."
+    },
+    {
+      "starts_with": "Before each clip renders, measures the master's grain",
+      "text": "Adds film grain to just the filled-in areas so they match the grain of your original footage instead of looking too clean, measuring how much each clip needs on its own before it renders. The original picture is never touched. Leave it unticked and no grain is added at all. Clips you've already tuned by hand are left alone."
+    },
+    {
+      "starts_with": "Opens a tuning window on the current preview clip with all grain",
+      "text": "Opens a window to compare the grain in the filled-in areas with the original footage, and adjust it until they match."
+    },
+    {
+      "starts_with": "Sets Red Reduce and Brightness to 0 and Contrast to 1",
+      "text": "Resets the fill color adjustments (Red Reduce, Brightness and Contrast) to their defaults. Grain settings aren't changed. Double-click a single slider to reset just that one."
+    },
+    {
+      "starts_with": "Fixed seed reproduces the exact grain pattern",
+      "text": "Keep the same number to get the exact same grain pattern every run. -1 makes a new pattern each time."
+    },
+    {
+      "starts_with": "Sets Amount so the fill's measured grain",
+      "text": "Sets the grain Amount to match the original footage, measured on the current frame. Size, Luma Falloff and Chroma still need to be judged by eye."
+    },
+    {
+      "starts_with": "8-bit encoding preset.",
+      "text": "For ordinary footage: standard 1080p Blu-ray rips and regular web or streaming videos. Picking 10-bit for these only makes bigger, slower files. Applies your saved version of this preset and never changes CRF. If neither button is lit, custom settings are in use."
+    },
+    {
+      "starts_with": "10-bit encoding preset",
+      "text": "For higher-quality sources: 4K Blu-ray (UHD) rips, 4K HDR web files, or 1080p you've converted from Dolby Vision yourself. Keeps smooth gradients from showing bands. Applies your saved version of this preset and never changes CRF. If neither button is lit, custom settings are in use."
+    },
+    {
+      "starts_with": "Select which image layer to display in the preview window",
+      "text": "Chooses what the preview shows, such as the finished result or one of the steps along the way. Only changes what you see."
+    },
+    {
+      "starts_with": "Scans the 'Inpainted Video Folder' for valid files",
+      "text": "Finds the videos in your folders and loads the first one into the preview. Click it again to rebuild the list after adding files."
+    },
+    {
+      "starts_with": "Releases the currently loaded preview and frees its GPU memory",
+      "text": "Closes the preview and frees up graphics card memory. Handy before starting a long render."
+    },
+    {
+      "starts_with": "Load the previous video in the list",
+      "text": "Shows the previous clip in the list."
+    },
+    {
+      "starts_with": "Load the next video in the list",
+      "text": "Shows the next clip in the list."
+    },
+    {
+      "starts_with": "Enter a video number and press Enter to jump",
+      "text": "Type a clip number and press Enter to jump straight to it."
+    },
+    {
+      "starts_with": "Displys which frame number",
+      "text": "Which frame you're on, out of the total."
+    },
+    {
+      "starts_with": "Play/Pause (frame-by-frame)",
+      "text": "Play or pause the preview. Shortcut: Spacebar."
+    },
+    {
+      "starts_with": "Fast Forward (step N frames)",
+      "text": "Skips ahead through the preview. The box next to it sets how many frames each step jumps. Shortcut: Shift+Spacebar."
+    },
+    {
+      "starts_with": "Select the number of frames to skip during Fast Forward",
+      "text": "How many frames each Fast Forward step skips."
+    },
+    {
+      "starts_with": "Loop playback.",
+      "text": "Start the preview over from the beginning when it reaches the end."
+    },
+    {
+      "starts_with": "Select the size of the video preview",
+      "text": "How big the preview is. Larger sizes can make playback slower."
+    }
+  ]
+}

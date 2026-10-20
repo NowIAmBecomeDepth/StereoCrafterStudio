@@ -1,0 +1,123 @@
+THIRD-PARTY NOTICES / ACKNOWLEDGEMENTS (StereoCrafter R bundle)
+
+Suggested placement:
+- This file may be kept inside dependency_R/ for a compact add-on style share.
+- If you later redistribute a full modified repository, root-level placement is also reasonable.
+
+====================================================================
+1) StereoCrafter base repository materials
+====================================================================
+
+This R bundle is an alternate GUI/dependency layer intended to be used alongside
+another StereoCrafter branch.
+
+Base repository materials reviewed:
+- License-Code.txt
+- README.md
+
+Summary from the base StereoCrafter materials:
+- The StereoCrafter inference code license text states that the StereoCrafter
+  inference code and weights are provided under the terms in License-Code.txt.
+- That notice says use is limited to academic, research, and education purposes,
+  and excludes commercial or production use.
+- The original copyright and permission notice should be included in copies or
+  substantial portions of the software.
+
+The original StereoCrafter README also acknowledges upstream projects including:
+- Stable Video Diffusion
+- DepthCrafter
+
+Practical recommendation:
+- Keep the original base-repo License-Code.txt with any shared package.
+- Keep the original base-repo README.md with any shared package.
+
+====================================================================
+2) Stability AI code (referenced by StereoCrafter materials)
+====================================================================
+
+The base StereoCrafter License-Code.txt references Stability AI code under the
+MIT License.
+
+Practical recommendation:
+- Keep the original base-repo License-Code.txt with your shared package.
+
+====================================================================
+3) DepthCrafter (referenced by StereoCrafter materials)
+====================================================================
+
+The base StereoCrafter README acknowledges DepthCrafter as an upstream project.
+
+Practical recommendation:
+- Keep the original base-repo README.md / acknowledgements with your shared package.
+
+====================================================================
+4) M2SVID-derived / vendored components
+====================================================================
+
+This package may include vendored and/or adapted M2SVID-derived components,
+including M2S-style warping and helper code.
+
+Files previously reviewed from the M2S-derived area identify Google LLC /
+Apache License 2.0 in source headers.
+
+The M2S GUI README reviewed also states:
+- This Windows GUI project is a fork / standalone GUI around M2SVID.
+- GUI developed by Archit.
+- Original research and code by Nina Shvetsova et al. (3DV 2026).
+- Original repository reference: google-research/m2svid
+
+Practical recommendation:
+- If you include the M2S-derived files, also include Apache License 2.0 text.
+- A safe attribution line is:
+
+  "This package includes vendored and/or adapted M2SVID-derived components,
+   including M2S-style warping and helper code. Relevant files are identified
+   in source headers as copyright Google LLC and licensed under the Apache
+   License, Version 2.0."
+
+====================================================================
+5) Additional third-party items referenced by the M2S GUI materials
+====================================================================
+
+The M2S GUI README reviewed lists these additional third-party sources:
+- Hi3D-Official — MIT License
+- bidavideo — MIT License
+- RAFT — BSD 3-Clause License
+
+Because these were listed in the reviewed M2S materials, the conservative /
+safe approach is:
+- mention them here, and
+- preserve any original upstream notices/license files if they are present in
+  the package you actually share.
+
+====================================================================
+6) Modification note
+====================================================================
+
+This R bundle includes local modifications such as:
+- alternate GUI entry points
+- dependency isolation (dependency_R)
+- local compatibility patches
+- GUI / workflow changes specific to this branch setup
+
+====================================================================
+7) Safe sharing checklist
+====================================================================
+
+For a conservative share, keep:
+- this notice file
+- the original base-repo License-Code.txt
+- the original base-repo README.md
+- Apache License 2.0 text if M2S-derived files are included
+- any original upstream NOTICE / LICENSE files that are already present in the
+  material you are shipping
+
+For a compact dependency_R-style share:
+- placing this file inside dependency_R/ is acceptable
+
+Optional note to include in a readme or release post:
+- "This package contains modified StereoCrafter GUI/dependency files and may
+   include vendored/adapted M2SVID-related components. See this notice file and
+   the included upstream license/readme files for attribution and licensing."
+
+End of notice.

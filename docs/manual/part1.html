@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started · StereoCrafter Studio Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body>
+
+<div class="caption">
+  <img src="../../assets/StereoCrafter.ico" alt="">
+  <span>StereoCrafter Studio · Manual</span>
+  <span class="where">Part 1 of 5</span>
+</div>
+
+<nav class="tabs">
+  <a href="index.html">Contents</a>
+  <a href="part1.html" class="current"><span class="n">1.</span>Getting started</a>
+  <a href="part2.html"><span class="n">2.</span>The pipeline</a>
+  <a href="part3.html"><span class="n">3.</span>Depth Map Editor</a>
+  <a href="part4.html"><span class="n">4.</span>Running jobs</a>
+  <a href="part5.html"><span class="n">5.</span>Customising</a>
+  <a href="appendices.html">Appendices</a>
+</nav>
+
+<main class="page">
+
+<header class="hero">
+  <div class="kicker">Part 1</div>
+  <h1>Getting started</h1>
+  <p>What Studio does, how to start it, what everything on the screen is for, and how to lay out
+     your folders so Studio can find your work by itself.</p>
+</header>
+
+<!-- ======================================================================== -->
+<section class="section" id="what">
+  <h2><span class="num">1</span> What Studio does <a class="anchor" href="#what">#</a></h2>
+
+  <p>StereoCrafter Studio turns an ordinary 2D video into 3D. It does this in steps, and each step
+     has its own tab at the top of the window. You work through them from left to right, and the
+     result of each step is what the next one starts from.</p>
+
+  <div class="pipeline">
+    <div class="stage extra">
+      <div class="n">EXTRA</div>
+      <div class="name">Scene Cut</div>
+      <div class="does">Splits a whole movie into short clips, one per shot, and sorts them into chapters.
+        The cutting is a must; using this tool for it is optional.</div>
+    </div>
+    <div class="stage">
+      <div class="n">1.</div>
+      <div class="name">DepthCrafter</div>
+      <div class="does">Makes a <b>depth map</b> for each clip: a black-and-white video where white is near and black is far.</div>
+    </div>
+    <div class="stage">
+      <div class="n">2.</div>
+      <div class="name">Splatting</div>
+      <div class="does">Uses the depth map to build the second eye's view: things shift sideways by how near they are.
+        <b>This is where your main 3D effect editing happens</b>: Disparity (Depth Strength), Depth Map
+        Pre-processing (Edge Alignment) and the Special FX.</div>
+    </div>
+    <div class="stage">
+      <div class="n">3.</div>
+      <div class="name">Inpainting</div>
+      <div class="does">The Splatting stage creates holes in the frame where the image was warped.
+        Inpainting uses generative AI to fill in those gaps for a much cleaner right eye view.</div>
+    </div>
+    <div class="stage">
+      <div class="n">4.</div>
+      <div class="name">Merging</div>
+      <div class="does">Puts the left and right eyes together into the finished 3D video.</div>
+    </div>
+  </div>
+  <p class="pipeline-foot">Beside the four numbered stages, the <span class="btn">Extra</span> tab holds
+     <b>Scene Cut</b>, the <b>Depth Map Editor</b>, where you can fix a depth map by hand before
+     Splatting uses it (Part 3), and <b>Edge Fill</b>, for the strip a deep warp leaves at a frame's edge.</p>
+
+  <h3>Where your clips come from</h3>
+  <p><b>DepthCrafter needs your movie cut into short clips, one per shot.</b> It's a <i>temporal</i>
+     model: it looks at a run of frames together and keeps the depth steady from one frame to the
+     next, as long as they belong to the same scene. Give it a clip with several shots in it and it
+     tries to keep the depth consistent across the cuts too, between scenes that have nothing in
+     common, and the depth map quickly gets worse. So every clip should be a single shot.</p>
+  <p><b>What's optional is the tool you cut with.</b> You can use any you like: DaVinci Resolve's scene
+     cut detection, another editor, or by hand. Put the clips in your Source folder (section 4) and
+     start at DepthCrafter. <b>Scene Cut</b> is included for convenience, so you can do the cutting
+     without leaving Studio, which is why it sits in the <span class="btn">Extra</span> tab rather
+     than being a numbered stage.</p>
+
+  <h3>Where the 3D look is made</h3>
+  <p>Most of your creative choices happen in <b>Splatting</b>. <b>Disparity</b> (Depth Strength) sets how
+     deep the 3D is, <b>Depth Map Pre-processing</b> (Edge Alignment) tidies the depth map so its edges line
+     up with the edges of
+     objects in the picture (no shimmering or ragged outlines), and the
+     <b>Special FX</b> add things like Pop Out Boost, Frame Break and Rain (rain put at depths of its own). The other stages mostly run on
+     their own once they're set up.</p>
+  <div class="note"><b>Two names</b><span>A name in brackets is the plainer one Beginner Mode shows in
+     its place: <span class="set">Disparity</span> is <b>Depth Strength</b>, the
+     <span class="set">Depth Map Pre-processing</span> panel is <b>Edge Alignment</b>, and its
+     <span class="set">Dilate</span> knobs are <b>Expand</b>. This manual uses the normal names first.</span></div>
+
+  <h3>What you end up with</h3>
+  <p>A <b>side-by-side</b> 3D video: the left eye's picture and the right eye's picture next to each
+     other in one frame. 3D TVs, VR headsets and 3D players know how to show each picture to the
+     right eye.</p>
+
+  <div class="note"><b>Good to know</b><span>Every step runs on your graphics card, and the AI steps
+     (DepthCrafter and Inpainting) take a while: minutes per clip, not seconds. Studio is built to
+     run a whole chapter on its own while you do something else.</span></div>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="install">
+  <h2><span class="num">2</span> Installing and starting Studio <a class="anchor" href="#install">#</a></h2>
+
+  <h3>What your computer needs</h3>
+  <ul>
+    <li><b>Windows</b> and an <b>NVIDIA RTX graphics card</b>: any RTX 20, 30, 40 or 50 series card,
+        or an RTX workstation card, with an up-to-date driver (version 580 or newer). Studio does its
+        work on the card. GTX 10 series and older NVIDIA cards can't run it, and neither can cards
+        from other makers.</li>
+    <li><b>Graphics memory (VRAM):</b> the more the better. 16 GB runs everything comfortably;
+        smaller cards work with lighter settings (see <a href="appendices.html#cards">Appendix A</a>). Inpainting V2, an experimental
+        option for problem scenes only, is the exception: it wants 20 GB or more, or plenty of system memory instead (see <a href="part2.html#inp-v2">Inpainting V2</a>).
+        Studio has been tested on a machine with an RTX 5060 Ti with 16 GB of VRAM and 32 GB of system
+        RAM.</li>
+    <li>Two free tools that must be installed and <i>on your PATH</i> (so any program can find them):
+      <b>Git</b> (the installer installs it if it's missing) and <b>FFmpeg</b> -- a full build, with
+      <code>ffprobe</code>. You <i>don't</i> need the CUDA Toolkit: Studio's PyTorch brings its own CUDA.
+      Studio checks the driver and FFmpeg each time it starts and tells you what's missing.</li>
+    <li>Plenty of disk space. Every step writes full videos, and a long chapter can use tens of
+        gigabytes while it runs.</li>
+  </ul>
+
+  <h3>Installing</h3>
+  <ol>
+    <li>Make a folder where you want Studio to live, and run the installer script
+        <code>StereoCrafter_1click_Installer.bat</code> from inside it.</li>
+    <li>When it asks, let it download the core models (<b>weights</b>, about 22 GB) into the
+        <code>weights</code> folder. One of them, Stable Video Diffusion, is <b>gated</b>: before you run the
+        installer, accept its terms on
+        <a href="https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1">its Hugging Face page</a>
+        and make a read token in your Hugging Face settings -- the installer asks for it.</li>
+  </ol>
+  <p>The other models are needed only for the tools that use them, and each is fetched when you want it:</p>
+  <ul>
+    <li><b>SAM 3</b> (Depth Map Editor, 3.4 GB, gated): <span class="btn">Download Weights</span> on the
+      editor's Segment page -- see <a href="part3.html#sam3">Setting up SAM 3</a>.</li>
+    <li><b>ROSE</b> (Erase from Clip, Edge Fill, about 3.7 GB): <span class="btn">Set Up ROSE</span> in the
+      editor's Erase panel.</li>
+    <li><b>Scene Cut's detectors</b>: the SceneCutGUI checkpoint bundle, linked in the README, into
+      <code>weights/SceneCut</code> -- only the detectors you use.</li>
+    <li><b>Inpainting V2</b> (experimental, 46.6 GB): <span class="btn">Download V2 Weights</span> on its page
+      fetches just the files it uses -- Wan 2.1 VACE's text encoder, VAE and tokenizer, and StereoCrafter2.</li>
+  </ul>
+  <div class="tip"><b>Tip</b><span>Without the core models in <code>weights</code>, DepthCrafter downloads its
+     own the first time it runs (about 10 GB), so that first job takes longer and needs an internet
+     connection.</span></div>
+
+  <h3>Starting Studio</h3>
+  <p>Double-click <code>StereoCrafter Studio.exe</code> in your Studio folder. A small black window
+     may flash up for a moment while Studio checks that everything is installed; then the Studio
+     window opens on the stage you used last.</p>
+  <p><b>Your project folder</b> sits in the middle of the title bar, at the top of the window. Until you
+     choose one it reads <i>Select project folder…</i>: click it and pick the folder your project lives in.
+     From then on every stage keeps its input and output for each chapter inside it, and the project's name
+     shows there instead. Once you have a few projects in one folder, the same click lists them all as
+     tiles to switch between (<a href="#switch-project">Switching projects</a>; <a href="#project">section 4</a> shows how to lay a
+     project out).</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/38_project_button.webp" alt="The project button in the middle of the title bar, its list of projects open"></div></div>
+    <figcaption>The project button in the middle of the title bar, here on <b>Demo Project</b>, with the list
+      it opens: each project a tile, its poster a picture from the project's folder.
+      <span class="btn">Open Other Project…</span> picks any folder.</figcaption>
+  </figure>
+  <div class="tip"><b>A desktop shortcut</b><span>Right-click <code>StereoCrafter Studio.exe</code> and choose
+     <b>Send to &gt; Desktop (create shortcut)</b> (on Windows 11, <b>Show more options</b> first) to start Studio
+     from your desktop, or pin it to the taskbar. The <b>App Icon</b> picker in the theme popout changes the icon's
+     colour live -- on the window, the taskbar and that shortcut.</span></div>
+  <p>Studio remembers your settings, folders, theme and window size by itself, and saves them when
+     you close it. If something goes wrong before the window appears, a window opens with the
+     error so you can see what happened.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="tour">
+  <h2><span class="num">3</span> A tour of the window <a class="anchor" href="#tour">#</a></h2>
+
+  <p>Every stage's page is laid out the same way, so once you know one you know them all. This is
+     DepthCrafter's page.</p>
+
+  <figure class="shot" data-markers="01_window">
+    <div class="frame"><div class="canvas">
+      <img src="shots/01_window.webp" alt="The Studio window on the DepthCrafter page">
+      <span class="marker" style="left:17.5%;top:1.9%">1</span>
+      <span class="marker" style="left:49.6%;top:4.6%">2</span>
+      <span class="marker" style="left:71.2%;top:4.6%">3</span>
+      <span class="marker" style="left:61%;top:4.4%">4</span>
+      <span class="marker" style="left:65.7%;top:3%">5</span>
+      <span class="marker" style="left:81.6%;top:4.6%">6</span>
+      <span class="marker" style="left:1.5%;top:11.4%">7</span>
+      <span class="marker" style="left:84.8%;top:64%">8</span>
+      <span class="marker" style="left:43%;top:93%">9</span>
+      <span class="marker" style="left:5.6%;top:98.4%">10</span>
+    </div></div>
+    <figcaption>The DepthCrafter page, with a chapter picked.</figcaption>
+  </figure>
+
+  <ol class="callouts">
+    <li><div><b>Title bar.</b> Drag it to move the window, double-click it to fill the screen. The
+        three buttons on the right are the usual minimise, maximise and close. In the middle is the
+        name of the project you're working on: click it to switch to another project (see
+        <a href="#switch-project">Switching projects</a>).</div></li>
+    <li><div><b>Stage tabs.</b> One tab per step, numbered in the order you use them, then
+        <span class="btn">Extra</span>. Click a tab to change stage. <kbd>Ctrl</kbd>+<kbd>Tab</kbd>
+        goes to the next one. Hover over <span class="btn">Extra</span> to pick one of its tools from the list
+        that drops down; a click on the tab opens the one you used last.</div></li>
+    <li><div><b>Theme.</b> Colours and look: pick a theme, and turn Frosted Glass, Section Outlines
+        and Film Grain on or off. The <b>UI Scale</b> knob makes everything bigger or smaller
+        (Part 5).</div></li>
+    <li><div><b>Beginner Mode.</b> Hides the advanced settings and explains everything in plainer
+        words. See <a href="#beginner">section 5</a>.</div></li>
+    <li><div><b>Settings</b> (the gear, or <kbd>Ctrl</kbd>+<kbd>,</kbd>). Everything that isn't on the
+        page: your project folder, saving settings, the GPU, and each stage's extra options. Right of it,
+        the <b>bell</b> keeps every message Studio has shown this session (a job finished, a folder set, a
+        problem), newest first; a number on it counts the ones you haven't seen. Click it to read them,
+        and <span class="btn">Clear All</span> empties it.</div></li>
+    <li><div><b>VRAM.</b> How much of your graphics card's memory is in use right now, by every
+        program, not only Studio. Click it for the details.</div></li>
+    <li><div><b>The page.</b> The stage's settings, in panels. Hover over any setting, or its name,
+        to see what it does.</div></li>
+    <li><div><b>Current Clip Info</b> shows the clip being worked on, and has the
+        <span class="btn">Open Console</span> button (more on the console below).</div></li>
+    <li><div><b>The action bar.</b> The progress of the running job, a line saying what it's doing,
+        and the buttons that start and stop it. <span class="btn">View Output Folder</span> opens the
+        folder the results go to.</div></li>
+    <li><div><b>Status line.</b> <i>Ready</i> when nothing is running; otherwise which stage is
+        busy and what it's doing, whichever tab you're looking at.</div></li>
+  </ol>
+
+  <h3>Settings</h3>
+  <p>The gear opens Settings. The list on the left starts with the options of the stage you're
+     looking at, so it changes as you change tabs, then <b>Studio</b>, <b>Appearance</b>,
+     <b>Keyboard Shortcuts</b>, <b>Tips</b> and <b>GPU</b>. <b>Tips</b> lists every tip in Studio, by stage --
+     the same ones each stage shows, one at a time, just above its progress bar.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/03_settings_studio.webp" alt="Settings, open at Studio"></div></div>
+    <figcaption>Settings → Studio: save everything now, set your project folder, check for a newer
+      Studio, open the console, or quit.</figcaption>
+  </figure>
+  <p><b>Appearance</b> has two groups:</p>
+  <ul>
+    <li><b>Window</b>: <b>Show Tips</b> turns the tips above each stage's progress bar on or off, and
+        <b>Fit Window to Content</b> sizes the window to the page you're on
+        (<kbd>Ctrl</kbd>+<kbd>0</kbd> does the same from anywhere).</li>
+    <li><b>Projects</b>: the <b>Projects Folder</b> that holds all your projects, and an optional
+        <b>TV Shows Folder</b> if you keep shows somewhere else. See
+        <a href="#switch-project">Switching projects</a>.</li>
+  </ul>
+  <p>At the top of <b>Studio</b>, <span class="btn">Open the Manual</span> opens this manual, and at the top
+     of each stage's section a button opens that stage's own part of it (<kbd>F1</kbd> does the same from
+     any page).</p>
+  <p><b>Check for Updates</b> looks for a newer Studio on its GitHub page and can install it -- there's nothing
+     to set up. <b>Check for Updates at Startup</b> (off until you turn it on) does that check once, a few seconds
+     after Studio opens, and tells you when there's something new; it doesn't check again that session
+     unless you click <b>Check for Updates</b>, and it never installs anything by itself.</p>
+
+  <h3>Picking folders and clips</h3>
+  <p>Every <span class="btn">Browse</span> button opens Studio's folder picker. Each level of folders sits
+     side by side, every folder shows how many clips (or folders) it holds, and the last column lists the
+     clips in the folder that's open.</p>
+  <ul>
+    <li><b>Click</b> a folder to open it in the next column; <b>double-click</b> it, or press
+      <span class="btn">Select Folder</span>, to use it.</li>
+    <li>Where a single clip will do (the input folders of DepthCrafter, Splatting, Inpainting and
+      Merging), <b>click a clip</b> and press <span class="btn">Select Clip</span> to work on just that
+      one; double-clicking it picks it straight away. Output folders take a folder only.</li>
+    <li><b>Right-click</b> in a column for <b>New Folder</b>: type its name and press <kbd>Enter</kbd>
+      (<kbd>Esc</kbd> cancels).</li>
+    <li><b>Right-click a folder or clip</b> for <b>Move to Recycle Bin</b>. Studio asks first, and you can
+      put it back from the Recycle Bin. On a drive with no Recycle Bin (a network share, some USB drives)
+      nothing is deleted. Something too big for its drive's Recycle Bin can't go there: Studio says so and
+      asks, as Windows does -- <b>Delete Permanently</b> removes it for good, <b>Keep It</b> leaves it. The
+      open project's folder (and a folder holding it) and the folders a running job is using can't be
+      moved to the Recycle Bin.</li>
+    <li>The path along the top is clickable, and the buttons at the top right jump to your project folder
+      or any drive.</li>
+    <li>Under the drives are four <b>Shortcuts</b> for the folders you use most. Click an empty one
+      (<b>+ Shortcut</b>) to keep the highlighted folder there; click it later to jump straight back.
+      Right-click a shortcut to change or remove it.</li>
+    <li><span class="btn">Windows Explorer…</span> opens Windows' own dialog instead, if you'd rather pick
+      that way. Where a clip will do too, it asks whether you're picking a folder or a clip.</li>
+  </ul>
+
+  <h3>The console</h3>
+  <p>The console is a separate window that shows what Studio is doing behind the scenes, line by
+     line. You don't need it to use Studio, but it's the first place to look when something goes
+     wrong. Open it with <span class="btn">Open Console</span>, or <kbd>Ctrl</kbd>+<kbd>`</kbd>.</p>
+  <figure class="shot" style="max-width:760px">
+    <div class="frame"><div class="canvas"><img src="shots/07_console.webp" alt="The console window"></div></div>
+    <figcaption>One tab per stage, plus <b>All</b>, which has everything. Progress bars are drawn
+      as bars.</figcaption>
+  </figure>
+  <ul>
+    <li>Each stage's tab shows only that stage's messages; <b>All</b> shows every message. DepthCrafter's,
+        Splatting's and Inpainting's tabs keep to the essentials: each clip's separator line, the progress
+        bars, the total times, and any warnings or errors. The rest of their detail is on <b>All</b>
+        (Splatting's and Inpainting's debug options open their tabs up again).</li>
+    <li>Every clip starts with a separator line giving its number in the batch and its name, so
+        it's easy to see where one clip's messages end and the next one's begin.</li>
+    <li>The project's name is shown at the top of the console too.</li>
+    <li>Drag across lines to select them, and <kbd>Ctrl</kbd>+<kbd>C</kbd> copies what you picked:
+        handy for asking for help. The copy button copies the whole tab.</li>
+    <li><b>Follow</b> keeps the newest line in view. It switches off when you scroll up to read.</li>
+    <li>Closing the console only hides it. Messages keep arriving, and they're all there when you open
+        it again.</li>
+  </ul>
+
+  <h3>Keyboard shortcuts</h3>
+  <p>Every shortcut is also listed in <b>Settings</b> → <b>Keyboard Shortcuts</b>. Single keys and arrows
+     work when you're not typing in a box.</p>
+  <table class="keys">
+    <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>Ctrl</kbd>+<kbd>4</kbd></td><td>Go to DepthCrafter, Splatting, Inpainting or Merging (<kbd>Ctrl</kbd>+<kbd>5</kbd>: Extra)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>Next stage (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>: the one before)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the project list (<kbd>Esc</kbd> closes it)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open or close Settings</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>`</kbd></td><td>Show or hide the console</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Fit the window to the page you're on</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>=</kbd> · <kbd>Ctrl</kbd>+<kbd>−</kbd></td><td>UI Scale up · down</td></tr>
+    <tr><td><kbd>F1</kbd></td><td>Open this manual at the stage you're on (in Extra: Scene Cut, or the Depth Map Editor's part)</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>In a preview: one frame back · forward (<kbd>Shift</kbd>: ten)</td></tr>
+    <tr><td><kbd>Home</kbd> · <kbd>End</kbd></td><td>In a preview: the first · last frame</td></tr>
+    <tr><td><kbd>↑</kbd> · <kbd>↓</kbd></td><td>In a preview: the next · previous clip</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>In a preview: play or pause (<kbd>Shift</kbd>+<kbd>Space</kbd>: fast forward)</td></tr>
+    <tr><td><kbd>F11</kbd> · <kbd>Esc</kbd></td><td>Full Preview, full screen (Splatting, Merging) · close it (F11 too)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Splatting: create or update the clip's sidecar</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Splatting: Detect Text</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>Splatting: Edit Depth Map (the clip in the Depth Map Editor)</td></tr>
+    <tr><td><kbd>S</kbd> · <kbd>D</kbd></td><td>Splatting: add a static · dynamic keyframe</td></tr>
+    <tr><td><kbd>S</kbd> · <kbd>D</kbd></td><td>Depth Map Editor: key the selected layer, static · dynamic</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Depth Map Editor: undo · redo the last edit (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes too)</td></tr>
+    <tr><td><kbd>I</kbd> · <kbd>O</kbd></td><td>Detect Text: Set From · Set To at the frame showing</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> · <kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>In the console: copy what's selected · select the whole tab</td></tr>
+  </table>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="project">
+  <h2><span class="num">4</span> Your project folder <a class="anchor" href="#project">#</a></h2>
+
+  <p>You can point each stage at any folders you like, but it's much easier to keep each movie in
+     one <b>project folder</b> laid out the way Studio expects. Then you pick a chapter from a list and
+     Studio fills in every folder for every stage by itself.</p>
+
+  <h3>How to lay out the folders</h3>
+  <p>One project folder per movie. Inside it, <b>one folder per stage</b>; inside each of those,
+     <b>one folder per chapter</b>:</p>
+
+<figure class="projmap" aria-label="A movie project: the project folder holds five stage folders, each holding the same chapter folders">
+  <div class="pm-root"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>Demo Movie</b><span>the project folder: choose this one in Studio</span></div>
+  <div class="pm-stages">
+    <div class="pm-stage">
+      <div class="pm-head"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>DM Source Clips</b></div>
+      <div class="pm-by">Scene Cut puts the clips here</div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 1 - Opening</b><i>the clips</i></span></div>
+        <div class="pm-ch match"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 2 - The Chase</b><i>the clips</i></span></div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 3 - Rooftops</b><i>the clips</i></span></div>
+    </div>
+    <div class="pm-arrow" aria-hidden="true">&rarr;</div>
+    <div class="pm-stage">
+      <div class="pm-head"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>DM DepthMaps</b></div>
+      <div class="pm-by">DepthCrafter's depth maps</div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 1 - Opening</b><i>depth maps</i></span></div>
+        <div class="pm-ch match"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 2 - The Chase</b><i>depth maps</i></span></div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 3 - Rooftops</b><i>depth maps</i></span></div>
+    </div>
+    <div class="pm-arrow" aria-hidden="true">&rarr;</div>
+    <div class="pm-stage">
+      <div class="pm-head"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>DM Splats</b></div>
+      <div class="pm-by">Splatting's results</div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 1 - Opening</b><i>hires/ &middot; lowres/</i></span></div>
+        <div class="pm-ch match"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 2 - Chase</b><i>hires/ &middot; lowres/</i></span></div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 3 - Rooftops</b><i>hires/ &middot; lowres/</i></span></div>
+    </div>
+    <div class="pm-arrow" aria-hidden="true">&rarr;</div>
+    <div class="pm-stage">
+      <div class="pm-head"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>DM Inpainted</b></div>
+      <div class="pm-by">Inpainting's results</div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 1 - Opening</b><i>filled-in clips</i></span></div>
+        <div class="pm-ch match"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 2 - The Chase</b><i>filled-in clips</i></span></div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 3 - Rooftops</b><i>filled-in clips</i></span></div>
+    </div>
+    <div class="pm-arrow" aria-hidden="true">&rarr;</div>
+    <div class="pm-stage">
+      <div class="pm-head"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>DM Merged</b></div>
+      <div class="pm-by">the finished 3D (Merging)</div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 1 - Opening</b><i>3D videos</i></span></div>
+        <div class="pm-ch match"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 2 - The Chase</b><i>3D videos</i></span></div>
+        <div class="pm-ch"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><span><b>Chapter 3 - Rooftops</b><i>3D videos</i></span></div>
+    </div>
+  </div>
+  <figcaption><span class="pm-key"></span>The outlined folders are the same chapter in every stage. Studio matches them by their number, so "The Chase" in one and "Chase" in another is fine. You make the chapter folders; each stage fills its own.</figcaption>
+</figure>
+
+  <p>Studio finds the folders by a few simple rules, so you can name them your own way:</p>
+  <ul>
+    <li><b>Stage folders are found by a word in their name.</b> The name just has to contain
+      <code>Source</code>, <code>Depth</code>, <code>Splat</code>, <code>Inpaint</code> and
+      <code>Merged</code>. For the last one, a name with <code>LR</code> as a word of its own works
+      too (such as <code>DM Converted LR Clips</code>), if you already use that.
+      Anything else in the name is up to you: here every folder starts with the movie's initials,
+      <code>DM</code>, so they're easy to tell apart from another movie's.</li>
+    <li><b>Chapter folders are matched by their number</b>, not their whole name. Start each
+      chapter folder's name with <code>Chapter</code> and its number (<code>Ch 2</code> and
+      <code>C2</code> work too). If the name after the number differs a little between stages
+      ("The Chase" in one, "Chase" in another), Studio still knows they're the same chapter.</li>
+    <li><b>Folders without a chapter number are ignored</b>, so a spare folder of notes or tests
+      won't confuse it.</li>
+    <li><b>You only make the chapter folders.</b> Each stage creates what it needs inside them, such
+      as Splatting's <code>hires</code> and <code>lowres</code>.</li>
+  </ul>
+
+  <h3>TV shows</h3>
+  <p>A show has one more layer or two: seasons and episodes. Inside each episode's folder, lay out the
+     stage folders exactly as for a movie:</p>
+
+<figure class="projmap tv" aria-label="A TV show project: show, season, episode, and inside each episode the five stage folders, each holding its chapter folders">
+  <div class="pm-root"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>Demo Show</b><span>the project folder: choose this one in Studio</span></div>
+  <div class="pm-box">
+    <div class="pm-label"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>Season 1</b></div>
+      <div class="pm-box">
+        <div class="pm-label"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>Episode 1</b></div>
+        <div class="pm-row"><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>1. S1E1 Source Clips</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>2. S1E1 DepthMaps</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>3. S1E1 Splats</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>4. S1E1 Inpainted</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>5. S1E1 Merged</span></div>
+        <div class="pm-in">inside each: <span class="pm-chip small"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>Chapter 1</span> <span class="pm-chip small"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>Chapter 2</span> &hellip;</div>
+      </div>
+      <div class="pm-box pm-dim">
+        <div class="pm-label"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg><b>Episode 2</b></div>
+        <div class="pm-row"><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>1. S1E2 Source Clips</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>2. S1E2 DepthMaps</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>3. S1E2 Splats</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>4. S1E2 Inpainted</span><span class="pm-sep" aria-hidden="true">&rarr;</span><span class="pm-chip"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>5. S1E2 Merged</span></div>
+        <div class="pm-in">inside each: <span class="pm-chip small"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>Chapter 1</span> <span class="pm-chip small"><svg class="fi" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.2l1.6 1.6h7.2v7.9H1.5z"/></svg>Chapter 2</span> &hellip;</div>
+      </div>
+  </div>
+  <figcaption>Each episode is laid out like a movie. Number the stage folders (1. to 5.) if you like them in pipeline order; Studio goes by the word in each name.</figcaption>
+</figure>
+
+  <p>The chapter list then names each chapter with its episode, such as <b>S1E1 · Chapter 1</b>.
+     Studio counts a project as a TV show when it has a folder with <code>Episode</code> in its name
+     somewhere inside. A movie kept one folder down (in a <code>Movie</code> folder, say) is still a
+     movie.</p>
+
+  <h3>The <code>finished</code> folders</h3>
+  <p>When a stage has used a clip, it moves that clip into a folder called <code>finished</code>
+     inside the folder it came from. That way, if you start the same chapter again, it carries on
+     with the clips it hasn't done yet instead of starting over. The next stage knows to look in
+     <code>finished</code>, so you never have to move anything yourself.</p>
+  <div class="note"><b>Good to know</b><span>A clip that has been through several stages can end
+     up a few <code>finished</code> folders deep. That's normal, and Studio finds it.</span></div>
+
+  <h3>Telling Studio where the project is</h3>
+  <ol>
+    <li>Open <b>Settings</b> (the gear) → <b>Studio</b>, and next to <b>Set Project Folder</b> press
+        <span class="btn">Open</span>.</li>
+    <li>Choose the project folder itself: <code>Demo Movie</code> in the example, not one of the
+        folders inside it.</li>
+  </ol>
+  <p>The project's name then shows in the middle of the title bar.</p>
+
+  <h3 id="switch-project">Switching projects</h3>
+  <p>If you keep all your projects in one folder, tell Studio where it is once: <b>Settings</b> →
+     <b>Appearance</b> → <b>Projects Folder</b>. Then click the project name in the title bar, and every
+     project in that folder is shown as a tile. Click one to switch to it.</p>
+  <ul>
+    <li><b>Movies</b> and <b>TV Shows</b> are on separate tabs. The list opens on the tab of the
+        project you're in.</li>
+    <li><b>Posters.</b> Put a picture (<code>.jpg</code> or <code>.png</code>) in a project's folder
+        and it becomes that project's tile. Without one, Studio uses the cover art stored inside the
+        movie's video file, if it has some (it ignores a plain frame from the film saved as a
+        thumbnail). Otherwise the tile shows a folder.</li>
+    <li><b>Your projects folder can be laid out three ways</b>: projects straight inside it, movies
+        and shows mixed; or <code>Movies</code> and <code>TV Shows</code> folders inside it, each
+        holding projects; or shows kept somewhere else entirely, with that folder set as the
+        <b>TV Shows Folder</b> in Settings.</li>
+    <li><span class="btn">Open Other Project…</span> picks any folder, even one outside your projects
+        folder. <span class="btn">Change Projects Folder…</span> points Studio at a different one.</li>
+  </ul>
+  <p><b>Each project remembers where you were.</b> When you switch, every stage goes back to the
+     chapter (or the folders) it last used in that project. Come back later, and DepthCrafter is still
+     on chapter 5 while Splatting is on chapter 3.</p>
+
+  <h3>Picking a chapter</h3>
+  <p>Every stage's folder panel now has a chapter list at the top right. Pick a chapter, and the
+     stage's input and output folders are filled in from your project. The folder fields fold away,
+     since you don't need to see them.</p>
+  <figure class="shot">
+    <div class="frame"><div class="canvas">
+      <img src="shots/04_chapter_picker.webp" alt="The chapter list, open on Splatting">
+      <span class="marker" style="left:88.6%;top:7%">1</span>
+      <span class="marker" style="left:82%;top:7%">2</span>
+    </div></div>
+    <figcaption><b>1</b> The chapter list. <b>2</b> <span class="btn">Change Folders</span> shows
+      the folders a chapter filled in, if you want to check or change them.</figcaption>
+  </figure>
+  <p>Each stage has its own chapter choice, because you'll usually have different chapters at
+     different stages: DepthCrafter can work on chapter 5 while Splatting is still on chapter 3.
+     Choose <b>Manual paths</b> at the top of the list to set the folders yourself again.</p>
+</section>
+
+<!-- ======================================================================== -->
+<section class="section" id="beginner">
+  <h2><span class="num">5</span> Beginner Mode <a class="anchor" href="#beginner">#</a></h2>
+
+  <p>Studio has a lot of settings, and most of them are for fine-tuning. <b>Beginner Mode</b>, the
+     switch at the top right, keeps the page down to the settings you need to get a good result:</p>
+  <ul>
+    <li><b>Advanced settings are hidden.</b> They keep their values; they're just out of the way. Splatting's
+        Rain is hidden too, since it needs tuning for each scene.</li>
+    <li><b>Hover help is in plain language</b>, like this manual.</li>
+    <li><b>A few settings get plainer names.</b></li>
+    <li><b>A few options are set for you</b> to the safe choice, such as making both the full-size and
+        the smaller Splatting results, which the later stages need.</li>
+  </ul>
+
+  <p>Never use it? <b>Settings &gt; Studio &gt; Hide Beginner Mode Switch</b> takes the switch off the top
+     bar. It comes back on its own while Beginner Mode is on, so you can always turn it off.</p>
+
+  <figure class="shot">
+    <div class="frame"><div class="canvas"><img src="shots/06_splatting_beginner.webp" alt="Splatting with Beginner Mode on"></div></div>
+    <figcaption>Splatting with Beginner Mode on. Compare with <a href="shots/05_splatting_normal.webp">the
+      same page with it off</a>.</figcaption>
+  </figure>
+
+  <p>Turn it off whenever you want everything back. All your settings, and the options it set for
+     you, go back to how you had them. Beginner Mode can't be switched while a job is running.</p>
+  <div class="tip"><b>Tip</b><span>New to 3D conversion? Leave Beginner Mode on for your first few
+     chapters. The defaults are chosen to give a good result, and you can learn the rest one
+     setting at a time.</span></div>
+</section>
+
+<nav class="foot">
+  <a class="prev" href="index.html">‹ Contents</a>
+  <a class="next" href="part2.html">Part 2 · The pipeline ›</a>
+</nav>
+
+</main>
+<a class="to-top" href="#" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+<script>(function () {  // the back-to-top button: shown once the page is scrolled down
+  var b = document.querySelector(".to-top");
+  function f() { b.classList.toggle("show", window.scrollY > 400); }
+  addEventListener("scroll", f, { passive: true }); f();
+  b.addEventListener("click", function (e) { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+})();</script>
+<script src="search_index.js"></script>
+<script src="search.js"></script>
+</body>
+</html>
