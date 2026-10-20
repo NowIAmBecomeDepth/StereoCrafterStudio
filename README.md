@@ -10,6 +10,8 @@ plus the **Depth Map Editor** (fix a depth map object by object, erase objects f
 (refill the strip a strong 3D shift uncovers at the frame's edge). Each stage hands its output to the next, and
 a project folder keeps every chapter of a long video in order.
 
+![Splatting, with an anaglyph preview of the demo clip](assets/readme/splatting.webp)
+
 The full manual is inside Studio: press **F1**, or open `docs/manual/index.html`.
 
 > **Licence -- read this first.** The StereoCrafter, StereoCrafter2 and DepthCrafter models and the StereoCrafter
@@ -97,6 +99,43 @@ Measured on a 16 GB RTX 5060 Ti against the GUIs Studio grew from:
   beside the technical ones.
 - Keyboard shortcuts with a legend, tips for every stage, and a **searchable offline manual** -- **F1** opens the
   page for the stage you're on.
+
+## Screenshots
+
+The example footage is from *Tears of Steel* (CC-BY 3.0, (CC) Blender Foundation | mango.blender.org).
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/readme/depthcrafter.webp" alt="DepthCrafter"><br><b>DepthCrafter</b>: a chapter's clips in Upcoming Jobs, sized for you</td>
+    <td width="50%"><img src="assets/readme/merging.webp" alt="Merging"><br><b>Merging</b>: the filled right eye back with its source, previewed live</td>
+  </tr>
+  <tr>
+    <td><img src="assets/readme/depth_map_editor.webp" alt="Depth Map Editor"><br><b>Depth Map Editor</b>: select objects with SAM 3, change their depth, erase them</td>
+    <td><img src="assets/readme/edge_fill.webp" alt="Edge Fill"><br><b>Edge Fill</b>: every clip's edge strip at a glance, refilled with ROSE</td>
+  </tr>
+  <tr>
+    <td><img src="assets/readme/erase_before.webp" alt="A man on the street"><br><b>Erase from Clip</b>: before</td>
+    <td><img src="assets/readme/erase_after.webp" alt="The street with the man erased"><br>...and after: the man gone, the lamp post he passed restored</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="assets/readme/scene_cut.webp" alt="Scene Cut" width="60%"><br><b>Scene Cut</b>: a whole video into shot clips, a folder per chapter</td>
+  </tr>
+</table>
+
+### Themes
+
+<table>
+  <tr>
+    <td width="33%"><img src="assets/readme/theme_warm_carbon.webp" alt="Warm Carbon"><br>Warm Carbon</td>
+    <td width="33%"><img src="assets/readme/theme_nord.webp" alt="Nord"><br>Nord</td>
+    <td width="33%"><img src="assets/readme/theme_plum.webp" alt="Plum"><br>Plum</td>
+  </tr>
+  <tr>
+    <td><img src="assets/readme/theme_teal_slate.webp" alt="Teal Slate"><br>Teal Slate</td>
+    <td><img src="assets/readme/theme_paper.webp" alt="Paper"><br>Paper</td>
+    <td><img src="assets/readme/theme_fern.webp" alt="Fern"><br>Fern</td>
+  </tr>
+</table>
 
 ## Requirements
 
