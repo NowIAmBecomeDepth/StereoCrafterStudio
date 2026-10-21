@@ -123,6 +123,23 @@ if %errorlevel% equ 0 (
     )
 )
 
+REM A copy downloaded as a ZIP has no .git: Studio's Check for Updates had nothing to update from
+REM (2026-10-21). Make it a git copy of the latest version -- settings, models and outputs stay.
+if "!ALREADY_HOME!"=="true" if not exist ".git" (
+    call :log "[INFO] This copy has no git history [downloaded as a ZIP?]. Setting it up for updates..."
+    git init --quiet >> "%LOGFILE%" 2>&1
+    git remote add origin "!STUDIO_URL!" >> "%LOGFILE%" 2>&1
+    git fetch --quiet --no-tags --depth 1 origin main >> "%LOGFILE%" 2>&1
+    if !errorlevel! equ 0 git checkout --quiet -f -B main FETCH_HEAD >> "%LOGFILE%" 2>&1
+    if !errorlevel! neq 0 (
+        call :log "[WARNING] Could not set up updates for this copy. Studio still installs; Check for Updates offers it later."
+        rmdir /s /q .git
+    ) else (
+        call :log "[INFO] This copy is now at the latest version and can update itself."
+        set "JUST_CLONED=true"
+    )
+)
+
 REM Optional Update Pull [Only if we didn't just clone it]
 if "!ALREADY_HOME!"=="true" if "!JUST_CLONED!" neq "true" (
     echo.

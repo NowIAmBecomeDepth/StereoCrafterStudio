@@ -158,6 +158,104 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("uv sync", s)
 
 
+class ZipCopyTests(unittest.TestCase):
+    """A copy downloaded as a ZIP (user, 2026-10-21: "fatal: not a git repository"): the check
+    compares its files with the latest version without touching it; Install's helper makes it a
+    git copy at the checked commit, keeping what isn't Studio's; later updates are the usual."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.hub, self.copy = root / "github", root / "zipcopy"
+        self.hub.mkdir()
+        git(self.hub, "init", "-q", "-b", "main")
+        (self.hub / ".gitignore").write_text("config/\n", encoding="utf-8")
+        git(self.hub, "add", ".gitignore")
+        commit(self.hub, "app.py", "v1\n", "first")
+        self.v2 = commit(self.hub, "new.py", "n\n", "second")
+        (self.hub / "app.py").write_text("v2\n", encoding="utf-8")
+        git(self.hub, "commit", "-q", "-am", "third")
+        self.sha = git(self.hub, "rev-parse", "HEAD")
+        # the ZIP of the first commit, extracted, then used: settings and a file of the user's own
+        self.copy.mkdir()
+        (self.copy / ".gitignore").write_text("config/\n", encoding="utf-8")
+        (self.copy / "app.py").write_text("v1\n", encoding="utf-8")
+        (self.copy / "config").mkdir()
+        (self.copy / "config" / "studio.json").write_text("{}", encoding="utf-8")
+        (self.copy / "my_notes.txt").write_text("mine", encoding="utf-8")
+        self.git_dir = self.copy / "config" / "update_git"
+        self.url = str(self.hub)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def check(self):
+        return U.check(self.copy, self.url, "main", git_dir=self.git_dir)
+
+    def test_the_check_lists_what_differs_and_touches_nothing(self):
+        r = self.check()
+        self.assertEqual(r["state"], "available", r)
+        self.assertTrue(r["zip"])
+        self.assertEqual(r["sha"], self.sha)
+        self.assertEqual(sorted((f["kind"], f["path"]) for f in r["files"]), [("added", "new.py"), ("changed", "app.py")])
+        self.assertIn("downloaded as a ZIP", r["message"])
+        self.assertEqual(U.refuse_reason(r), "")
+        self.assertFalse((self.copy / ".git").exists(), "the check made the copy a git copy")
+        self.assertEqual((self.copy / "app.py").read_text(encoding="utf-8"), "v1\n")
+
+    def test_a_copy_matching_the_latest_still_offers_the_setup(self):
+        (self.copy / "app.py").write_text("v2\n", encoding="utf-8")
+        (self.copy / "new.py").write_text("n\n", encoding="utf-8")
+        r = self.check()
+        self.assertEqual((r["state"], r["files"]), ("available", []), r)
+        self.assertIn("matches the latest version", r["message"])
+
+    def run_helper(self, r):
+        done = subprocess.Popen([sys.executable, "-c", "pass"]); done.wait()   # a Studio that has exited
+        result, log = Path(self.tmp.name) / "result.json", Path(self.tmp.name) / "update.log"
+        script = Path(self.tmp.name) / "helper.ps1"
+        script.write_text(U.helper_script(self.copy, done.pid, r["sha"], "", result, log, False,
+                                          zip_from=Path(r["git_dir"]), url=self.url), encoding="utf-8-sig")
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                       capture_output=True, timeout=120)
+        return json.loads(result.read_text(encoding="utf-8-sig"))
+
+    def test_install_makes_it_a_git_copy_and_later_updates_are_the_usual(self):
+        out = self.run_helper(self.check())
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), self.sha)
+        self.assertEqual((self.copy / "app.py").read_text(encoding="utf-8"), "v2\n")
+        self.assertTrue((self.copy / "new.py").exists())
+        self.assertEqual((self.copy / "config" / "studio.json").read_text(encoding="utf-8"), "{}", "settings kept")
+        self.assertEqual((self.copy / "my_notes.txt").read_text(encoding="utf-8"), "mine", "the user's file kept")
+        self.assertFalse(self.git_dir.exists(), "the check's git folder left behind")
+        self.assertEqual(git(self.copy, "remote", "get-url", "origin"), self.url)
+        self.assertEqual(git(self.copy, "status", "--porcelain", "--untracked-files=no"), "")
+        later = commit(self.hub, "app.py", "v3\n", "fourth")
+        r = U.check(self.copy, self.url, "main")
+        self.assertEqual((r["state"], [c["subject"] for c in r["commits"]]), ("available", ["fourth"]), r)
+        self.assertNotIn("zip", r)
+        self.assertTrue(self.run_helper_plain(r["sha"])["ok"])
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), later)
+
+    def run_helper_plain(self, sha):
+        done = subprocess.Popen([sys.executable, "-c", "pass"]); done.wait()
+        result, log = Path(self.tmp.name) / "result2.json", Path(self.tmp.name) / "update2.log"
+        script = Path(self.tmp.name) / "helper2.ps1"
+        script.write_text(U.helper_script(self.copy, done.pid, sha, "", result, log, False), encoding="utf-8-sig")
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                       capture_output=True, timeout=120)
+        return json.loads(result.read_text(encoding="utf-8-sig"))
+
+    def test_a_failed_install_leaves_no_half_made_git_copy(self):
+        r = self.check()
+        r["sha"] = "0" * 40                                      # a commit it doesn't have
+        out = self.run_helper(r)
+        self.assertFalse(out["ok"], out)
+        self.assertFalse((self.copy / ".git").exists())
+        self.assertEqual((self.copy / "app.py").read_text(encoding="utf-8"), "v1\n")
+
+
 class UpdaterObjectTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

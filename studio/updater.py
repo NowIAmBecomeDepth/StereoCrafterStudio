@@ -15,6 +15,14 @@ type it); the Updates dialog can point a copy at a fork instead.
   the result and starts Studio again. Doing it after exit means no file is
   swapped under the running app.
 * Next start, :attr:`Updater.notice` carries the result for a toast.
+* **A copy downloaded as a ZIP** (user, 2026-10-21: "fatal: not a git repository" -- the
+  installer, run inside an extracted ZIP, finds Studio there and clones nothing) has no
+  history to compare. Check fetches the latest commit into a git folder of its own
+  (config/update_git, shallow) and compares its files with the copy's, touching nothing
+  else; Install's helper then makes the folder a git copy at that exact commit (git init,
+  fetch from config/update_git, checkout -f), so later updates are the usual ones.
+  Settings, models, projects and outputs (untracked, ignored) stay; edits to Studio's own
+  files are replaced -- the dialog says so.
 * **Check at startup** (user, 2026-10-05; off by default): once, a few seconds
   after Studio opens, the same check runs in the background -- only when an
   update source is set -- and a toast says when there is something new. It
@@ -134,15 +142,78 @@ def changed_files(name_status: str) -> List[Dict]:
     return out
 
 
-def check(repo: Path, url: str, branch: str) -> Dict:
+def is_checkout(repo: Path) -> bool:
+    """Studio's folder is a git copy of its own (not a ZIP's files, nor inside another repository)."""
+    return (Path(repo) / ".git").exists()
+
+
+def zip_git_dir() -> Path:
+    return settings_store.CONFIG_DIR / "update_git"
+
+
+def zip_check(repo: Path, url: str, branch: str, git_dir: Path) -> Dict:
+    """check() for a copy with no history (a ZIP's files): the latest commit fetched into
+    `git_dir` (shallow, kept as refs/heads/update for Install) and its files compared with
+    the copy's -- what Install would change. The copy itself is only read."""
+    out = {"state": "error", "message": "", "sha": "", "commits": [], "files": [], "dirty": False, "deps": False,
+           "zip": True, "git_dir": str(git_dir)}
+
+    def g(*args, timeout=30):
+        return _git(Path(git_dir), "--git-dir=" + str(git_dir), "--work-tree=" + str(repo), *args, timeout=timeout)
+
+    try:
+        if not (Path(git_dir) / "HEAD").exists():
+            Path(git_dir).mkdir(parents=True, exist_ok=True)
+            _run(["git", "init", "--quiet", "--bare", str(git_dir)], 30)
+        f = g("fetch", "--quiet", "--no-tags", "--depth", "1", url, branch, timeout=FETCH_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        out["message"] = "GitHub did not answer in time. Check your connection and try again."
+        return out
+    except FileNotFoundError:
+        out["message"] = "Git is not installed or not on PATH, so Studio can't look for updates."
+        return out
+    if f.returncode != 0:
+        err = (f.stderr or f.stdout).strip().splitlines()
+        out["message"] = "Could not reach " + url + " (" + branch + "): " + (err[-1] if err else "git fetch failed")
+        return out
+    sha = g("rev-parse", "FETCH_HEAD").stdout.strip()
+    g("update-ref", "refs/heads/update", sha)
+    # the commit's files as an index, refreshed against the copy's: what differs is left
+    g("read-tree", sha)
+    g("update-index", "-q", "--refresh", timeout=300)
+    files = []
+    for line in g("diff-files", "--name-status").stdout.splitlines():
+        kind, _, path = line.partition("\t")
+        if path:
+            # a file the copy lacks is one the latest version added
+            files.append({"kind": "added" if kind.startswith("D") else "changed", "path": path, "from": ""})
+    out["sha"], out["files"] = sha, files[:MAX_FILES]
+    out["deps"] = any(f["path"] in _DEPS for f in files)
+    out["state"] = "available"
+    keep = ("Your settings, models, projects and outputs stay; changes made to Studio's own files are replaced.")
+    if files:
+        out["message"] = (f"This copy was downloaded as a ZIP, so it has no update history. {len(files)} of its "
+                          f"files differ from the latest version. Install & Restart brings it up to date and sets "
+                          f"it up so later updates work as usual. " + keep)
+    else:
+        out["message"] = ("This copy was downloaded as a ZIP and matches the latest version, but it has no update "
+                          "history. Install & Restart sets it up so later updates work as usual (none of its "
+                          "files change).")
+    return out
+
+
+def check(repo: Path, url: str, branch: str, git_dir: Optional[Path] = None) -> Dict:
     """Compare HEAD with ``branch`` at ``url``. Returns a dict:
     state (up_to_date | available | diverged | error), message, sha (the
-    fetched commit), commits [{sha, date, subject}], dirty, deps."""
+    fetched commit), commits [{sha, date, subject}], dirty, deps; a ZIP's copy
+    (no .git) goes to zip_check."""
     out = {"state": "error", "message": "", "sha": "", "commits": [], "files": [], "dirty": False, "deps": False}
     url, branch = str(url or "").strip(), str(branch or "").strip()
     if not url or not branch:
         out["message"] = "Set the repository and branch to check first."
         return out
+    if not is_checkout(repo):
+        return zip_check(repo, url, branch, git_dir or zip_git_dir())
     try:
         f = _git(repo, "fetch", "--quiet", "--no-tags", url, branch, timeout=FETCH_TIMEOUT_S)
     except subprocess.TimeoutExpired:
@@ -201,8 +272,29 @@ def _ps(s) -> str:
 
 
 def helper_script(repo: Path, pid: int, sha: str, launch: str, result_path: Path, log_path: Path,
-                  run_uv: bool) -> str:
-    """The PowerShell that runs after Studio exits (see the module doc)."""
+                  run_uv: bool, zip_from: Optional[Path] = None, url: str = "") -> str:
+    """The PowerShell that runs after Studio exits (see the module doc). `zip_from`: a ZIP's
+    copy -- made a git copy at `sha`, fetched from that folder (zip_check's), instead of merged."""
+    if zip_from is not None:
+        apply = [
+            f"$zipgit = {_ps(zip_from)}; $url = {_ps(url)}",
+            "Log 'Making this copy a git copy (it was downloaded as a ZIP)'",
+            "git init --quiet 2>&1 | ForEach-Object { Log $_ }",
+            "git fetch --quiet --no-tags --depth 1 $zipgit refs/heads/update 2>&1 | ForEach-Object { Log $_ }",
+            "if ($LASTEXITCODE -eq 0) { git checkout --quiet -f -B main $sha 2>&1 | ForEach-Object { Log $_ } }",
+            # a half-made one would read as a git copy with no commit: gone, so the next check is a ZIP's again
+            "if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath (Join-Path $repo '.git') -Recurse -Force "
+            "-ErrorAction SilentlyContinue; Done $false 'The update could not be applied (git checkout failed). "
+            "Nothing was changed. See config/update_last.log.' }",
+            "if ($url) { git remote add origin $url 2>&1 | ForEach-Object { Log $_ } }",
+            "Remove-Item -LiteralPath $zipgit -Recurse -Force -ErrorAction SilentlyContinue",
+        ]
+    else:
+        apply = [
+            "git merge --ff-only $sha 2>&1 | ForEach-Object { Log $_ }",
+            "if ($LASTEXITCODE -ne 0) { Done $false 'The update could not be applied (git merge failed). "
+            "Nothing was changed. See config/update_last.log.' }",
+        ]
     return "\n".join([
         "$ErrorActionPreference = 'Continue'",
         f"$repo = {_ps(repo)}; $sha = {_ps(sha)}; $launch = {_ps(launch)}",
@@ -221,9 +313,7 @@ def helper_script(repo: Path, pid: int, sha: str, launch: str, result_path: Path
         f"if (Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue) {{ $launch = ''; "
         "Done $false 'Studio did not close, so nothing was updated.' }",
         "Set-Location -LiteralPath $repo",
-        "git merge --ff-only $sha 2>&1 | ForEach-Object { Log $_ }",
-        "if ($LASTEXITCODE -ne 0) { Done $false 'The update could not be applied (git merge failed). "
-        "Nothing was changed. See config/update_last.log.' }",
+        *apply,
         "$uvNote = ''",
         "if (" + ("$true" if run_uv else "$false") + ") {",
         "  $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source",
@@ -348,7 +438,10 @@ class Updater(QObject):
         if self._auto:
             self._auto = False
             if self._result.get("state") == "available":
-                self.updateFound.emit(len(self._result.get("commits", [])), self._get_branch())
+                if not self._result.get("zip"):
+                    self.updateFound.emit(len(self._result.get("commits", [])), self._get_branch())
+                elif self._result.get("files"):         # a ZIP's copy that differs: no count to give
+                    self.updateFound.emit(-1, self._get_branch())
 
     # -- install ------------------------------------------------------------
     @Slot(result=str)
@@ -371,9 +464,11 @@ class Updater(QObject):
         cfg = settings_store.CONFIG_DIR
         cfg.mkdir(parents=True, exist_ok=True)
         script = cfg / "update_helper.ps1"
+        zip_from = Path(self._result["git_dir"]) if self._result.get("zip") and self._result.get("git_dir") else None
         script.write_text(helper_script(self._repo, os.getpid(), self._result["sha"], launch_target(self._repo),
                                         cfg / "update_result.json", cfg / "update_last.log",
-                                        bool(self._result.get("deps"))), encoding="utf-8-sig")
+                                        bool(self._result.get("deps")), zip_from=zip_from,
+                                        url=self._get_repo_url()), encoding="utf-8-sig")
         try:
             subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
                               "-File", str(script)], cwd=str(self._repo), close_fds=True,

@@ -115,6 +115,17 @@ RESULT.update({"state": "up_to_date", "message": "Studio is up to date.", "commi
 check("...and none of it when Studio is up to date", not _heading.isVisible() and not commits.isVisible()
       and not named("updateFilesHeading").isVisible())
 RESULT.clear(); RESULT.update(_saved_result); up.check(); pump(1.0)
+# a copy downloaded as a ZIP (user, 2026-10-21): no commits to list, its differing files are, Install is on
+RESULT.clear(); RESULT.update({"state": "available", "zip": True, "git_dir": "x", "sha": "0123456789abcdef",
+                               "dirty": False, "deps": False, "commits": [],
+                               "files": [{"kind": "changed", "path": "studio/app.py", "from": ""}],
+                               "message": "This copy was downloaded as a ZIP, so it has no update history."})
+up.check(); pump(1.0)
+check("a ZIP's copy: says so, lists the files it changes, Install on",
+      "downloaded as a ZIP" in msg.property("text") and named("updateFilesHeading").isVisible()
+      and "(1)" in named("updateFilesHeading").property("text") and not commits.isVisible()
+      and install_btn.property("enabled") is True, str(named("updateFilesHeading").property("text")))
+RESULT.clear(); RESULT.update(_saved_result); up.check(); pump(1.0)
 
 # uncommitted changes: refused, with the reason shown
 RESULT["dirty"] = True; up.check(); pump(1.0)

@@ -374,7 +374,7 @@ ApplicationWindow {
         function onQuitForUpdate() { win.close() }
         function onUpdateFound(n, branch) {
             Theme.toast("info", "Studio update available",
-                        (n === 1 ? "1 new change" : n + " new changes") + " on " + branch
+                        (n < 0 ? "A newer version" : n === 1 ? "1 new change" : n + " new changes") + " on " + branch
                         + ". Settings > Studio > Check for Updates installs it.")
         }
     }

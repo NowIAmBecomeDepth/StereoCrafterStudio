@@ -156,7 +156,9 @@ Popup {
                     id: filesHeading
                     objectName: "updateFilesHeading"
                     property bool open: false
-                    visible: commitList.visible && !!dlg.up && dlg.up.files.length > 0
+                    // not only under commits: a ZIP's copy has none to list (user, 2026-10-21)
+                    visible: !!dlg.up && (dlg.up.state === "available" || dlg.up.state === "diverged")
+                             && dlg.up.files.length > 0
                     text: (open ? "\u25BE " : "\u25B8 ") + "Files it changes (" + (dlg.up ? dlg.up.files.length : 0) + ")"
                     color: filesHover.hovered ? Theme.fg : Theme.fgMuted
                     font.family: Theme.bodyFont
