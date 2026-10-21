@@ -259,7 +259,9 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         """One decode chunk; out of memory, it is decoded in halves (and those in halves...)
         rather than ending the clip: 8 frames a chunk (2026-10-11) doubled the decode's peak
         against the 4 before, too much for a smaller card (bug sweep 2026-10-14c). The halves
-        meet at one more seam than the whole chunk would have."""
+        meet at one more seam than the whole chunk would have. On Windows a full card spills
+        into system memory rather than raising, so this only catches a real out-of-memory;
+        the default is back at 4 for that (2026-10-21)."""
         try:
             kw = {"num_frames": chunk.shape[0]} if accepts_num_frames else {}
             return self.vae.decode(chunk, **kw).sample
@@ -473,7 +475,7 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         guidance_scale: float = 1.0,
         window_size: Optional[int] = 110,
         noise_aug_strength: float = 0.02,
-        decode_chunk_size: Optional[int] = 8,
+        decode_chunk_size: Optional[int] = 4,
         encode_chunk_size: Optional[int] = 4,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.FloatTensor] = None,
@@ -500,8 +502,11 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         :param noise_aug_strength:
         :param decode_chunk_size: frames per VAE decode. The temporal decoder mixes the
             frames inside a chunk, so each chunk edge is a seam: 8 (upstream's default)
-            flickered 7% less against a scene of known depth than the 4 used before,
-            at the same speed (.claude/dc-speed/REPORT.md, 2026-10-11).
+            flickered 7% less against a scene of known depth than 4 (2026-10-11), but
+            at 768x448 its decode reserves 12.7 GB against 6.6 GB at 4, for the same
+            speed (2026-10-21). On a 12 GB card WDDM spills that into system memory
+            instead of failing, so _decode_chunk's halving never runs and the decode
+            crawls: a user's 69-frame clip took 2:05 in Studio against 36 s before. 4.
         :param encode_chunk_size: frames per CLIP / VAE encode and noise chunk. Kept at
             4 apart from the decode: the noise is drawn per chunk, so changing it
             changes the random stream (and the depth) for no speed.
@@ -530,7 +535,7 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
         num_frames = video.shape[0]
-        decode_chunk_size = decode_chunk_size if decode_chunk_size is not None else 8
+        decode_chunk_size = decode_chunk_size if decode_chunk_size is not None else 4
         encode_chunk_size = max(1, int(encode_chunk_size if encode_chunk_size is not None else 4))
         if num_frames <= window_size:
             window_size = num_frames

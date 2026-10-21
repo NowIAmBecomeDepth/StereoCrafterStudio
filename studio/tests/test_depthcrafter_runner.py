@@ -855,11 +855,13 @@ class StabiliseApplyTest(unittest.TestCase):
 
 
 class ChunkSizeTest(unittest.TestCase):
-    """2026-10-11: the decode runs 8 frames a chunk (7% less flicker than 4:
-    the temporal decoder seams at chunk edges); the encodes and the noise stay
-    at 4, or the random stream -- and the depth -- would change."""
+    """2026-10-21: the decode runs 4 frames a chunk again. 8 (2026-10-11, 7% less
+    flicker) reserved 12.7 GB at 768x448 against 6.6 GB, for the same speed, and
+    a 12 GB card spilled it into system memory: 3-4x slower around every window.
+    The encodes and the noise stay at 4, or the random stream -- and the depth --
+    would change."""
 
-    def test_decode_8_encode_4(self):
+    def test_decode_4_encode_4(self):
         import inspect
         saved = sys.modules.pop("depthcrafter.depth_crafter_ppl", None)
         try:
@@ -868,7 +870,7 @@ class ChunkSizeTest(unittest.TestCase):
             if saved is not None:
                 sys.modules["depthcrafter.depth_crafter_ppl"] = saved
         params = inspect.signature(P.DepthCrafterPipeline.__call__).parameters
-        self.assertEqual(params["decode_chunk_size"].default, 8)
+        self.assertEqual(params["decode_chunk_size"].default, 4)
         self.assertEqual(params["encode_chunk_size"].default, 4)
 
 
