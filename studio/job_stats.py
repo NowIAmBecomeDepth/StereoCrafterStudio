@@ -35,6 +35,15 @@ resolution has it from the first clip; an unknown one shows ``etaPartial``
 ("+ render") until a clip has been timed. The page shows it as a finish time,
 so nothing has to tick between updates.
 
+The batch's ETA (user, 2026-10-21: "the eta timer of the individual clips [is]
+accurate"): the clip's ETA, plus the frames of the clips not reached yet x
+seconds a frame -- the clips finished this run as they took (start to next
+start), with the running one as its ETA projects it (so far + ETA). The
+controller hands over its run's clips and their frames (``batch_begin``, from
+Upcoming Jobs' counts) and names each clip as it starts (``batch_clip``).
+DepthCrafter's Process as Segments: the running source's later segments are
+not in it (its ETA is the segment's).
+
 Only real inference counts (user, 2026-10-09: "< 1 min" while the model
 loaded): Inpainting reads a bar only when its length is the steps of one tile
 pass, so a loading bar ("5/5" at 130 it/s) moves nothing; a pass's first step
@@ -136,6 +145,13 @@ class DcEta:
     (config/depthcrafter_eta.json), a size not timed yet scaled by pixels from
     the nearest one that has been. On the user's 257-frame clip (8 windows of
     120 / overlap 100, 10 steps) it came to 588 s against 583 s taken.
+
+    Process as Segments runs a clip as one job per segment, each one window of its
+    own frames (user, 2026-10-21: the ETA ran out at every segment's end): the
+    runner names the clip's segments up front (``segments_planned``, their source
+    frames), and the ones after the running segment add (head + steps x r + tail)
+    x their frames, scaled as the running one's plan scaled its own (a frame rate
+    change). The merge of the segments at the end is not in it.
     The clock is passed in, so it is the caller's."""
 
     KINDS = ("head", "tail", "step")
@@ -143,9 +159,19 @@ class DcEta:
 
     def __init__(self, rates: Optional[dict] = None):
         self.rates = {k: dict((rates or {}).get(k) or {}) for k in self.KINDS}
+        self.queue: List[int] = []      # Process as Segments: the clip's segments not started yet
+        self.later: List[int] = []      # ...those after the running one
+        self.raw = 0                    # ...and the running one's source frames
         self.clip_started(None)
 
+    def segments_planned(self, frames: List[int]) -> None:
+        self.queue = [max(0, int(f)) for f in frames]
+
     def clip_started(self, now: Optional[float]) -> None:
+        """A clip -- or a segment, which the queue then names -- starts."""
+        if now is not None:
+            self.raw = self.queue.pop(0) if self.queue else 0
+            self.later = list(self.queue)
         self.frames, self.steps, self.wins, self.key = 0, 0, [], ""
         self.t_clip, self.t_denoise, self.t_tail = now, None, None
         self.window, self.step_n, self.window_t0 = 0, 0, None
@@ -192,15 +218,26 @@ class DcEta:
     def rate(self) -> float:
         return sum(self.samples) / len(self.samples) if self.samples else self.known("step")
 
+    def later_frames(self) -> float:
+        """The segments after this one, in this one's plan frames."""
+        if not self.later:
+            return 0.0
+        scale = self.frames / self.raw if self.raw > 0 and self.frames > 0 else 1.0
+        return sum(self.later) * scale
+
+    def _later_s(self, head: float, tail: float, r: float) -> float:
+        return self.later_frames() * (head + self.steps * r + tail)
+
     def eta(self, now: float):
         """(seconds left in the clip or -1 when unknown, partial: the head or tail not known yet)."""
         if not self.wins or self.frames <= 0:
             return -1.0, False
         head, tail, r = self.known("head"), self.known("tail"), self.rate()
-        partial = tail <= 0
+        partial = tail <= 0 or (bool(self.later) and head <= 0)
         tail_s = tail * self.frames
+        later_s = self._later_s(head, tail, r)
         if self.t_tail is not None:
-            return (max(0.0, tail_s - (now - self.t_tail)) if tail > 0 else -1.0), partial
+            return (max(0.0, tail_s - (now - self.t_tail)) + later_s if tail > 0 else -1.0), partial
         if r <= 0:
             return -1.0, partial
         if self.window <= 0:        # still in the head
@@ -210,11 +247,11 @@ class DcEta:
             else:
                 partial = True
             denoise = sum(self.steps * r * f for f in self.wins) + self.overhead * (len(self.wins) - 1)
-            return max(0.0, head_left) + denoise + tail_s, partial
+            return max(0.0, head_left) + denoise + tail_s + later_s, partial
         i = min(self.window, len(self.wins))
         running = max(0, self.steps - self.step_n) * r * self.wins[i - 1]
         after = sum(self.steps * r * f for f in self.wins[i:]) + self.overhead * (len(self.wins) - i)
-        return running + after + tail_s, partial
+        return running + after + tail_s + later_s, partial
 
     def clip_done(self, now: float) -> dict:
         """The clip is saved: its head, tail and r, half into what was kept for its size."""
@@ -243,6 +280,8 @@ class JobStats(QObject):
     _sigMerge = Signal(str, float, str)
     _sigTail = Signal(float)
     _sigDc = Signal(str, object)
+    _sigBatch = Signal(str, object)
+    _sigBatchClip = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -283,6 +322,9 @@ class JobStats(QObject):
         self._sigTail.connect(self._on_tail)
         self._dc: Optional[DcEta] = None    # DepthCrafter's ETA, while a DepthCrafter job runs
         self._sigDc.connect(self._on_dc)
+        self._batch_reset()
+        self._sigBatch.connect(self._on_batch)
+        self._sigBatchClip.connect(self._on_batch_clip)
 
     # ---- QML --------------------------------------------------------------------
     stage = Property(str, lambda self: self._stage, notify=changed)
@@ -307,6 +349,10 @@ class JobStats(QObject):
     #: when the render + encode at its end is not in it yet (the first clip).
     eta = Property(float, lambda self: self._eta, notify=changed)
     etaPartial = Property(bool, lambda self: self._eta_partial, notify=changed)
+    #: the whole batch: seconds until its last clip is done, -1 while unknown or with no
+    #: clip after this one (partial as etaPartial); and how many clips come after this one
+    batchEta = Property(float, lambda self: self._batch_eta, notify=changed)
+    batchClips = Property(int, lambda self: len(self._batch), notify=changed)
 
     def _fraction(self) -> float:
         """How far through the clip: finished chunks, plus the running one's
@@ -346,6 +392,7 @@ class JobStats(QObject):
         self._eta_reset()
         self._eta_tail_per_frame = 0.0
         self._dc = DcEta(self._dc_rates_load()) if stage == "depthcrafter" else None
+        self._batch_reset()
         self.changed.emit()
 
     def _clear_clip(self) -> None:
@@ -406,6 +453,10 @@ class JobStats(QObject):
             self._eta_first = 0.0
 
     def _eta_update(self) -> None:
+        self._eta_update_clip()
+        self._batch_update()
+
+    def _eta_update_clip(self) -> None:
         if self._stage == "depthcrafter" and self._dc is not None:
             self._eta, self._eta_partial = self._dc.eta(self._clock())
             return
@@ -437,6 +488,70 @@ class JobStats(QObject):
         a Splatting render after DepthCrafter -- moved them)."""
         if stage == self._stage:
             self._live = False
+
+    # ---- the batch's ETA (user, 2026-10-21) --------------------------------------------
+    @staticmethod
+    def _batch_key(name: str) -> str:
+        """A clip's name as both sides give it: the runner's (a basename, with or without its
+        extension) and Upcoming Jobs' paths."""
+        base = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+        stem, dot, ext = base.rpartition(".")
+        return (stem if dot and 1 <= len(ext) <= 4 else base).lower()
+
+    def _batch_reset(self) -> None:
+        self._batch = {}                # clips not reached yet: key -> frames
+        self._batch_spent = 0.0         # the clips finished this run: seconds,
+        self._batch_spent_frames = 0    # ...and their frames
+        self._batch_t0 = None           # when the running clip started
+        self._batch_frames = 0          # ...and its frames, once known
+        self._batch_later = 0.0         # DepthCrafter's segments after the running one: in its ETA
+        self._batch_eta = -1.0
+
+    def batch_begin(self, stage: str, clips) -> None:
+        """The run's clips, [(path or name, frames)], for `stage` (any thread; after begin)."""
+        self._sigBatch.emit(str(stage), [(str(p), int(f or 0)) for p, f in clips])
+
+    def batch_clip(self, stage: str, name: str) -> None:
+        """`stage`'s job is on the clip `name` (any thread)."""
+        self._sigBatchClip.emit(str(stage), str(name))
+
+    @Slot(str, object)
+    def _on_batch(self, stage: str, clips) -> None:
+        if stage != self._stage:
+            return
+        self._batch = {}
+        for p, f in clips:
+            if f > 0:
+                self._batch[self._batch_key(p)] = f
+        self._batch_update()
+        self.changed.emit()
+
+    @Slot(str, str)
+    def _on_batch_clip(self, stage: str, name: str) -> None:
+        if stage != self._stage or not name or name == "N/A":
+            return
+        if self._batch.pop(self._batch_key(name), None) is not None:
+            self._batch_update()
+            self.changed.emit()
+
+    def _batch_clip_started(self, frames: int = 0) -> None:
+        """A clip (or a DepthCrafter segment) starts: the one before it is done, its time
+        from its start to this one's. `frames`: this one's, when known already (Inpainting
+        reports them first; DepthCrafter with its plan)."""
+        now = self._clock()
+        if self._batch_t0 is not None and self._batch_frames > 0:
+            self._batch_spent += now - self._batch_t0
+            self._batch_spent_frames += self._batch_frames
+        self._batch_t0, self._batch_frames, self._batch_later = now, max(0, int(frames)), 0.0
+
+    def _batch_update(self) -> None:
+        left = sum(self._batch.values())
+        frames = self._batch_frames
+        if left <= 0 or self._eta < 0 or self._batch_t0 is None or frames <= 0:
+            self._batch_eta = -1.0
+            return
+        took = self._batch_spent + (self._clock() - self._batch_t0) + self._eta
+        self._batch_eta = self._eta + took / (self._batch_spent_frames + frames + self._batch_later) * left
 
     # ---- feeds (any thread) -----------------------------------------------------
     def feed_bar(self, text: str) -> None:
@@ -509,10 +624,15 @@ class JobStats(QObject):
         now = self._clock()
         if kind == "clip":
             dc.clip_started(now)
+            self._batch_clip_started()
             self._clear_clip()      # not the clip before's full bar until its first window
         elif kind == "plan" and isinstance(data, dict):
             dc.plan(data.get("frames", 0), data.get("steps", 1), data.get("window", 0),
                     data.get("overlap", 0), data.get("key", ""))
+            self._batch_frames = dc.frames
+            self._batch_later = dc.later_frames()
+        elif kind == "segments" and isinstance(data, (list, tuple)):
+            dc.segments_planned(list(data))
         elif kind == "done":
             rates = dc.clip_done(now)
             try:
@@ -554,6 +674,8 @@ class JobStats(QObject):
 
     @Slot(int, int, int, int)
     def _on_frames(self, total: int, done: int, first: int, last: int) -> None:
+        if self._stage == "inpainting" and done == 0 and (first, last) == (-1, -1):
+            self._batch_clip_started(total)     # a clip starts: InpaintingChunks.process_single_video
         self._frames, self._frames_done, self._range = total, min(done, total), (first, last)
         self.changed.emit()
 

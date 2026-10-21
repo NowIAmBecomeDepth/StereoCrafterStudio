@@ -487,6 +487,12 @@ class DepthCrafterRunner:
                     master_meta_for_this_vid["jobs_info"].extend(pre_existing)
                     master_meta_for_this_vid["completed_successful_jobs"] += len(pre_existing)
 
+                # the segments' frames, for the ETA (user, 2026-10-21: the clip's ETA ran out at the
+                # end of each segment); hooks without it (tests, the CLI) just don't get them
+                if is_segment_processing and hasattr(self.hooks, "segments"):
+                    self.hooks.segments([int(j.get("num_frames_to_load_raw") or 0)
+                                         for j in jobs_to_process_for_this_source])
+
                 # D. run the jobs
                 skipped_by_user = False
                 total_jobs_for_source = len(jobs_to_process_for_this_source)

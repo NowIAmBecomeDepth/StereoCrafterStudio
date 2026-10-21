@@ -413,6 +413,139 @@ class DcEtaTests(unittest.TestCase):
         self.assertEqual(s.property("eta"), -1.0)
 
 
+class DcSegmentEtaTests(unittest.TestCase):
+    """Process as Segments (user, 2026-10-21): a clip runs as one job per segment, and its ETA
+    ran out at the end of each one -- now the segments after the running one are in it."""
+
+    RATES = DcEtaTests.RATES
+    PER = 0.088 + 10 * 0.0514 + 0.203          # head + steps x r + tail, a frame at 768x448
+
+    def setUp(self):
+        from studio import settings_store as ss
+        ss.save("depthcrafter_eta", {})
+        self.now = [0.0]
+        self.s = JobStats()
+        self.s._clock = lambda: self.now[0]
+        self.s.begin("depthcrafter")
+        self.s._dc.rates = {k: dict(v) for k, v in self.RATES.items()}
+
+    def segment(self, frames):
+        self.s._on_dc("clip", None)
+        self.s._on_dc("plan", {"frames": frames, "steps": 10, "window": frames, "overlap": 0, "key": "768x448"})
+
+    def test_the_clips_later_segments_are_in_its_eta(self):
+        s = self.s
+        s._on_dc("segments", [100, 100, 57])
+        self.segment(100)
+        self.assertAlmostEqual(s.property("eta"), 100 * self.PER + 157 * self.PER, places=3)
+        self.assertFalse(s.property("etaPartial"))
+        self.now[0] = 60.0
+        self.segment(100)                            # the second: only the last after it
+        self.assertAlmostEqual(s.property("eta"), 100 * self.PER + 57 * self.PER, places=3)
+        self.now[0] = 120.0
+        self.segment(57)                             # the last: its own alone
+        self.assertAlmostEqual(s.property("eta"), 57 * self.PER, places=3)
+
+    def test_a_frame_rate_change_scales_the_later_ones(self):
+        s = self.s
+        s._on_dc("segments", [200, 200])             # source frames; the plan loads half (fps halved)
+        self.segment(100)
+        self.assertAlmostEqual(s.property("eta"), 100 * self.PER + 100 * self.PER, places=3)
+
+    def test_a_whole_clip_after_a_segmented_one_has_none(self):
+        s = self.s
+        s._on_dc("segments", [100])
+        self.segment(100)
+        self.segment(80)                             # the next clip, not segmented: the queue is empty
+        self.assertAlmostEqual(s.property("eta"), 80 * self.PER, places=3)
+
+    def test_the_batch_counts_a_segment_by_its_own_frames(self):
+        s = self.s
+        s._on_batch("depthcrafter", [("A.mp4", 200), ("B.mp4", 100)])
+        s._on_batch_clip("depthcrafter", "A")
+        s._on_dc("segments", [100, 100])
+        self.segment(100)
+        eta = s.property("eta")                      # both of A's segments
+        self.assertAlmostEqual(s.property("batchEta"), eta + eta / 200 * 100, places=3)
+        self.now[0] = 50.0                           # segment 1 took 50 s: 50 s for its 100 frames
+        self.segment(100)
+        self.assertEqual((s._batch_spent, s._batch_spent_frames), (50.0, 100))
+        eta = s.property("eta")
+        self.assertAlmostEqual(s.property("batchEta"), eta + (50.0 + eta) / 200 * 100, places=3)
+
+
+class BatchEtaTests(unittest.TestCase):
+    """The batch's ETA (user, 2026-10-21): the clip's ETA + the frames of the clips not reached
+    yet x seconds a frame -- the finished clips as they took, the running one as projected."""
+
+    RATES = DcEtaTests.RATES
+
+    def setUp(self):
+        from studio import settings_store as ss
+        ss.save("depthcrafter_eta", {})
+        self.now = [0.0]
+        self.s = JobStats()
+        self.s._clock = lambda: self.now[0]
+
+    def dc_clip(self, name, frames):
+        s = self.s
+        s._on_batch_clip("depthcrafter", name)
+        s._on_dc("clip", None)
+        s._on_dc("plan", {"frames": frames, "steps": 10, "window": 120, "overlap": 100, "key": "768x448"})
+
+    def test_depthcrafter_three_clips(self):
+        s = self.s
+        s.begin("depthcrafter")
+        s._dc.rates = {k: dict(v) for k, v in self.RATES.items()}
+        s._on_batch("depthcrafter", [("D:/in/A.mp4", 257), ("D:/in/B.mp4", 100), ("D:/in/C.mov", 50)])
+        self.assertEqual(s.property("batchClips"), 3)
+        self.assertEqual(s.property("batchEta"), -1.0, "no clip running yet")
+        self.dc_clip("A", 257)                                  # the runner names it without its extension
+        self.assertEqual(s.property("batchClips"), 2)
+        eta = s.property("eta")
+        self.assertGreater(eta, 0)
+        self.assertAlmostEqual(s.property("batchEta"), eta + eta / 257 * 150, places=3)
+        self.now[0] = 100.0                                     # 100 s in: the clip's projection holds
+        s._eta_update()
+        eta = s.property("eta")
+        self.assertAlmostEqual(s.property("batchEta"), eta + (100.0 + eta) / 257 * 150, places=3)
+        self.now[0] = 600.0                                     # A took 600 s; B starts
+        self.dc_clip("B", 100)
+        eta_b = s.property("eta")
+        self.assertAlmostEqual(s.property("batchEta"), eta_b + (600.0 + eta_b) / 357 * 50, places=3)
+        self.now[0] = 900.0                                     # C: the last -- no batch line
+        self.dc_clip("C", 50)
+        self.assertEqual(s.property("batchClips"), 0)
+        self.assertEqual(s.property("batchEta"), -1.0)
+
+    def test_inpainting_names_with_extensions_and_an_unknown_clip_eta(self):
+        s = self.s
+        s.begin("inpainting")
+        s._on_batch("inpainting", [("D:/in/x_splatted.mp4", 100), ("D:/in/y_splatted.mp4", 200)])
+        s._on_frames(100, 0, -1, -1)
+        s._on_chunk("inpainting", 0, 4, False)                  # x starts
+        s._on_batch_clip("inpainting", "x_splatted.mp4")
+        self.assertEqual(s.property("batchClips"), 1)
+        self.assertEqual(s.property("batchEta"), -1.0, "the clip's ETA unknown: the batch's too")
+        s._eta, s._eta_partial = 50.0, False                    # as _eta_update_clip would set it
+        self.now[0] = 30.0
+        s._batch_update()
+        self.assertAlmostEqual(s.property("batchEta"), 50.0 + (30.0 + 50.0) / 100 * 200)
+        self.now[0] = 90.0                                      # y: frames first, then its start
+        s._on_frames(200, 0, -1, -1)
+        s._on_chunk("inpainting", 0, 8, False)
+        self.assertEqual((s._batch_spent, s._batch_spent_frames), (90.0, 100), "x timed with x's frames")
+
+    def test_a_new_job_forgets_the_batch(self):
+        s = self.s
+        s.begin("inpainting")
+        s._on_batch("inpainting", [("a.mp4", 10)])
+        s.begin("inpainting")
+        self.assertEqual(s.property("batchClips"), 0)
+        s._on_batch("depthcrafter", [("a.mp4", 10)])            # another stage's: not this job's
+        self.assertEqual(s.property("batchClips"), 0)
+
+
 class DepthCrafterTimelineTests(unittest.TestCase):
     """The run's clips reach JobStats from DepthCrafterDemo's own calls, put back after."""
 

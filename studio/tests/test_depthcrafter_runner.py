@@ -1016,6 +1016,20 @@ class SegmentTests(RunnerTestBase):
         # Keep NPZ off: the segment folder goes once merged.
         self.assertFalse((self.out / "a_seg").exists())
 
+    def test_the_segments_frames_reach_the_eta(self):
+        """user, 2026-10-21: the clip's ETA ran out at each segment's end -- the runner names the
+        clip's segments (their frames, in order) before running them; hooks without it are fine."""
+        self.clip("a.mp4")
+        specs, _ = R.discover_sources(str(self.inp))
+        got = []
+
+        class SegHooks(RecordingHooks):
+            def segments(self, frames):
+                got.append((list(frames), len(FakeDemo.instances[0].runs) if FakeDemo.instances else 0))
+        R.DepthCrafterRunner(self.seg_opts(), SegHooks(), threading.Event()).run_batch(specs, 7)
+        self.assertEqual(got, [([110, 110, 110], 0)], "once, with every segment's frames, before the first ran")
+        self.assertEqual(len(FakeDemo.instances[-1].runs), 3)
+
     # audit 2026-09-28 (minor): Output CRF / Preset reached only a clip done
     # whole -- the merged depth of a segmented clip always got the defaults.
     def test_crf_and_preset_reach_the_merged_output(self):

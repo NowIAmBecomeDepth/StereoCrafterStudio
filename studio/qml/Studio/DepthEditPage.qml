@@ -44,6 +44,14 @@ Item {
     // SAM 3 set up (packages there, the model's weights downloaded): its page
     // section goes, and its settings live in Settings (user, 2026-09-28)
     readonly property bool samInstalled: page.s.install_btn === false && page.s.weights_btn === false
+    // SAM 3's download, run by Settings > Studio > Models (user, 2026-10-21): on = running or queued
+    readonly property var samDl: {
+        const d = typeof Models !== "undefined" && Models ? Models.download : ({})
+        const running = d.key === "sam3"
+        const queued = (d.queued || []).indexOf("sam3") >= 0
+        const err = d.error && d.error.key === "sam3" ? d.error.text : ""
+        return { on: running || queued, running: running, progress: d.progress || 0, text: d.text || "", error: err }
+    }
     readonly property var stageMenus: [samMenu]
     StudioMenu {
         id: samMenu
@@ -1143,8 +1151,34 @@ Item {
                         Layout.fillWidth: true
                         spacing: 6
                         Btn { op: "_install_packages"; text: "Install Packages"; enabled: !!page.s.install_btn; tip: page.help("install_packages") }
-                        Btn { op: "_download_weights"; text: "Download Weights"; enabled: !!page.s.weights_btn; tip: page.help("download_weights") }
+                        Btn { op: "_download_weights"; text: "Download Weights"; enabled: !!page.s.weights_btn && !page.samDl.on; tip: page.help("download_weights") }
                         Btn { op: "_toggle_model"; text: "Unload Model"; enabled: !!page.s.model_btn; tip: page.help("unload_model") }
+                    }
+                    // the download (Settings > Studio > Models' own): its bar and Stop (user, 2026-10-21)
+                    RowLayout {
+                        objectName: "deSamDownload"
+                        visible: page.samDl.on
+                        Layout.fillWidth: true
+                        spacing: 8
+                        ProgressBar {
+                            objectName: "deSamDownloadProgress"
+                            Layout.fillWidth: true
+                            from: 0; to: 1; value: page.samDl.running ? page.samDl.progress : 0
+                            background: Rectangle { implicitHeight: 6; radius: 3; color: Theme.trough }
+                            contentItem: Item { Rectangle { width: parent.parent.visualPosition * parent.width; height: 6; radius: 3; color: Theme.accent } }
+                        }
+                        AccentButton {
+                            objectName: "deSamDownloadStop"
+                            text: "Stop"; kind: "ghost"
+                            onClicked: page.samDl.running ? Models.stop() : Models.unqueue("sam3")
+                            HoverTip { tip: "Stops the download. What came down is kept: the next Download Weights carries on from there." }
+                        }
+                    }
+                    Muted {
+                        visible: page.samDl.on || page.samDl.error !== ""
+                        text: page.samDl.error !== "" ? page.samDl.error
+                              : page.samDl.running ? page.samDl.text
+                              : "Waiting for the download running in Settings > Studio > Models."
                     }
                     VarCheck { varName: "offload"; text: "Keep frames in system RAM (saves VRAM)"; tip: page.help("offload_frames") }
                 }

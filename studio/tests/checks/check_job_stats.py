@@ -296,6 +296,19 @@ S._dc.rates["tail"]["640x384"] = 0.6; S._on_bar("Window 1/1:  75%|### | 3/4 [03:
 _eta = shown(dcp, "jobEtaText")                                  # 1 step x 60 s + 100 frames x 0.6 s
 check("...and a finish time once its tail is known", _eta.startswith("ETA 2 min · ") and len(_eta) > 13, _eta)
 check("...not on Inpainting's page", not any(c.objectName() == "jobEtaText" and c.isVisible() for c in walk(ipp, [])))
+# the batch's ETA beside it (user, 2026-10-21): the clip's 2 min + 200 frames after it at the
+# 1.2 s a frame this clip projects (its 120 s / 100 frames)
+check("Batch ETA: none for a run of one clip", not any(c.objectName() == "batchEtaText" and c.isVisible()
+      for c in walk(dcp, [])))
+S.batch_begin("depthcrafter", [("D:/in/A.mp4", 100), ("D:/in/B.mp4", 200)]); S.batch_clip("depthcrafter", "A"); pump(0.1)
+_b = shown(dcp, "batchEtaText")
+check("...with clips after this one, the whole batch's beside the clip's", _b.startswith("Batch 6 min · "), _b)
+_be = [c for c in walk(dcp, []) if c.objectName() == "batchEtaText"][0]
+_je = [c for c in walk(dcp, []) if c.objectName() == "jobEtaText"][0]
+check("...left of the clip's, on its line", _be.property("x") + _be.property("width") < _je.property("x")
+      and _be.property("y") == _je.property("y"), f"{_be.property('x')}+{_be.property('width')} / {_je.property('x')}")
+S.batch_clip("depthcrafter", "B"); pump(0.1)
+check("...and gone on the last clip", not _be.isVisible())
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 2), Q_ARG("QVariant", True)); pump(1.0)   # back, as before
 # how long the job took, after the finish status (user, 2026-10-04: every stage, as
 # Inpainting's "Processing completed in ...")

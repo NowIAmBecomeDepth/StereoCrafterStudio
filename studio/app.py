@@ -202,6 +202,9 @@ def build(app: QGuiApplication):
     updater = Updater()
     updater.job_running = lambda: (jobs.running() or ("", ""))[1]   # Install waits for a job (bug sweep A1)
     models = ModelsController(shell)
+    # the Segment page's Download Weights runs Settings > Studio > Models' download: a child process with
+    # a Stop (user, 2026-10-21; the editor's own ran in-process and couldn't be stopped)
+    depthedit.models = models
     # a download waits for a job; the folder can't change during one (the busy flag, as Main shows it)
     models.job_running = lambda: next((name for _sid, name, c in jobs._stages if c.property("busy")), "")
     from .folder_browser import FolderBrowser

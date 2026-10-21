@@ -118,6 +118,31 @@ check("...and says so", bool(toasts) and toasts[-1][1] == "SAM 3 uninstalled", s
 after_real = sorted(p.name for p in real_weights.glob("*")) if real_weights.is_dir() else []
 check("the real weights/SAM3 untouched", after_real == before_real, f"{before_real} -> {after_real}")
 
+# ---- Download Weights: Settings > Studio > Models' download, with a bar and a Stop (user, 2026-10-21) --
+# the fetch stood in for (nothing is downloaded): it reports progress until Stop
+import threading as _th
+import studio.model_catalog as _C
+_seen = {"stopped": False}
+def _fake_download(parts, progress, stop, procs=None, wait=None):
+    while not stop.is_set():
+        progress(0.4, "Downloading sam3.pt  1.4 / 3.5 GB"); time.sleep(0.05)
+    _seen["stopped"] = True
+    raise _C.Stopped()
+_C.download = _fake_download
+models = objs["Models"]
+de.run("_download_weights"); pump(0.6)
+dl = lambda: models.property("download") or {}
+check("Download Weights runs Models' download of SAM 3", dl().get("key") == "sam3", str(dl()))
+row = find(win.contentItem(), lambda c: c.objectName() == "deSamDownload")
+stop_btn = find(win.contentItem(), lambda c: c.objectName() == "deSamDownloadStop")
+check("...the SAM 3 section shows its bar and a Stop", row is not None and row.isVisible() and stop_btn is not None
+      and stop_btn.isVisible(), f"row {row is not None and row.isVisible()}")
+check("...and Download Weights greyed while it runs",
+      find(win.contentItem(), lambda c: c.property("op") == "_download_weights").property("enabled") is False)
+QMetaObject.invokeMethod(stop_btn, "clicked"); pump(0.2)
+check("Stop ends the download", until(lambda: _seen["stopped"] and not dl().get("key"), 10), str(dl()))
+check("...and the bar goes", until(lambda: not row.isVisible(), 5))
+
 studio_warns = [w for w in warns if "Studio" in w or "qml" in w.lower()]
 check("no QML warnings", not studio_warns, "\n    " + "\n    ".join(studio_warns[:12]))
 _lj = h0 == (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None); print("last_jobs unchanged:", _lj)

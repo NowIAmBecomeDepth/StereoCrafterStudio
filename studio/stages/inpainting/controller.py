@@ -411,6 +411,9 @@ class InpaintingController(QObject):
             stats = getattr(self, "job_stats", None)
             if stats is not None:
                 stats.clip_changed("inpainting")
+        stats = getattr(self, "job_stats", None)
+        if stats is not None and self._clip:
+            stats.batch_clip("inpainting", str(self._clip[0]))
         self.infoChanged.emit()
 
     def _claim(self) -> bool:
@@ -508,6 +511,15 @@ class InpaintingController(QObject):
         self._status = "Starting processing..."
         self.stateChanged.emit()
         self.infoChanged.emit()
+        stats = getattr(self, "job_stats", None)
+        # the batch's ETA beside the clip's (user, 2026-10-21): Upcoming Jobs' clips are the
+        # engine's (the finished ones moved out of the input); a Single Clip ID run, one of them
+        if stats is not None and kwargs.get("single_clip_id") is None:
+            try:
+                stats.batch_begin("inpainting", self.queue.frames_of(
+                    list(only) if only else self.queue.clipPaths, int(kwargs.get("process_length", -1) or -1)))
+            except Exception:
+                logger.debug("No batch ETA for this run", exc_info=True)
 
         hooks = _EngineHooks(self)
         paths = dict(self._run_paths)

@@ -91,6 +91,12 @@ class _QtHooks(R.Hooks):
     def clip(self, filename, resolution, frames):
         self.ctl._sigClip.emit(str(filename), str(resolution), str(frames))
 
+    def segments(self, frames):
+        """Process as Segments: the clip's segments to run, their frames in order (the ETA's)."""
+        stats = getattr(self.ctl, "job_stats", None)
+        if stats is not None:
+            stats.dc_event("segments", list(frames))
+
     def ask(self, title, message, allow_cancel=True):
         return self.ctl._ask_from_worker(title, message, allow_cancel)
 
@@ -455,6 +461,9 @@ class DepthCrafterController(QObject):
     @Slot(str, str, str)
     def _on_clip(self, name, res, frames):
         self._clip = (name, res, frames)
+        stats = getattr(self, "job_stats", None)
+        if stats is not None and self._task == "batch":
+            stats.batch_clip("depthcrafter", name)
         self.infoChanged.emit()
 
     def _claim(self) -> bool:
@@ -615,7 +624,14 @@ class DepthCrafterController(QObject):
             self._done, self._total = 0, len(specs)
             self._on_status(f"Starting processing {len(specs)} files/sequences...")
             self._batch_runner = runner
-        self._begin("batch", runner.run_batch, specs, seed, before=before)
+        if self._begin("batch", runner.run_batch, specs, seed, before=before):
+            stats = getattr(self, "job_stats", None)
+            if stats is not None and getattr(self, "queue", None) is not None:
+                try:                    # the batch's ETA beside the clip's (user, 2026-10-21)
+                    stats.batch_begin("depthcrafter", self.queue.frames_of(
+                        [s["path"] for s in specs], int(opts.get("process_length", -1) or -1)))
+                except Exception:
+                    logger.debug("No batch ETA for this run", exc_info=True)
 
     @Slot()
     def cancel(self) -> None:

@@ -104,14 +104,15 @@ Item {
         color: Theme.bed
     }
 
-    function etaText(s, partial) {
+    function etaText(s, partial, label) {
+        label = label || "ETA"
         if (s < 0)
-            return "ETA N/A"
+            return label + " N/A"
         var m = Math.round(s / 60)
         var left = s < 60 ? "< 1 min" : m < 60 ? m + " min" : Math.floor(m / 60) + " h " + (m % 60) + " min"
         if (partial)    // what isn't timed yet: Inpainting's hi-res render, DepthCrafter's encode / decode
-            return "ETA " + left + (bar.statsStage === "depthcrafter" ? " + encode/decode" : " + render")
-        return "ETA " + left + " \u00b7 " + new Date(Date.now() + s * 1000).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+            return label + " " + left + (bar.statsStage === "depthcrafter" ? " + encode/decode" : " + render")
+        return label + " " + left + " \u00b7 " + new Date(Date.now() + s * 1000).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
     }
 
     component Progress: RowLayout {
@@ -178,6 +179,7 @@ Item {
                     // so it never narrows the bar; a finish time, so nothing ticks
                     // between updates (Theme.calm).
                     Text {
+                        id: jobEta
                         objectName: "jobEtaText"
                         visible: (bar.statsStage === "inpainting" || bar.statsStage === "depthcrafter")
                                  && clipPercent.parent.mine
@@ -186,6 +188,20 @@ Item {
                         anchors.topMargin: 4
                         text: visible ? bar.etaText(JobStats.eta, JobStats.etaPartial) : ""
                         color: JobStats.eta >= 0 ? Theme.fg : Theme.fgFaint
+                        font.family: Theme.bodyFont
+                        font.pixelSize: Theme.smallSize + 1
+                        font.features: { "tnum": 1 }
+                    }
+                    // ...and the whole batch's, beside it, while clips come after this one
+                    // (JobStats.batchEta; user, 2026-10-21)
+                    Text {
+                        objectName: "batchEtaText"
+                        visible: jobEta.visible && JobStats.batchClips > 0
+                        anchors.right: jobEta.left
+                        anchors.rightMargin: 18
+                        anchors.top: jobEta.top
+                        text: visible ? bar.etaText(JobStats.batchEta, JobStats.etaPartial, "Batch") : ""
+                        color: JobStats.batchEta >= 0 ? Theme.fg : Theme.fgFaint
                         font.family: Theme.bodyFont
                         font.pixelSize: Theme.smallSize + 1
                         font.features: { "tnum": 1 }

@@ -1005,6 +1005,13 @@ class DepthEditController(QObject):
         if name == "_pick_from_depthcrafter":
             self._pick_from_depthcrafter()
             return
+        if name == "_download_weights" and getattr(self, "models", None) is not None:
+            # Settings > Studio > Models' download (a child process: Stop ends it at once, the part-file
+            # resumes next time); the page shows its bar and Stop, the status follows when it lands
+            why = self.models.start("sam3")
+            if why:
+                self.message.emit("warning", "Download Weights", why)
+            return
         if name in ("_track", "_find_text") and not self._claim_for_sam():
             return
         if name == "_load_clip" and self._engine is not None and not self._engine._job_pending():

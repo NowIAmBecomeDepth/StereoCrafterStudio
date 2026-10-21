@@ -696,6 +696,16 @@ class ClipQueue(QObject):
         """The ticked clips, in the list's order."""
         return [p for p in self._paths if self._key(p) in self._checked]
 
+    def frames_of(self, paths, cap: int = -1) -> List[Tuple[str, int]]:
+        """[(path, frames)] for a run's clips: the list's own counts, else the header's; at most
+        `cap` each when it is set (Process Length). For the batch's ETA (job_stats.batch_begin)."""
+        known = {self._key(p): f for p, f in zip(self._paths, self._frames)}
+        out = []
+        for p in paths:
+            n = known.get(self._key(p)) or frame_count(p, self._frames_cache)
+            out.append((p, min(n, cap) if cap and cap > 0 else n))
+        return out
+
     @Slot(str, bool)
     def setChecked(self, path: str, on: bool) -> None:
         key = self._key(path)
