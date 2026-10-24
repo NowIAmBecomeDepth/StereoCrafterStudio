@@ -19,6 +19,37 @@ import subprocess
 # Configure a logger for this module
 _logger = logging.getLogger(__name__)
 
+#: ffmpeg / ffprobe without a console window of their own: Studio runs windowless (pythonw), so each
+#: one opened a window that took the focus for a moment -- at the end of every clip, as the depth map
+#: was written (a user, 2026-10-24: "a command window pops up and takes focus away ... typing on Discord")
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _hide_mediapy_windows(module) -> None:
+    """mediapy starts ffmpeg itself (subprocess.Popen / run) with no window flag: its own `subprocess`
+    name is pointed at one that adds CREATE_NO_WINDOW -- mediapy's alone; nothing else changes."""
+    real = getattr(module, "subprocess", None)
+    if not _NO_WINDOW or real is None or getattr(real, "_studio_no_window", False):
+        return
+    import types
+
+    shim = types.ModuleType("subprocess")
+    shim.__dict__.update(real.__dict__)
+
+    def _hidden(fn):
+        def call(*args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NO_WINDOW
+            return fn(*args, **kwargs)
+        return call
+
+    shim.Popen = _hidden(real.Popen)
+    shim.run = _hidden(real.run)
+    shim._studio_no_window = True
+    module.subprocess = shim
+
+
+_hide_mediapy_windows(mediapy)
+
 dataset_res_dict = {
     "sintel": [448, 1024],
     "scannet": [640, 832],
@@ -156,7 +187,8 @@ def get_video_stream_info(video_path: str) -> Optional[dict]:
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", timeout=60,
+                                creationflags=_NO_WINDOW)
         raw_stdout = result.stdout  # <--- Capture stdout
         data = json.loads(raw_stdout)  # <--- Use captured stdout
         # No debug print of raw stdout here
@@ -200,7 +232,8 @@ def get_video_stream_info(video_path: str) -> Optional[dict]:
             ]
             try:
                 result_count_frames = subprocess.run(
-                    cmd_count_frames, capture_output=True, text=True, check=True, encoding="utf-8", timeout=60
+                    cmd_count_frames, capture_output=True, text=True, check=True, encoding="utf-8", timeout=60,
+                    creationflags=_NO_WINDOW,
                 )
                 raw_stdout_count_frames = result_count_frames.stdout
                 data_count_frames = json.loads(raw_stdout_count_frames)

@@ -23,7 +23,9 @@ def check_cuda_availability() -> bool:
         logger.info("PyTorch reports CUDA is available.")
         try:
             # Further check with nvidia-smi for robustness
-            subprocess.run(["nvidia-smi"], capture_output=True, check=True, timeout=2, encoding="utf-8")
+            # no window of its own: Studio is windowless, and one popped up and took the focus (2026-10-24)
+            subprocess.run(["nvidia-smi"], capture_output=True, check=True, timeout=2, encoding="utf-8",
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             logger.debug("CUDA detected (nvidia-smi also ran successfully). NVENC can be used.")
             CUDA_AVAILABLE = True
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
