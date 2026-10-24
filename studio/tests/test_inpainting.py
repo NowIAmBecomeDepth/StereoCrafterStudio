@@ -46,6 +46,50 @@ class SyncTest(unittest.TestCase):
                          "engine.py is stale; re-run: python -m studio.tools.gen_inpainting_engine")
 
 
+class JoinChunksTest(unittest.TestCase):
+    """A user's clip (2026-10-24, a 12 GB card): two hours in, "DefaultCPUAllocator: not enough
+    memory: you tried to allocate 12959907840 bytes" -- torch.cat(results) built the whole clip while
+    every chunk was still held: the clip twice in RAM. _join_chunks lets each chunk go once copied."""
+
+    def setUp(self):
+        from studio.stages.inpainting import engine as E
+        self.E = E
+
+    def chunks(self):
+        import torch
+        g = torch.Generator().manual_seed(4)
+        return [torch.rand((n, 3, 12, 20), generator=g) for n in (22, 22, 22, 9)]
+
+    def test_the_same_clip_as_torch_cat(self):
+        import torch
+        chunks = self.chunks()
+        want = torch.cat(chunks, dim=0)
+        got = self.E._join_chunks(chunks)
+        self.assertEqual(got.dtype, want.dtype)
+        self.assertTrue(torch.equal(got, want))
+        self.assertEqual(chunks, [], "the chunks are handed over, not kept")
+
+    def test_each_chunk_is_let_go_once_copied(self):
+        import weakref
+        seen = []
+        real_pop = list.pop
+
+        class Watch(list):
+            def pop(self, i=-1):
+                seen.append(first() is not None)        # still alive when the next one is taken?
+                return real_pop(self, i)
+        chunks = Watch(self.chunks())                   # the only holder of the chunks
+        first = weakref.ref(chunks[0])
+        self.E._join_chunks(chunks)
+        self.assertEqual(seen[:2], [True, False], "the first chunk was still held after it was copied in")
+
+    def test_the_engine_joins_its_chunks_so(self):
+        import inspect
+        src = inspect.getsource(self.E.InpaintingEngine.process_single_video)
+        self.assertIn("_join_chunks(results)", src)
+        self.assertNotIn("torch.cat(results", src)
+
+
 class RetiredSettingsTest(unittest.TestCase):
     """Post-Inpainting Blend left Studio (user, 2026-10-11: Merging blends the
     fill in, with more control). A config, preset or older Studio that saved it

@@ -134,6 +134,25 @@ def _chunk_append_length(i, stride, overlap, actual, total):
     return actual if is_last else stride
 
 
+def _join_chunks(chunks):
+    """The inpainted chunks as one clip, each let go once it is copied in. v1's torch.cat held every
+    chunk AND the joined clip at once -- twice the clip in RAM (a user's clip, 2026-10-24: 13 GB more
+    asked for at the end, out of memory after two hours). Now the clip plus one chunk. The same
+    frames, the same dtype; `chunks` is left empty."""
+    total = sum(int(c.shape[0]) for c in chunks)
+    first = chunks[0]
+    out = torch.empty((total,) + tuple(first.shape[1:]), dtype=first.dtype)
+    at = 0
+    del first
+    while chunks:
+        chunk = chunks.pop(0)
+        n = int(chunk.shape[0])
+        out[at:at + n] = chunk
+        at += n
+        del chunk
+    return out
+
+
 class _Counter:
     """Stands in for v1's tk.IntVar progress counters."""
 
@@ -2990,7 +3009,7 @@ class InpaintingEngine:
                     )
                 return False, None
 
-            frames_output = torch.cat(results, dim=0).cpu()
+            frames_output = _join_chunks(results)  # v2: the clip once, not twice (2026-10-24)
             if frames_output.numel() == 0 or frames_output.shape[2] < padded_H or frames_output.shape[3] < padded_W:
                 logger.error(
                     f"Generated frames_output has invalid dimensions (actual {frames_output.shape[2]}x{frames_output.shape[3]} vs target {padded_H}x{padded_W})."
