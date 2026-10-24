@@ -328,6 +328,18 @@ def helper_script(repo: Path, pid: int, sha: str, launch: str, result_path: Path
     ]) + "\n"
 
 
+#: How the helper is started: hidden, in its own process group so it outlives Studio. NOT
+#: DETACHED_PROCESS (0x8): Windows PowerShell started with no console at all ends before it runs a
+#: line -- Install closed Studio, nothing was updated and nothing reopened (a user, 2026-10-24).
+HELPER_FLAGS = _NO_WINDOW | 0x00000200          # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+
+
+def start_helper(script: Path, cwd: Path) -> subprocess.Popen:
+    """Start the update helper (helper_script, written to `script`); it waits for Studio to close."""
+    return subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+                             "-File", str(script)], cwd=str(cwd), close_fds=True, creationflags=HELPER_FLAGS)
+
+
 def launch_target(repo: Path) -> str:
     for name in ("StereoCrafter Studio.exe", "StereoCrafter Studio.bat"):
         if (repo / name).exists():
@@ -470,9 +482,7 @@ class Updater(QObject):
                                         bool(self._result.get("deps")), zip_from=zip_from,
                                         url=self._get_repo_url()), encoding="utf-8-sig")
         try:
-            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                              "-File", str(script)], cwd=str(self._repo), close_fds=True,
-                             creationflags=_NO_WINDOW | 0x00000008 | 0x00000200)  # DETACHED | NEW_PROCESS_GROUP
+            start_helper(script, self._repo)
         except Exception as e:
             logger.exception("Could not start the update helper")
             return f"Could not start the update: {e}"

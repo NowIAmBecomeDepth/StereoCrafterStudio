@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from PySide6.QtCore import QCoreApplication
 import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
 import studio.settings_store as ss
 from studio import updater as U
+
+REPO = Path(__file__).resolve().parents[2]
 
 from studio.tests._qt import app as _qt_app
 _app = _qt_app()   # a GUI app: the whole suite shares it (tests/_qt.py)
@@ -246,6 +249,41 @@ class ZipCopyTests(unittest.TestCase):
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
                        capture_output=True, timeout=120)
         return json.loads(result.read_text(encoding="utf-8-sig"))
+
+    def test_install_as_studio_starts_it_updates_and_reopens(self):
+        """A user, 2026-10-24: "when i click install update studio closes to desktop ... it doesn't reopen
+        ... its giving me the update notification again". Started detached (DETACHED_PROCESS) from a
+        closing Studio, the helper never ran a line. Here a windowless Studio (pythonw) starts it as
+        Install does and closes at once; the helper waits, updates, and starts the copy again."""
+        r = self.check()
+        (self.copy / "StereoCrafter Studio.bat").write_text('@echo off\r\necho reopened> "%~dp0reopened.txt"\r\n',
+                                                          encoding="utf-8")
+        cfg = self.copy / "config"
+        studio = Path(self.tmp.name) / "studio.py"
+        studio.write_text(
+            "import json, os, sys\n"
+            f"sys.path.insert(0, {str(REPO)!r})\n"
+            "from pathlib import Path\n"
+            "from studio import updater as U\n"
+            f"r = json.loads({json.dumps(json.dumps(r))})\n"
+            f"copy, cfg = Path({str(self.copy)!r}), Path({str(cfg)!r})\n"
+            "script = cfg / 'update_helper.ps1'\n"
+            "script.write_text(U.helper_script(copy, os.getpid(), r['sha'], U.launch_target(copy),\n"
+            "                  cfg / 'update_result.json', cfg / 'update_last.log', False,\n"
+            f"                  zip_from=Path(r['git_dir']), url={self.url!r}), encoding='utf-8-sig')\n"
+            "U.start_helper(script, copy)\n", encoding="utf-8")
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        subprocess.run([str(pythonw if pythonw.exists() else sys.executable), str(studio)], timeout=60)
+        result, reopened = cfg / "update_result.json", self.copy / "reopened.txt"
+        end = time.time() + 90
+        while time.time() < end and not (result.exists() and reopened.exists()):
+            time.sleep(0.5)
+        log = (cfg / "update_last.log").read_text(encoding="utf-8-sig") if (cfg / "update_last.log").exists() else "(no log)"
+        self.assertTrue(result.exists(), "the helper never ran: " + log)
+        self.assertTrue(json.loads(result.read_text(encoding="utf-8-sig"))["ok"], log)
+        self.assertTrue(reopened.exists(), "Studio wasn't started again: " + log)
+        self.assertEqual((self.copy / "app.py").read_text(encoding="utf-8"), "v2\n")
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), self.sha)
 
     def test_a_failed_install_leaves_no_half_made_git_copy(self):
         r = self.check()
