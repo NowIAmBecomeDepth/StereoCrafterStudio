@@ -85,6 +85,29 @@ check("SINGLE rendered clipA only", outs and all("clipA" in o.name for o in outs
 settle()
 check("preview came back after SINGLE", pv.loaded, "")
 
+# each grid records the warp and mask it was made with (2026-10-22): M2SVid's inpainting takes only
+# an M2S splat, and tells an SC one by this
+import subprocess
+from core.splatting.m2s_backends import backend_available, parse_grid_comment
+
+
+def warp_of(p):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags=comment",
+                          "-of", "default=nw=1:nk=1", str(p)], capture_output=True, text=True).stdout.strip()
+    return parse_grid_comment(out)
+
+
+tags = {o.name: warp_of(o) for o in outs}
+check("each grid records its warp: SC", tags and all(t.get("splat_backend") == "SC" for t in tags.values()), str(tags))
+setv("splat_backend", "M2S"); ctl._set("dual_output", True); settle(10)
+got = run_single(); print("   M2S single toasts:", got, flush=True)
+duals = [o for o in (FIX / "out").rglob("*_splatted2.mp4")]
+tags = {o.name: warp_of(o) for o in duals}
+want = "M2S" if backend_available() else "SC"
+check(f"Splat Backend M2S: its dual grids record {want}", duals and all(t.get("splat_backend") == want for t in tags.values()),
+      str(tags))
+setv("splat_backend", "SC"); ctl._set("dual_output", False); settle(10)
+
 print("STATUS", ctl._status, "busy", ctl._busy, flush=True)
 print("out:", list((FIX / "out").rglob("*")), flush=True)
 _lj = h0 == (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None); print("last_jobs unchanged:", _lj)

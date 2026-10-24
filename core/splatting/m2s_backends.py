@@ -108,6 +108,36 @@ def resolve_splat_backend(splat_backend: str) -> Tuple[str, bool]:
     return "M2S", False
 
 
+#: How a splatted grid records its warp and mask in the file's comment tag (2026-10-22): a stage that
+#: needs an M2S warp -- M2SVid's inpainting does -- can tell one from an SC splat.
+GRID_COMMENT_PREFIX = "StereoCrafter Splatting"
+
+
+def grid_comment(splat_backend: str, mask_mode: str, is_low_res_task: bool = False) -> str:
+    """The comment a grid is written with: the warp and mask the render really ran (an M2S backend
+    that didn't load warped with SC)."""
+    backend, fix = resolve_splat_backend(splat_backend)
+    if backend == "M2S" and not backend_available():
+        backend, fix = "SC", False
+    mask = resolve_mask_mode(mask_mode, is_low_res_task)
+    if mask != "SC" and not backend_available():
+        mask = "SC"
+    return f"{GRID_COMMENT_PREFIX}; splat_backend={backend + ('+Fix' if fix else '')}; mask_mode={mask}"
+
+
+def parse_grid_comment(comment: str) -> dict:
+    """{"splat_backend": ..., "mask_mode": ...} from a grid's comment, or {} for a file without one."""
+    text = str(comment or "")
+    if not text.startswith(GRID_COMMENT_PREFIX):
+        return {}
+    out = {}
+    for part in text.split(";")[1:]:
+        key, _, value = part.strip().partition("=")
+        if key:
+            out[key] = value
+    return out
+
+
 def apply_hybrid_mask(
     sc_mask: torch.Tensor,
     disp_map: torch.Tensor,

@@ -411,6 +411,10 @@ class RenderProcessor:
 
         if not is_test_mode:
             encode_stream_info = self._get_encode_stream_info(video_stream_info, color_tags_mode)
+            # the warp and mask this render runs, in the grid's comment (2026-10-22): M2SVid's
+            # inpainting needs an M2S warp and can tell an SC splat by it
+            from core.splatting.m2s_backends import grid_comment as _grid_comment
+            grid_comment = _grid_comment(splat_backend, mask_mode, is_low_res_task)
 
             if use_dnxhr_split:
                 base_dir = os.path.dirname(output_video_path_base)
@@ -432,6 +436,7 @@ class RenderProcessor:
                     final_output_mov_path=parts[splat_output_path],
                     fps=processed_fps,
                     dnxhr_profile=dnxhr_profile,
+                    comment=grid_comment,
                 )
                 if splat_process is None:
                     logger.error("Failed to start DNxHR pipe for combined splat output. Aborting splatting task.")
@@ -458,6 +463,7 @@ class RenderProcessor:
                     output_format_str="splatted_grid",
                     debug_label=task_name,
                     encoding_options=encoding_options,
+                    comment=grid_comment,
                 )
                 if ffmpeg_process is None:
                     logger.error("Failed to start FFmpeg pipe. Aborting splatting task.")

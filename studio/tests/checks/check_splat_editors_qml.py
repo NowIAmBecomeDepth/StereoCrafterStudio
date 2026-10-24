@@ -420,12 +420,29 @@ check("...a Detect Text mask: a T badge on that clip only",
       [list(x)[5] for x in pv.property("jobClips").property("clipFx")] == [True, False] and _tx == [True, False], str(_tx))
 _subA.unlink()
 pv.jumpTo(2); settle(); pv.jumpTo(1); settle()
-keep_tall()
+# room for a whole badge row AND the legend under it: in less the legend now steps aside rather
+# than run out of the box (user, 2026-10-24: it was cut off at the bottom)
+keep_tall(2000)
 _lg = find(sq, lambda c: c.objectName() == "jobQueueLegend")
 _li = [c for c in find_all(sq, lambda c: c.objectName() == "jobQueueLegendItem")]
 check("...a legend of the eight badges under the list (user, 2026-10-03; Particles 2026-10-08; Object removed 2026-10-16)", _lg is not None and _lg.isVisible() and len(_li) == 8
       and _lg.mapToItem(sq, QPointF(0, 0)).y() >= find(sq, lambda c: c.objectName() == "jobQueueList").mapToItem(sq, QPointF(0, 0)).y()
-      + find(sq, lambda c: c.objectName() == "jobQueueList").height() - 0.5, f"{len(_li)} items")
+      + find(sq, lambda c: c.objectName() == "jobQueueList").height() - 0.5
+      and _lg.mapToItem(sq, QPointF(0, _lg.height())).y() <= sq.height() + 0.5,
+      f"{len(_li)} items; box {sq.height():.0f}, room {sq.property('listRoom') or 0:.0f}, min row {sq.property('minList') or 0:.0f}, "
+      f"legend {_lg.property('implicitHeight'):.0f} / {_lg.height():.0f}" if _lg is not None else "no legend")
+# squeezed (user, 2026-10-24: "the splat clip list gets cut off on the bottom when the little indicators
+# are on any of the clips"): a badge row is taller than a plain one, and the legend sat under a list
+# kept at one plain row -- both ran out of the box. Now nothing shown runs past its bottom.
+keep_tall(1600)
+_lst = find(sq, lambda c: c.objectName() == "jobQueueList")
+_inside = lambda it: it.mapToItem(sq, QPointF(0, it.height())).y() <= sq.height() + 0.5
+_tall = sq.property("rowHeight") + sq.property("fxLineHeight")      # a row with its badge line
+check("...squeezed, nothing cut off at the bottom: a whole badge row or no list, the legend inside or put away",
+      (not _lst.isVisible() or (_inside(_lst) and _lst.height() >= _tall - 0.5))
+      and (not _lg.isVisible() or _inside(_lg)),
+      f"box {sq.height():.0f}; list {_lst.isVisible()} {_lst.height():.0f} (a badge row {_tall}); "
+      f"legend {_lg.isVisible()} ends {_lg.mapToItem(sq, QPointF(0, _lg.height())).y():.0f}")
 check("...the mask gone: no T",
       not any(bool(find(r, lambda c: c.objectName() == "fxTextMask").isVisible()) for r in sqr))
 # ---- another chapter (user, 2026-09-27): with a clip previewed, the folders move to

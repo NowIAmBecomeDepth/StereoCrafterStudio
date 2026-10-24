@@ -137,7 +137,15 @@ Section {
     // heading, the counter and one row -- and the list fills whatever height
     // the layout gives the box (Layout.fillHeight).
     readonly property real fixedPart: 2 * Theme.sectionPad + 58
-    readonly property real minList: rowHeight + 4
+    // one whole row at least -- the tallest one: a row with its badge line under the name is
+    // fxLineHeight taller (user, 2026-10-24: in a squeezed Splatting list it was cut off)
+    readonly property bool anyFxUnder: { for (let i = 0; i < fxs.length; i++) if (fxUnder(fxs[i])) return true; return false }
+    readonly property real minList: rowHeight + (anyFxUnder ? fxLineHeight : 0) + 4
+    // the room the rows have: the box less its heading, counter and tick bar. Short of one whole
+    // row the list and its legend step aside -- the heading and counter stay -- rather than show
+    // a row cut off at the bottom; the legend shows only where it fits under a whole row.
+    readonly property real listRoom: height - fixedPart - (tickBar.visible ? tickBar.height + spacing : 0)
+    readonly property bool listFits: listRoom >= minList
     // ...plus the tick bar when it shows: without it a short page (Merging at its minimum height) squeezed
     // the list below one row and the row spilled out of the box (user, 2026-10-10: "the alignment is off").
     implicitHeight: fixedPart + minList + (tickBar.visible ? tickBar.height + spacing : 0)
@@ -447,9 +455,9 @@ Section {
         id: list
         objectName: "jobQueueList"
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.max(queue.minList, queue.height - queue.fixedPart
-                                         - (tickBar.visible ? tickBar.height + queue.spacing : 0)
+        Layout.preferredHeight: Math.max(queue.minList, queue.listRoom
                                          - (legend.visible ? legend.height + queue.spacing : 0))
+        visible: queue.listFits
         clip: true
         spacing: 6
         model: queue.src ? queue.src.clips : []
@@ -830,7 +838,8 @@ Section {
         Layout.preferredWidth: 0            // wraps in the list's width, as the tick bar does
         Layout.minimumWidth: 0
         Layout.maximumWidth: queue.width - 28
-        visible: queue.legendItems.length > 0 && list.count > 0
+        visible: queue.legendItems.length > 0 && list.count > 0 && queue.listFits
+                 && queue.listRoom - implicitHeight - queue.spacing >= queue.minList
         spacing: 12
         Repeater {
             model: queue.legendItems

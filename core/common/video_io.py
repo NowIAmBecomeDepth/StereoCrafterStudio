@@ -1139,6 +1139,7 @@ def start_ffmpeg_pipe_process(
     pad_to_16_9: bool = False,
     debug_label: Optional[str] = None,
     encoding_options: Optional[dict] = None,
+    comment: Optional[str] = None,
 ) -> Optional[subprocess.Popen]:
     """Start an FFmpeg process that reads raw video from a pipe.
 
@@ -1159,6 +1160,8 @@ def start_ffmpeg_pipe_process(
             - encoding_tune: tune option
             - output_crf: CRF value
             - nvenc_lookahead_enabled, nvenc_lookahead, etc.
+        comment: Optional text for the file's comment tag -- how it was made (Splatting's grids
+            record their warp and mask, 2026-10-22: a stage that needs one kind can tell)
 
     Returns:
         The subprocess.Popen instance
@@ -1305,6 +1308,8 @@ def start_ffmpeg_pipe_process(
         if val:
             cmd.extend([f, val])
 
+    if comment:
+        cmd.extend(["-metadata", f"comment={comment}"])
     cmd.extend(["-movflags", "+write_colr", *ffmpeg_output_args(final_output_mp4_path)])
     cmd = with_color_tags(cmd)     # primaries / transfer into the file (core.common.color_tags)
     housekeeping_log.info(f"Starting FFmpeg pipe: {' '.join(cmd)}")
@@ -1348,6 +1353,7 @@ def start_ffmpeg_pipe_process_dnxhr(
     fps: float,
     dnxhr_profile: str = "HQX",
     pad_to_16_9: bool = False,
+    comment: Optional[str] = None,
 ) -> Optional[subprocess.Popen]:
     """Start an FFmpeg process for high-quality DNxHR output via pipe.
 
@@ -1358,6 +1364,7 @@ def start_ffmpeg_pipe_process_dnxhr(
         fps: Frame rate
         dnxhr_profile: DNxHR profile (SQ, HQ, HQX, 444)
         pad_to_16_9: Letterbox/pillarbox the output to a 16:9 frame
+        comment: Optional text for the file's comment tag (start_ffmpeg_pipe_process's)
 
     Returns:
         The subprocess.Popen instance
@@ -1417,6 +1424,7 @@ def start_ffmpeg_pipe_process_dnxhr(
         "-movflags",
         "write_colr",
         "-an",
+        *(["-metadata", f"comment={comment}"] if comment else []),
         *ffmpeg_output_args(final_output_mov_path),   # a .part name: see partial_output
     ]
     cmd = with_color_tags(cmd)     # primaries / transfer into the file (core.common.color_tags)
