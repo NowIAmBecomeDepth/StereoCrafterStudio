@@ -470,6 +470,14 @@ Section {
         // during Splatting's and Merging's own jobs too (not heavy on the GPU --
         // user); while a heavier stage runs (Theme.durLight) it's an instant jump.
         property real wheelTarget: 0
+        // where the wheel may take it: from originY, not 0. With rows of two heights (a badge row is
+        // taller) the list only estimates the rows it hasn't built and shifts originY when it learns
+        // better -- clamped to 0 .. contentHeight - height, the wheel stopped short of the last row,
+        // or ran past it (user, 2026-10-24: "i can't scroll further down than this")
+        function clampY(y) {
+            const lo = list.originY
+            return Math.max(lo, Math.min(Math.max(lo, lo + list.contentHeight - list.height), y))
+        }
         NumberAnimation {
             id: wheelGlide
             objectName: "jobQueueGlide"
@@ -477,6 +485,8 @@ Section {
             property: "contentY"
             duration: Theme.durLight(220)
             easing.type: Easing.OutCubic
+            // the rows built on the way may move originY again: the glide lands inside the list
+            onFinished: list.contentY = list.clampY(list.contentY)
         }
         WheelHandler {
             objectName: "jobQueueWheel"
@@ -484,16 +494,15 @@ Section {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: (e) => {
                 const step = queue.rowHeight + list.spacing
-                const top = Math.max(0, list.contentHeight - list.height)
                 e.accepted = true
                 if (e.pixelDelta.y !== 0) {            // a touchpad: already smooth, follow it
                     wheelGlide.stop()
-                    list.contentY = Math.max(0, Math.min(top, list.contentY - e.pixelDelta.y))
+                    list.contentY = list.clampY(list.contentY - e.pixelDelta.y)
                     return
                 }
                 // from where a glide still running is heading, so quick notches add up
                 const from = wheelGlide.running ? list.wheelTarget : list.contentY
-                list.wheelTarget = Math.max(0, Math.min(top, from - e.angleDelta.y / 120 * step * 2))
+                list.wheelTarget = list.clampY(from - e.angleDelta.y / 120 * step * 2)
                 if (wheelGlide.duration <= 0) {        // a heavy job runs: no animation
                     wheelGlide.stop()
                     list.contentY = list.wheelTarget
