@@ -85,6 +85,10 @@ Item {
     // Inpainting, once the chunks are done (JobStats.phase): the bar starts
     // again for the hi-res blend's render, then the encode.
     readonly property string phase: showFrames ? JobStats.phase : ""
+    // the batch's ETA, while clips come after this one: under the bar beside the clip's, or on a titled
+    // bar's heading (user, 2026-10-24)
+    readonly property bool batchEtaShown: (statsStage === "inpainting" || statsStage === "depthcrafter")
+        && typeof JobStats !== "undefined" && JobStats.stage === statsStage && JobStats.batchClips > 0
     readonly property string framesText: !showFrames ? ""
         : phase === "render" ? "Hi-res blend: " + JobStats.renderDone + " / " + JobStats.renderTotal + " frames rendered"
         : phase === "encode" ? "Encoding the final video…"
@@ -193,10 +197,10 @@ Item {
                         font.features: { "tnum": 1 }
                     }
                     // ...and the whole batch's, beside it, while clips come after this one
-                    // (JobStats.batchEta; user, 2026-10-21)
+                    // (JobStats.batchEta; user, 2026-10-21) -- a titled bar has it on its heading
                     Text {
                         objectName: "batchEtaText"
-                        visible: jobEta.visible && JobStats.batchClips > 0
+                        visible: bar.batchEtaShown && bar.title === ""
                         anchors.right: jobEta.left
                         anchors.rightMargin: 18
                         anchors.top: jobEta.top
@@ -288,6 +292,18 @@ Item {
                         iconGlyph: Theme.icon.console
                         implicitHeight: 26
                         onClicked: bar.consoleRef.open = true
+                    },
+                    // the batch's ETA at the heading's right end (user, 2026-10-24: beside the clip's,
+                    // under the bar, a long status line ran into it)
+                    Text {
+                        objectName: "batchEtaHeader"
+                        visible: bar.batchEtaShown
+                        Layout.alignment: Qt.AlignVCenter
+                        text: visible ? bar.etaText(JobStats.batchEta, JobStats.etaPartial, "Batch") : ""
+                        color: JobStats.batchEta >= 0 ? Theme.fg : Theme.fgFaint
+                        font.family: Theme.bodyFont
+                        font.pixelSize: Theme.smallSize + 1
+                        font.features: { "tnum": 1 }
                     }
                 ]
                 Progress { Layout.fillWidth: true }

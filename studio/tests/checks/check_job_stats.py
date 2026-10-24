@@ -280,6 +280,21 @@ check("...then the chunks left from the steps' s/it, '+ render' on the first cli
 S._eta_tail_per_frame = 1.5; S._on_bar("3/10 [00:90<03:30, 30.00s/it]"); pump(0.1)   # 7 x 30 + 300 + 60 frames x 1.5 s
 _eta = shown(ipp, "jobEtaText")
 check("...and a finish time once the render is known", _eta.startswith("ETA 10 min · ") and len(_eta) > 13, _eta)
+# its batch's ETA on the Progress heading's right end (user, 2026-10-24: under the bar a long status
+# line -- "Hi-res blend: 0 / 20 frames rendered" -- ran into it)
+S.batch_begin("inpainting", [("D:/in/A_640_splatted4.mp4", 60), ("D:/in/B_640_splatted4.mp4", 60)])
+S.batch_clip("inpainting", "A_640_splatted4"); pump(0.1)
+_bh = [c for c in walk(ipp, []) if c.objectName() == "batchEtaHeader"]
+_cb = [c for c in walk(ipp, []) if c.objectName() == "clipBar"][0]
+check("Inpainting's Batch ETA on the Progress heading, not on the status line",
+      len(_bh) == 1 and _bh[0].isVisible() and str(_bh[0].property("text")).startswith("Batch ")
+      and not any(c.objectName() == "batchEtaText" and c.isVisible() for c in walk(ipp, [])),
+      str(_bh[0].property("text")) if _bh else "no heading item")
+_hy, _by = _bh[0].mapToItem(ipp, 0, 0).y(), _cb.mapToItem(ipp, 0, 0).y()
+_ab = [c for c in walk(ipp, []) if c.objectName() == "actionBar"][0]
+check("...on the heading's line, above the bar, at its right end", _hy < _by
+      and abs((_bh[0].mapToItem(_ab, _bh[0].width(), 0).x()) - _ab.width()) < 40,
+      f"y {_hy:.0f} vs bar {_by:.0f}; right {_bh[0].mapToItem(_ab, _bh[0].width(), 0).x():.0f} of {_ab.width():.0f}")
 check("...not on DepthCrafter's page while Inpainting runs",
       not any(c.objectName() == "jobEtaText" and c.isVisible() for c in walk(dcp, [])))
 # DepthCrafter's ETA (user, 2026-10-12): head + r x window frames to run + tail, r from the bar
