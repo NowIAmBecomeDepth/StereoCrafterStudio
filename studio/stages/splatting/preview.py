@@ -454,12 +454,29 @@ class SplattingPreview(QObject):
     def setKeyValue(self, key: str, value: float) -> bool:
         """A keyframed dial turned by hand: on a keyframe, that keyframe takes the value
         too, so the picture follows (user, 2026-10-11: as the Depth Map Editor's layers).
-        False off a keyframe -- the keyframes decide that frame, so nothing changes there."""
+        Off a keyframe a DYNAMIC keyframe is added there (user, 2026-10-25: as video editors
+        do -- turned off a key the dial went back, and a key one frame off looked frozen),
+        holding what the dials show at that frame with the turn in it. False: not keyed."""
         track = self._kf_track
-        entry = track.frame_at(self._frame) if track is not None and self._loaded else None
-        if entry is None:
+        if track is None or not self._loaded:
             return False
         var = key + "_var"
+        entry = track.frame_at(self._frame)
+        if entry is None:
+            values = dict(track.values_at(self._frame) or {})
+            if var not in values:
+                return False
+            values[var] = float(value)
+            track.set_keyframe(self._frame, "dynamic", values)
+            self._keyframes = sorted([k for k in getattr(self, "_keyframes", []) if k.get("frame") != self._frame]
+                                     + [{"frame": self._frame, "kind": "dynamic", "curve": None}],
+                                     key=lambda k: k["frame"])
+            self._kf_rev += 1
+            self._drop_play_cache()
+            self._kf_sent = getattr(self, "_kf_sent", 0) + 1
+            self._submit("kf_set", (self._frame, "dynamic", values, self._kf_sent))
+            self.changed.emit()
+            return True
         values = dict(entry.get("values") or {})
         if var not in values:
             return False
@@ -1138,15 +1155,29 @@ class SplattingPreview(QObject):
             eng._kf_clear_current()
         elif kind == "kf_value":
             frame, var, value, seq = arg
-            entry = eng.keyframe_track.frame_at(frame)
-            if entry is not None:
-                values = dict(entry.get("values") or {})
-                values[var] = float(value)
-                eng.keyframe_track.set_keyframe(frame, entry.get("type", "static"), values)
+            try:
+                entry = eng.keyframe_track.frame_at(frame)
+                if entry is not None:
+                    values = dict(entry.get("values") or {})
+                    values[var] = float(value)
+                    eng.keyframe_track.set_keyframe(frame, entry.get("type", "static"), values)
+                    eng._kf_autosave()
+                    if pv.source_readers:
+                        pv.update_preview()
+            finally:        # counted even if the redraw failed: the dials would wait for it forever
+                self._kf_done = max(getattr(self, "_kf_done", 0), int(seq))
+        elif kind == "kf_set":
+            # a keyed dial turned off a keyframe: the dynamic keyframe it adds (setKeyValue)
+            frame, kf_kind, values, seq = arg
+            try:
+                eng.keyframe_track.set_keyframe(int(frame), str(kf_kind), dict(values))
+                eng._kf_redraw_markers()
+                eng._kf_refresh_summary()
                 eng._kf_autosave()
                 if pv.source_readers:
                     pv.update_preview()
-            self._kf_done = max(getattr(self, "_kf_done", 0), int(seq))
+            finally:
+                self._kf_done = max(getattr(self, "_kf_done", 0), int(seq))
         elif kind == "kf_curve":
             frame, curve = arg
             if eng.keyframe_track.set_curve(frame, curve):

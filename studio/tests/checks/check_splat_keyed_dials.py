@@ -154,11 +154,24 @@ check("...the keyframe saved with the last value", abs(kf.get(20, {}).get("value
 QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", "max_disp"), Q_ARG("QVariant", start)); settle()
 pv.seek(12); settle()                                  # between the keys again
 
-# off a keyframe: nothing changes; a hint, once
+# off a keyframe (user, 2026-10-25: "i cant change any settings on the keyframed clip now" -- turned off a
+# key the dial went back, a key one frame off looked frozen): a DYNAMIC keyframe is added there, holding
+# what the dials showed at that frame with the turn in it, as video editors do
 before = dict(pv.property("keyed"))
 QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", "max_disp"), Q_ARG("QVariant", 10.0)); settle()
-check("turned off a keyframe: the keyframes still decide it", pv.property("keyed") == before, str(pv.property("keyed").get("max_disp")))
-check("...said once", bool(page.property("keyHintShown")))
+k12 = next((k for k in pv.property("keyframes") if k["frame"] == 12), None)
+check("turned off a keyframe: a dynamic keyframe added there, the dial where it was turned",
+      k12 is not None and k12["kind"] == "dynamic" and pv.property("onKey") and abs(shown() - 10.0) < 1e-6,
+      f"{[(k['frame'], k['kind']) for k in pv.property('keyframes')]} dial {shown()}")
+after = pv.property("keyed")
+check("...the rest as the dials showed them there", all(abs(after[k] - v) < 1e-6 for k, v in before.items() if k != "max_disp"),
+      {k: (before[k], after[k]) for k in before if k != "max_disp" and abs(after[k] - before[k]) >= 1e-6})
+kf = {k["frame"]: k for k in (json.loads(next((FIX / "depth").glob("*.fssidecar")).read_text(encoding="utf-8"))
+                             .get("keyframe_track") or [])}
+check("...and in the sidecar", kf.get(12, {}).get("type") == "dynamic"
+      and abs(kf.get(12, {}).get("values", {}).get("max_disp_var", -1) - 10.0) < 1e-6, str(kf.get(12)))
+pv.seek(12); settle(); pv.clearKeyframe(); settle()
+check("...Clear Current takes it off again", all(k["frame"] != 12 for k in pv.property("keyframes")) and not pv.property("onKey"))
 
 # bug sweep 2026-10-14c: the dial itself turned (not keyEdit) wrote the clip's base value as well
 pv.seek(20); settle()

@@ -106,17 +106,16 @@ Item {
         // keyed: the keyframe takes the turn, not the clip's base value as well
         writesStore: (page.pv.keyed || {})[key] === undefined
     }
-    // A keyframed dial turned: on a keyframe that keyframe takes the value; off one, the
-    // keyframes decide the frame -- said once (Add a keyframe there to change it)
-    property bool keyHintShown: false
+    // A keyframed dial turned: on a keyframe that keyframe takes the value; off one, a dynamic
+    // keyframe is added there with the turn (user, 2026-10-25: as video editors do -- the dial
+    // used to go back, and a key one frame off looked frozen). Said each time one is added.
     function keyEdit(k, v) {
         if ((pv.keyed || {})[k] === undefined) return
-        if (!pv.setKeyValue(k, v) && !keyHintShown) {
-            keyHintShown = true
-            Theme.toast("info", "The keyframes set this frame",
-                        "This clip has keyframes, so they decide its keyed settings here. Go to a keyframe to change "
-                        + "it, or add one on this frame (S static, D dynamic).")
-        }
+        const wasOn = pv.onKey
+        if (pv.setKeyValue(k, v) && !wasOn)
+            Theme.toast("info", "Keyframe added",
+                        "A dynamic keyframe was added on this frame with your change. Clear Current takes it off "
+                        + "again; S on this frame makes it static.")
     }
     component Caption: Text {
         color: parent && parent.enabled === false ? Theme.fgFaint : Theme.fg
