@@ -123,6 +123,10 @@ def build(app: QGuiApplication):
     # under a Python-busy thread went 1190 -> 19 ms; a real Splatting job
     # timed the same (median 10.10 s at 5 ms, 9.85 s at 0.5 ms).
     sys.setswitchinterval(0.0005)
+    # OpenCV's PNG writes and reads for any path: a clip named in Cyrillic lost a 3-hour Inpainting
+    # at its first hi-res frame (user, 2026-10-24; core/common/image_io.py)
+    from core.common import image_io
+    image_io.install()
     logs = LogHub()
     _setup_logging(logs)
 
