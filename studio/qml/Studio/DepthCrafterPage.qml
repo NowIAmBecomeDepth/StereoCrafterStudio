@@ -358,6 +358,17 @@ ChangeFoldersButton {
                     FieldRow { label: "Process Max Frames (-1 All)"; labelWidth: 176; shown: !page.bh["dc.process_max_frames"]; help: page.help("process_length"); DcBox { key: "process_length" } }
                     DcCheck { key: "save_final_output_json_var"; shown: !page.bh["dc.save_final_json"]; text: "Save Sidecar JSON for Final Output"; help: page.help("save_final_json") }
                     DcCheck { key: "process_as_segments_var"; text: "Process as Segments (Low VRAM Mode)"; help: page.help("process_as_segments") }
+                    // as the other stages' Resume (user, 2026-10-25)
+                    DcCheck {
+                        objectName: "dcResume"
+                        key: "move_to_finished"; text: "Resume"
+                        help: page.help("move_to_finished")
+                              || "On: each clip whose depth map is done moves into a 'finished' folder inside the input "
+                               + "folder (a failed one into 'failed'), so the next Start skips it and an interrupted batch "
+                               + "picks up where it stopped. Off: the clips stay where they are, and every Start runs them "
+                               + "all again -- and Splatting, which reads them from 'finished', needs its Source Clips "
+                               + "pointed at this folder instead. Restore Finished moves them back."
+                    }
                 }
 
                 Section {

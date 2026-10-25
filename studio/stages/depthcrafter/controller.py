@@ -616,7 +616,9 @@ class DepthCrafterController(QObject):
             opts["test_render"] = True        # a test before replaces it without asking
             logger.info("Test render: %s into %s", ", ".join(os.path.basename(s["path"]) for s in specs),
                         opts["output_dir"])
-        runner = R.DepthCrafterRunner(opts, _QtHooks(self), self._stop, move_originals=not single and not test,
+        # Resume off (user, 2026-10-25): the sources stay where they are, as for a single clip
+        runner = R.DepthCrafterRunner(opts, _QtHooks(self), self._stop,
+                                      move_originals=S.moves_finished(opts, single, test),
                                       stop_now=self._stop_now)
 
         def before():

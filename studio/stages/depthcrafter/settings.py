@@ -81,6 +81,10 @@ DEFAULTS: Dict[str, Any] = {
     "robust_output_suffix": "_clipped_depth",
     "is_depth_far_black": True,
     "use_sageattention_var": True,
+    # Resume (user, 2026-10-25: "like the other stages so any stage can turn off using finished folders"):
+    # on, a finished clip's source moves into <input>/finished (a failed one into failed/) and the next
+    # Start skips it, as before; off, the sources stay where they are
+    "move_to_finished": True,
     # v2 only: v1 kept this in a menu checkbox and never saved it.
     "debug_logging": False,
 }
@@ -273,6 +277,12 @@ def window_overlap_problem(settings: Dict[str, Any]) -> str:
         return (f"Overlap must be at least 1 and less than the Window ({window}); it is {overlap}. "
                 f"Otherwise the full-video run cannot move from one window to the next.")
     return ""
+
+
+def moves_finished(opts: Dict[str, Any], single: bool, test: bool) -> bool:
+    """A run moves each source into <input>/finished (or failed/) as it ends: a folder of clips with
+    Resume on (user, 2026-10-25: Resume, as the other stages) -- never a single clip or a Test Render."""
+    return not single and not test and bool(opts.get("move_to_finished", True))
 
 
 def snapshot(settings: Dict[str, Any]) -> Dict[str, Any]:
