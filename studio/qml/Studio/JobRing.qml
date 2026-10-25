@@ -11,7 +11,9 @@ Item {
     id: ring
     property string stage: ""
     property int size: 92
+    property string owner: ""         // which of the stage's pages (JobStats.owner): "" = any
     readonly property bool mine: typeof JobStats !== "undefined" && JobStats.stage === stage
+        && (owner === "" || JobStats.owner === owner)
     readonly property real fraction: mine ? JobStats.part : 0
     readonly property int chunks: mine ? JobStats.chunks : 0
     readonly property int running: mine ? Math.max(1, JobStats.chunk) : 0

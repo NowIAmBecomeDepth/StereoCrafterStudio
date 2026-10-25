@@ -139,6 +139,7 @@ def build(app: QGuiApplication):
     inpainting = InpaintingController(shell)
     inpainting_v2 = InpaintingV2Controller(shell, sibling=inpainting)
     inpainting.sibling = inpainting_v2
+    inpainting_m2s = _personal_m2svid(shell)    # None in the release (personal/ is the user's own)
     splatting = SplattingController(shell)
     merging = MergingController(shell)
     scenecut = SceneCutController(shell)
@@ -181,16 +182,28 @@ def build(app: QGuiApplication):
                                 ("merging", "Merging", merging), ("scenecut", "Scene Cut", scenecut),
                                 ("depthedit", "Depth Map Editor", depthedit), ("edgefill", "Edge Fill", edgefill)):
         jobs.register(stage_id, name, ctl)
+    if inpainting_m2s is not None:
+        # its own id: GpuJobs keeps it from running beside V1 / V2, and has them let go of the card
+        jobs.register("inpainting_m2s", "Inpainting M2S", inpainting_m2s)
+        inpainting_m2s.splatting, inpainting_m2s.inpainting = splatting, inpainting
     # The live job numbers (DepthCrafter, Inpainting) and the VRAM readout.
     job_stats = JobStats()
     _log_model.BAR_LISTENERS.append(job_stats.feed_bar)
     inpainting.job_stats = job_stats
+    inpainting_v2.job_stats = job_stats     # V1's numbers on V2's page too (user, 2026-10-24)
     depthcrafter.job_stats = job_stats      # its ETA (user, 2026-10-12)
-    for stage_id, ctl in (("depthcrafter", depthcrafter), ("inpainting", inpainting), ("merging", merging)):
-        def _watch(stage_id=stage_id, ctl=ctl, was=[False]):
+    # M2S (personal/m2svid) reports under Inpainting's numbers, as V1 does (user, 2026-10-24)
+    _m2s_stats = ((("inpainting", "m2s", inpainting_m2s),) if inpainting_m2s is not None else ())
+    if inpainting_m2s is not None:
+        inpainting_m2s.job_stats = job_stats
+    # The owner: which of Inpainting's pages runs the job -- each page shows its own job's numbers
+    # only, not another's (user, 2026-10-24: M2S's ring mirrored V1's run)
+    for stage_id, owner, ctl in (("depthcrafter", "", depthcrafter), ("inpainting", "v1", inpainting),
+                                 ("inpainting", "v2", inpainting_v2), ("merging", "", merging)) + _m2s_stats:
+        def _watch(stage_id=stage_id, owner=owner, ctl=ctl, was=[False]):
             busy = bool(ctl.property("busy"))
             if busy and not was[0]:
-                job_stats.begin(stage_id)
+                job_stats.begin(stage_id, owner)
             elif was[0] and not busy:
                 job_stats.end(stage_id)     # no bars read for it after (audit 2026-09-28)
             was[0] = busy
@@ -246,6 +259,8 @@ def build(app: QGuiApplication):
                "Splatting": splatting, "Merging": merging, "SceneCut": scenecut,
                "DepthEdit": depthedit, "EdgeFill": edgefill, "Beginner": beginner, "GpuJobs": jobs,
                "JobStats": job_stats, "Vram": vram, "Folders": folders, "Glasses3D": glasses, "Models": models}
+    if inpainting_m2s is not None:
+        objects["InpaintingM2S"] = inpainting_m2s
 
     # Real per-pixel alpha, so the tint over the glass is translucent.
     QQuickWindow.setDefaultAlphaBuffer(True)
@@ -288,7 +303,21 @@ def build(app: QGuiApplication):
 
 #: Each job stage's Stop now slot (audit #13): the one the page's Stop runs.
 _STOP_NOW = {"DepthCrafter": "cancel", "SceneCut": "abort", "Splatting": "stop", "Inpainting": "stop",
-             "InpaintingV2": "stop", "Merging": "stop", "EdgeFill": "stop"}
+             "InpaintingV2": "stop", "InpaintingM2S": "stop", "Merging": "stop", "EdgeFill": "stop"}
+
+
+def _personal_m2svid(shell):
+    """Inpainting's M2SVid engine (personal/m2svid: the user's own, not released), or None where that
+    folder isn't -- or can't load, which is logged and leaves the rest of Studio as it is."""
+    from .shell import personal_m2svid_page
+    if not personal_m2svid_page():
+        return None
+    try:
+        from personal.m2svid.controller import M2SvidController
+        return M2SvidController(shell)
+    except Exception:
+        logger.exception("personal/m2svid is there but could not load; Inpainting runs without it")
+        return None
 
 
 def stop_running_jobs_now(objects) -> list:
@@ -298,6 +327,8 @@ def stop_running_jobs_now(objects) -> list:
     from .child_procs import kill_encoders
     running = []
     for name, slot in _STOP_NOW.items():
+        if name not in objects:             # a personal/ engine this install doesn't have
+            continue
         try:
             if objects[name].property("busy"):
                 running.append(name)
@@ -401,8 +432,10 @@ def main() -> int:
         # every stage after it, and the shell's own save
         # Edge Fill first: it waits for its fill (ROSE ended, the clip's files as they were), well
         # inside the exit watchdog, before the slower stages' shutdowns (bug sweep 2026-10-14b)
-        for name in ("EdgeFill", "Vram", "DepthCrafter", "Inpainting", "InpaintingV2", "Splatting", "Merging",
-                     "SceneCut", "DepthEdit", "Models"):
+        for name in ("EdgeFill", "Vram", "DepthCrafter", "Inpainting", "InpaintingV2", "InpaintingM2S", "Splatting",
+                     "Merging", "SceneCut", "DepthEdit", "Models"):
+            if name not in objects:         # a personal/ engine this install doesn't have
+                continue
             try:
                 objects[name].shutdown()
             except Exception:

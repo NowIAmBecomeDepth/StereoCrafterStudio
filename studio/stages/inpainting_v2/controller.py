@@ -149,6 +149,8 @@ class InpaintingV2Controller(QObject):
         self.queue = ClipQueue("inpainting_v2", self._values, self)
         QTimer.singleShot(0, self.queue.rescan)
         self._only = None                  # the clips the next run is limited to (None: all)
+        self.job_stats = None              # studio.app hands it over: the page's live numbers
+        self._chunks = None                # job_stats.InpaintingV2Chunks, while a run goes
 
         q = Qt.ConnectionType.QueuedConnection
         self._sigMessage.connect(self.message, q)
@@ -402,6 +404,7 @@ class InpaintingV2Controller(QObject):
             self.queue.hold(on)             # the list stays as it is while the job runs
             self.stateChanged.emit()
             if not on:
+                self._stop_stats()
                 self._only = None
                 self.save()
 
@@ -520,7 +523,33 @@ class InpaintingV2Controller(QObject):
         # Inpainting's Encoding Settings (V1's page, Settings > Inpainting) for V2's files too
         # (user, 2026-10-11): codec, bit depth (10-bit = HEVC Main 10), CRF, Enable DNxHR
         self._runner_values["_encoding"] = self._encoding_settings()
+        self._start_stats()
         runner.start_processing()          # v1: validate, claim, start the worker
+        if not self._busy:                 # refused (validation, the claim): no run to report
+            self._stop_stats()
+            return
+        stats = self.job_stats
+        if stats is not None:              # the batch's ETA beside the clip's, as V1's
+            try:
+                stats.batch_begin("inpainting", self.queue.frames_of(
+                    list(self._only) if self._only else self.queue.clipPaths, -1))
+            except Exception:
+                logger.debug("No batch ETA for this run", exc_info=True)
+
+    def _start_stats(self) -> None:
+        """V1's numbers on V2's page (user, 2026-10-24): the run's chunks and steps into JobStats."""
+        self._stop_stats()
+        if self.job_stats is not None and self._module is not None:
+            try:
+                from studio.job_stats import InpaintingV2Chunks
+                self._chunks = InpaintingV2Chunks(self._module, self.job_stats)
+            except Exception:
+                logger.debug("Chunk timeline unavailable for this run", exc_info=True)
+
+    def _stop_stats(self) -> None:
+        if self._chunks is not None:
+            self._chunks.restore()
+            self._chunks = None
 
     def _encoding_settings(self) -> Dict[str, Any]:
         sib = self._sibling

@@ -273,6 +273,30 @@ def _scale_mode(value: Any) -> str:
     return min(UI_SCALES, key=lambda s: abs(float(s) - v))
 
 
+def personal_m2svid_page() -> str:
+    """The M2SVid sub tab's page (personal/m2svid, the user's own -- not released) as a URL, or ""
+    where that folder isn't: the release runs without it."""
+    try:
+        if importlib.util.find_spec("personal.m2svid.controller") is None:
+            return ""
+    except (ImportError, ValueError):
+        return ""
+    page = REPO / "personal" / "m2svid" / "M2SvidPage.qml"
+    return QUrl.fromLocalFile(str(page)).toString() if page.is_file() else ""
+
+
+def personal_inpainting_tabs() -> List[str]:
+    """Inpainting's sub tab names on the user's own copy (personal/ui_names.py, not released), or []:
+    the release's own names."""
+    try:
+        if importlib.util.find_spec("personal.ui_names") is None:
+            return []
+        from personal.ui_names import INPAINTING_TABS
+        return [str(t) for t in INPAINTING_TABS]
+    except Exception:
+        return []
+
+
 def _seed_from_v1_studio(v1: Dict[str, Any]) -> Dict[str, Any]:
     out = {}
     if v1.get("theme_name"):
@@ -481,6 +505,17 @@ class StudioShell(QObject):
     def personalWeb(self):
         from core.splatting.rain import web_available
         return web_available()
+
+    # A third Inpainting engine of the user's own (personal/m2svid, not released): its page's URL
+    # where it is installed, "" elsewhere -- InpaintingPage offers its sub tab only then
+    @Property(str, constant=True)
+    def personalM2svidPage(self):
+        return personal_m2svid_page()
+
+    # Inpainting's sub tab names on the user's own copy (personal/ui_names.py), [] elsewhere
+    @Property("QVariantList", constant=True)
+    def personalInpaintingTabs(self):
+        return personal_inpainting_tabs()
 
     # -- the app icon (user, 2026-10-08): picked in the theme popout ----------
     # assets/icons/, built by studio/tools/build_app_icons.py; the window, the

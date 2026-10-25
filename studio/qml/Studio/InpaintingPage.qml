@@ -23,14 +23,18 @@ Item {
     property real flipAngle: 0
     property var prompt: null
     property var consoleRef: null
-    property int engine: 0               // 0 = V1 (SVD), 1 = V2 (Wan VACE)
+    property int engine: 0               // 0 = V1 (SVD), 1 = V2 (Wan VACE), 2 = M2SVid (personal/)
+    // M2SVid (personal/m2svid): the user's own engine, not released -- its sub tab only where it is
+    readonly property string m2sPage: Shell.personalM2svidPage
+    property bool m2sOpened: false       // its page loads the first time its tab is picked, then stays
+    onEngineChanged: if (engine === 2) m2sOpened = true
 
     readonly property var ip: Inpainting
     readonly property var st: ip.settings
     // Studio > Use Beginner Mode: v1's rule key -> hidden (beginner.py).
     readonly property var bh: Beginner.hide
     // v1 hides the V2 sub-tab in Beginner Mode; showing it goes back to V1.
-    Connections { target: Beginner; function onChanged() { if (page.bh["inp.v2_tab"] && page.engine === 1) page.engine = 0 } }
+    Connections { target: Beginner; function onChanged() { if (page.bh["inp.v2_tab"] && page.engine > 0) page.engine = 0 } }
     // A picked chapter fills every path, so the rows are put away (v1's
     // collapse); Change Folders brings them back without leaving it.
     property bool foldersOpen: false
@@ -53,6 +57,7 @@ Item {
     readonly property int requiredWidth: 36 + settingsWidth + Theme.gap + listMin
     readonly property real requiredHeight: engine === 0
         ? v1.y + content.y + content.implicitHeight + Theme.gap + actionBar.implicitHeight + 12
+        : engine === 2 && m2s.item ? m2s.y + m2s.item.requiredHeight
         : v2.y + v2.requiredHeight
 
     transform: Rotation {
@@ -136,7 +141,11 @@ Item {
         y: 0
         implicitHeight: 34
         numbered: false
-        model: page.bh["inp.v2_tab"] ? ["V1 (SVD)"] : ["V1 (SVD)", "V2 (Wan VACE)"]
+        // the names: the release's, or the user's own copy's (personal/ui_names.py)
+        readonly property var names: Shell.personalInpaintingTabs.length >= 3 ? Shell.personalInpaintingTabs
+                                     : ["V1 (SVD)", "V2 (Wan VACE)", "M2SVid"]
+        model: page.bh["inp.v2_tab"] ? [names[0]]
+               : [names[0], names[1]].concat(page.m2sPage !== "" ? [names[2]] : [])
         currentIndex: page.engine
         onActivated: (i) => page.engine = i
     }
@@ -366,7 +375,8 @@ ChangeFoldersButton {
             // only ever the job's clips ("N/A" between them, which names none)
             trustRunning: true
             running: page.ip.busy && page.ip.clipName && page.ip.clipName !== "N/A" ? String(page.ip.clipName) : ""
-            progress: typeof JobStats !== "undefined" && JobStats.stage === "inpainting" ? JobStats.fraction : 0
+            progress: typeof JobStats !== "undefined" && JobStats.stage === "inpainting" && JobStats.owner === "v1"
+                      ? JobStats.fraction : 0
             countText: page.ip.progressCount || ""
             rowActions: [{ id: "run", text: "Inpaint This Clip Now" }, { id: "test", text: "Test Render" },
                          { id: "finished", text: "Move to Finished" },
@@ -382,6 +392,7 @@ ChangeFoldersButton {
         ActionBar {
             id: actionBar
             statsStage: "inpainting"
+            statsOwner: "v1"        // V1's job only: V2 and M2S show their own (user, 2026-10-24)
             framesLabel: "frames inpainted"
             // workflow and troubleshooting, typed out above the bar (user, 2026-09-27)
             tips: Tips.forStage("inpainting")      // studio/qml/Studio/tips.js: Settings > Tips lists them all
@@ -439,10 +450,32 @@ ChangeFoldersButton {
         width: page.width
         height: page.height - y
         prompt: page.prompt
+        consoleRef: page.consoleRef
         opacity: page.engine === 1 ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
         transform: Translate { x: page.engine === 1 ? 0 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
+    }
+
+    // M2SVid's page, from personal/m2svid (not released): loaded the first time its tab is picked
+    Loader {
+        id: m2s
+        objectName: "inpaintingM2sPage"
+        active: page.m2sPage !== "" && page.m2sOpened
+        source: page.m2sPage
+        y: engineSwitch.y + engineSwitch.height
+        width: page.width
+        height: page.height - y
+        onLoaded: {
+            item.prompt = Qt.binding(() => page.prompt)
+            // V1's foot on it (user, 2026-10-24): Inpainting's tips and the console's Open Console
+            item.tips = Tips.forStage("inpainting")
+            item.consoleRef = Qt.binding(() => page.consoleRef)
+        }
+        opacity: page.engine === 2 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
+        transform: Translate { x: page.engine === 2 ? 0 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
     }
 
     // v1's menus for this stage. Main puts them on the menu bar after the

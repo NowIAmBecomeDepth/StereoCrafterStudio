@@ -290,7 +290,8 @@ class LogHub(QObject):
 
     def set_active(self, stage_id) -> None:
         """The stage whose job runs now (a GpuJobs stage id), or None."""
-        self._active = _JOB_TAB.get(stage_id) if stage_id else None
+        # an engine of a stage's own id ("inpainting_m2s") logs to that stage's tab
+        self._active = (_JOB_TAB.get(stage_id) or _JOB_TAB.get(str(stage_id).split("_", 1)[0])) if stage_id else None
 
     def set_tab_debug(self, tab_id: str, on: bool) -> None:
         """A quiet tab's Debug option: on, it shows its whole log (v1)."""

@@ -796,6 +796,10 @@ def blend_v(a: torch.Tensor, b: torch.Tensor, overlap_size: int) -> torch.Tensor
     return b
 
 
+#: v2: each denoise step, to Studio's numbers (studio/job_stats.InpaintingV2Chunks): fn(n, total)
+STEP_HOOK = None
+
+
 def run_wan_pipeline(
     cond_frames, 
     mask_frames, 
@@ -859,6 +863,8 @@ def run_wan_pipeline(
                 return_dict=False,
             )[0]
         latents = noise_scheduler.step(model_pred, t, latents)
+        if STEP_HOOK is not None:  # v2: the step to Studio's numbers
+            STEP_HOOK(i + 1, len(noise_scheduler.timesteps))
     
     return latents
 

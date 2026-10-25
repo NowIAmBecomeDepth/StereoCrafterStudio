@@ -406,6 +406,8 @@ ApplicationWindow {
         { name: "Inpainting", ctl: Inpainting }, { name: "Inpainting V2", ctl: InpaintingV2 },
         { name: "Merging", ctl: Merging }, { name: "Scene Cut", ctl: SceneCut },
         { name: "Depth Map Editor", ctl: DepthEdit }, { name: "Edge Fill", ctl: EdgeFill }]
+        // Inpainting's M2SVid engine, where personal/m2svid is (the user's own, not released)
+        .concat(typeof InpaintingM2S !== "undefined" && InpaintingM2S ? [{ name: "Inpainting M2S", ctl: InpaintingM2S }] : [])
     Binding { target: Theme; property: "calm"; value: !!win.runningStage }
     Binding { target: Theme; property: "lightJob"
               value: !!win.runningStage && (win.runningStage.name === "Splatting" || win.runningStage.name === "Merging") }

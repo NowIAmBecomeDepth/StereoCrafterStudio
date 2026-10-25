@@ -188,6 +188,108 @@ class EtaTests(unittest.TestCase):
         self.assertFalse(self.eta()[1], "a known size's render left out")
 
 
+class PushedStepTests(unittest.TestCase):
+    """step_event (2026-10-24): an engine reporting its steps itself -- Inpainting's M2S engine, whose
+    tiles are its steps -- gives the same numbers a printed bar does, and once it has, its other
+    printed bars (its chunks, its decode) are no steps even when their counts match."""
+
+    def setUp(self):
+        self.now = [0.0]
+        self.s = JobStats()
+        self.s._clock = lambda: self.now[0]
+        self.s.begin("inpainting")
+        self.s._on_frames(30, 0, -1, -1)
+        self.s._on_per_chunk(6, 6)                  # 6 tiles a chunk, one step each
+        self.s._on_tail(1e-6)
+        self.s._on_chunk("inpainting", 1, 2, False)
+
+    def test_a_pushed_step_sets_the_step_the_rate_and_the_eta(self):
+        s = self.s
+        s._on_step("inpainting", 0, 6, 0.0)
+        self.assertEqual((s.property("step"), s.property("steps")), (0, 6))
+        for n in range(1, 4):
+            s._on_step("inpainting", n, 6, 2.0)
+        self.assertEqual((s.property("step"), s.property("steps"), s.property("rate")), (3, 6, 2.0))
+        self.assertAlmostEqual(s.property("part"), 0.5)
+        # 3 tiles left x 2 s, then chunk 2's 6 tiles x 2 s (untimed: from its steps)
+        self.assertAlmostEqual(s.property("eta"), 3 * 2.0 + 6 * 2.0, places=3)
+        self.assertFalse(s.property("etaPartial"))
+
+    def test_printed_bars_are_no_steps_once_steps_are_pushed(self):
+        s = self.s
+        s._on_step("inpainting", 0, 6, 0.0)
+        s._on_step("inpainting", 1, 6, 2.0)
+        s._on_bar("Temporal Chunks:  50%|#####| 3/6 [00:39<00:39, 39.90s/it]")    # a count that matches
+        self.assertEqual((s.property("step"), s.property("rate")), (1, 2.0))
+
+    def test_another_stages_steps_are_not_taken(self):
+        self.s._on_step("depthcrafter", 2, 6, 9.0)
+        self.assertEqual((self.s.property("step"), self.s.property("rate")), (0, 0.0))
+
+
+def _fake_v2_engine(seen, stats):
+    """Inpainting V2's engine as InpaintingV2Chunks sees it: run_inpaint's chunk loop (its progress_cb
+    per chunk, its module's STEP_HOOK per denoise step) and plan_next_chunk (fixed chunks, overlapping)."""
+    import types
+    mod = types.SimpleNamespace(STEP_HOOK=None)
+
+    def plan_next_chunk(done, total, chunk, overlap, vsft):
+        start = max(0, done - overlap) if done else 0
+        return start, min(chunk, total - start)
+
+    def run_inpaint(engine, video, save_dir, frames_chunk=20, frames_overlap=5, tile_num=1,
+                    inference_steps=3, progress_cb=None, **_):
+        total, done = 50, 0
+        while done < total:
+            start, length = plan_next_chunk(done, total, frames_chunk, frames_overlap, 4)
+            progress_cb("inpaint", done, total, "")
+            for n in range(1, inference_steps + 1):
+                mod.STEP_HOOK(n, inference_steps)
+                if n == 2:
+                    s = stats
+                    seen.append((s.property("chunk"), s.property("chunks"), s.property("framesDone"),
+                                 (s.property("rangeFrom"), s.property("rangeTo")), s.property("step")))
+            done = start + length
+        progress_cb("export", 0, 1, "")
+        progress_cb("done", total, total, "")
+        return {}
+
+    mod.plan_next_chunk, mod.run_inpaint = plan_next_chunk, run_inpaint
+    return mod
+
+
+class InpaintingV2ChunksTests(unittest.TestCase):
+    """V1's numbers on V2's page (user, 2026-10-24): V2's chunks, frames and steps into JobStats, and
+    each Inpainting page's job its own (begin's owner)."""
+
+    def test_v2s_chunks_frames_and_steps(self):
+        from studio.job_stats import InpaintingV2Chunks
+        s, seen, told = JobStats(), [], []
+        s.begin("inpainting", "v2")
+        mod = _fake_v2_engine(seen, s)
+        original = mod.run_inpaint
+        chunks = InpaintingV2Chunks(mod, s)
+        try:
+            mod.run_inpaint(object(), "D:/in/x_splatted.mp4", "D:/out", frames_chunk=20, frames_overlap=5,
+                            tile_num=2, inference_steps=3, progress_cb=lambda *a: told.append(a[0]))
+        finally:
+            chunks.restore()
+        self.assertEqual(s.property("owner"), "v2")
+        # 50 frames, 20 a chunk, 5 overlap: 0-20, 15-35, 30-50; seen at each chunk's step 2
+        self.assertEqual(seen, [(1, 3, 0, (0, 20), 2), (2, 3, 20, (15, 35), 2), (3, 3, 35, (30, 50), 2)])
+        self.assertEqual((s.property("done"), s.property("framesDone"), s.property("frames")), (3, 50, 50))
+        self.assertIn("inpaint", told, "the page's own progress still told")
+        self.assertIs(mod.run_inpaint, original, "restored")
+        self.assertIsNone(mod.STEP_HOOK, "restored: no hook after the run")
+
+    def test_each_page_has_its_own_job(self):
+        s = JobStats()
+        s.begin("inpainting", "v1")
+        self.assertEqual((s.property("stage"), s.property("owner")), ("inpainting", "v1"))
+        s.begin("inpainting")
+        self.assertEqual(s.property("owner"), "", "no owner: the stage's")
+
+
 class TailTimingTests(unittest.TestCase):
     """InpaintingChunks times the hi-res blend + encode per frame and keeps it
     per resolution (config/inpainting_eta.json -- a temp config here)."""
@@ -535,6 +637,54 @@ class BatchEtaTests(unittest.TestCase):
         s._on_frames(200, 0, -1, -1)
         s._on_chunk("inpainting", 0, 8, False)
         self.assertEqual((s._batch_spent, s._batch_spent_frames), (90.0, 100), "x timed with x's frames")
+
+    def inpaint_clip(self, name, frames, chunks):
+        s = self.s
+        s._on_frames(frames, 0, -1, -1)
+        s._on_phase("inpaint", 0, 0)
+        s._on_per_chunk(4, 2)                                   # 2 tiles x 2 steps
+        s._on_chunk("inpainting", 0, chunks, False)
+        s._on_batch_clip("inpainting", name)
+
+    def steps(self, rates):
+        for i, r in enumerate(rates):
+            self.s._on_bar(f"{i % 2 + 1}/2 [00:01<00:01, {r:.2f}s/it]")
+
+    def test_a_compile_warm_up_is_no_frames_time(self):
+        # user, 2026-10-24: the first clip's ~10 min compile read as every frame's -- the Batch ETA
+        # promised an hour and a half too much, and only caught up over the batch
+        s = self.s
+        s.begin("inpainting")
+        s._on_batch("inpainting", [("x.mp4", 100), ("y.mp4", 100)])
+        self.inpaint_clip("x.mp4", 100, 3)
+        s._on_chunk("inpainting", 1, 3, False)
+        self.steps([300.0, 2.0, 2.0, 2.0])                      # the first step compiles
+        s._on_chunk("inpainting", 1, 3, True)
+        self.now[0] = 900.0                                     # the warm-up chunk: 900 s
+        s._on_chunk("inpainting", 2, 3, False)
+        self.steps([2.0, 2.0, 2.0, 2.0])
+        self.now[0] = 910.0                                     # a normal chunk: 10 s
+        s._on_chunk("inpainting", 3, 3, False)
+        self.steps([2.0])
+        eta = s.property("eta")
+        warm = 900.0 - 10.0                                     # beyond a normal chunk
+        self.assertAlmostEqual(s.property("batchEta"), eta + (910.0 - warm + eta) / 100 * 100, places=3)
+
+    def test_a_one_chunk_warm_up_clip_is_left_out_too(self):
+        s = self.s
+        s.begin("inpainting")
+        s._on_batch("inpainting", [("x.mp4", 100), ("y.mp4", 100), ("z.mp4", 100)])
+        self.inpaint_clip("x.mp4", 100, 1)
+        s._on_chunk("inpainting", 1, 1, False)
+        self.steps([300.0, 2.0, 2.0, 2.0])
+        s._on_chunk("inpainting", 1, 1, True)
+        self.now[0] = 320.0                                     # y starts: x took 320 s, 298 of them compile
+        self.inpaint_clip("y.mp4", 100, 2)
+        s._on_chunk("inpainting", 1, 2, False)
+        self.steps([2.0, 2.0])
+        eta = s.property("eta")
+        self.assertGreater(eta, 0)
+        self.assertAlmostEqual(s.property("batchEta"), eta + (320.0 - 298.0 + eta) / 200 * 100, places=3)
 
     def test_a_new_job_forgets_the_batch(self):
         s = self.s

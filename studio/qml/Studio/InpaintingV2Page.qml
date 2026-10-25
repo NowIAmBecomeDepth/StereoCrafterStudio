@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Studio
+import "tips.js" as Tips
 
 // Inpainting V2 (Wan VACE), v1's arrangement (inpainting_gui_v2.create_widgets):
 //
@@ -11,15 +12,15 @@ import Studio
 //   Parameters     Frames / chunk | Frames overlap, Tile overlap | Tiles / axis,
 //                  Inference steps | Seed, Resume
 //   VRAM / Performance   Offload mode, Torch Compile, Free text encoder
-//   [Start][Stop]                 [Restore Finished]   (Load / Save V2 Settings: Settings > Inpainting)
-//   [ progress ]
-//   status
+//   Progress     V1's ActionBar: ring, sec/it, the clip's bar + ETA, frames inpainted, status,
+//                [Start][Stop]   [Restore Finished]   (Load / Save V2 Settings: Settings > Inpainting)
 //
 // The work is v1's own (stages/inpainting_v2: the generated runner). v1's
 // modal dialogs arrive as InpaintingV2.message and are asked in the page.
 Item {
     id: page
     property var prompt: null
+    property var consoleRef: null   // the console window: the Progress heading's Open Console
     readonly property var wan: InpaintingV2
     readonly property var st: wan.settings
     readonly property var tips: wan.tips
@@ -310,11 +311,24 @@ Item {
             }
         }
 
-        // v1's two unsectioned rows, with their own gap above.
-        RowLayout {
+        // V1's foot (user, 2026-10-24): the chunk ring, sec/it with "Inference Step n / N", the chunk's
+        // frames, the clip's bar with its ETA and the batch's, "n / N frames inpainted", the status --
+        // this page's own job's numbers only (statsOwner), as JobStats has them from V2's engine
+        ActionBar {
+            id: actionBar
+            objectName: "v2ActionBar"
             Layout.fillWidth: true
             Layout.topMargin: 10
-            spacing: 4
+            statsStage: "inpainting"
+            statsOwner: "v2"
+            framesLabel: "frames inpainted"
+            tips: Tips.forStage("inpainting")
+            consoleRef: page.consoleRef
+            busy: page.wan.busy || page.wan.loading
+            status: page.wan.status
+            jobTime: false      // the finish line says it already, as V1's does
+            title: "Progress"
+
             AccentButton {
                 objectName: "v2Start"
                 text: "Start"; iconGlyph: Theme.icon.play
@@ -342,42 +356,23 @@ Item {
                          + "left for the next Start. Click again to carry on instead."
                 }
             }
-            Item { Layout.fillWidth: true }
-            // not during a batch, as V1's (bug sweep 2026-10-09, A7): Restore moved
-            // clips the run had just finished back to be run again, and Load
-            // showed settings the run was not using
-            AccentButton {
-                objectName: "v2RestoreFinished"
-                text: "Restore Finished"; kind: "outline"
-                enabled: !page.wan.busy && !page.wan.loading
-                onClicked: page.prompt.ask({
-                    title: "Restore Finished Files",
-                    message: "Are you sure you want to move all processed videos from the 'finished' folder back to the input folder?",
-                    buttons: [{ text: "Yes", code: 1, kind: "filled" }, { text: "No", code: 0, kind: "ghost" }],
-                    onDone: (code) => { if (code === 1) page.wan.restoreFinished() }
-                })
-            }
-        }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.topMargin: 6
-            spacing: 4
-            Item {
-                Layout.fillWidth: true
-                implicitHeight: 8
-                Rectangle { anchors.fill: parent; radius: 4; color: Theme.trough }
-                Rectangle {
-                    objectName: "v2Progress"
-                    width: parent.width * Math.max(0, Math.min(1, page.wan.progress / 100))
-                    height: parent.height
-                    radius: 4
-                    color: Theme.accent
-                    Behavior on width { NumberAnimation { duration: Theme.dur(200) } }
+            trailing: [
+                // not during a batch, as V1's (bug sweep 2026-10-09, A7): Restore moved
+                // clips the run had just finished back to be run again, and Load
+                // showed settings the run was not using
+                AccentButton {
+                    objectName: "v2RestoreFinished"
+                    text: "Restore Finished"; kind: "outline"
+                    enabled: !page.wan.busy && !page.wan.loading
+                    onClicked: page.prompt.ask({
+                        title: "Restore Finished Files",
+                        message: "Are you sure you want to move all processed videos from the 'finished' folder back to the input folder?",
+                        buttons: [{ text: "Yes", code: 1, kind: "filled" }, { text: "No", code: 0, kind: "ghost" }],
+                        onDone: (code) => { if (code === 1) page.wan.restoreFinished() }
+                    })
                 }
-                IndeterminateBar { anchors.fill: parent; visible: page.wan.loading }
-            }
-            Body { objectName: "v2Status"; text: page.wan.status; Layout.fillWidth: true; elide: Text.ElideRight; wrapMode: Text.NoWrap }
+            ]
         }
     }
 }

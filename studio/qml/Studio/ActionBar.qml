@@ -68,6 +68,11 @@ Item {
     // DepthCrafter / Inpainting: the chunk ring, the s/it and a clip bar in
     // place of the batch bar (JobRing, JobRate, job_stats.py). Empty: the bar.
     property string statsStage: ""
+    // which of the stage's pages this bar is (Inpainting's "v1", "v2", "m2s"): only its own job's
+    // numbers, never another page's run (user, 2026-10-24). "" = the stage's, whoever runs it
+    property string statsOwner: ""
+    readonly property bool statsMine: typeof JobStats !== "undefined" && JobStats.stage === statsStage
+        && (statsOwner === "" || JobStats.owner === statsOwner)
     // Tips above the bar (TipTicker); empty: none.
     property var tips: []
     // Set ("frames inpainted"): while the job runs, the line under the bar
@@ -81,14 +86,14 @@ Item {
     readonly property string mergePhase: phaseStage !== "" && busy && typeof JobStats !== "undefined"
         && JobStats.stage === phaseStage && status.indexOf("Stopping") !== 0 ? JobStats.mergePhase : ""
     readonly property bool showFrames: framesLabel !== "" && busy && typeof JobStats !== "undefined"
-        && JobStats.stage === statsStage && JobStats.frames > 0 && status.indexOf("Stopping") !== 0
+        && statsMine && JobStats.frames > 0 && status.indexOf("Stopping") !== 0
     // Inpainting, once the chunks are done (JobStats.phase): the bar starts
     // again for the hi-res blend's render, then the encode.
     readonly property string phase: showFrames ? JobStats.phase : ""
     // the batch's ETA, while clips come after this one: under the bar beside the clip's, or on a titled
     // bar's heading (user, 2026-10-24)
     readonly property bool batchEtaShown: (statsStage === "inpainting" || statsStage === "depthcrafter")
-        && typeof JobStats !== "undefined" && JobStats.stage === statsStage && JobStats.batchClips > 0
+        && statsMine && JobStats.batchClips > 0
     readonly property string framesText: !showFrames ? ""
         : phase === "render" ? "Hi-res blend: " + JobStats.renderDone + " / " + JobStats.renderTotal + " frames rendered"
         : phase === "encode" ? "Encoding the final video…"
@@ -127,11 +132,13 @@ Item {
         JobRing {
             visible: bar.statsStage !== ""
             stage: bar.statsStage
+            owner: bar.statsOwner
             Layout.alignment: Qt.AlignVCenter
         }
         JobRate {
             visible: bar.statsStage !== ""
             stage: bar.statsStage
+            owner: bar.statsOwner
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: 140      // "Inference Step 15 / 15"
         }
@@ -152,7 +159,7 @@ Item {
                 visible: bar.statsStage !== ""
                 Layout.fillWidth: true
                 spacing: 10
-                readonly property bool mine: typeof JobStats !== "undefined" && JobStats.stage === bar.statsStage
+                readonly property bool mine: bar.statsMine
                 readonly property real clip: !mine ? 0
                     : bar.phase === "render" ? (JobStats.renderTotal > 0 ? JobStats.renderDone / JobStats.renderTotal : 0)
                     : bar.phase === "encode" ? 1

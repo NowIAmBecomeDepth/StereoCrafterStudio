@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import re
 import sys
 import time
@@ -282,10 +283,13 @@ class JobStats(QObject):
     _sigDc = Signal(str, object)
     _sigBatch = Signal(str, object)
     _sigBatchClip = Signal(str, str)
+    _sigStep = Signal(str, int, int, float)
+    _sigClipChanged = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._stage = ""
+        self._owner = ""            # the stage's page whose job it is ("v1", "v2", "m2s"; "" = the stage's)
         self._rate = 0.0
         self._chunk = 0            # the chunk running (1-based), 0 = none yet
         self._chunks = 0
@@ -325,9 +329,14 @@ class JobStats(QObject):
         self._batch_reset()
         self._sigBatch.connect(self._on_batch)
         self._sigBatchClip.connect(self._on_batch_clip)
+        # an engine that reports its steps itself (step_event): its printed bars aren't read as steps
+        self._pushed_steps = False
+        self._sigStep.connect(self._on_step)
+        self._sigClipChanged.connect(self.clip_changed)
 
     # ---- QML --------------------------------------------------------------------
     stage = Property(str, lambda self: self._stage, notify=changed)
+    owner = Property(str, lambda self: self._owner, notify=changed)
     rate = Property(float, lambda self: self._rate, notify=changed)
     chunk = Property(int, lambda self: self._chunk, notify=changed)
     chunks = Property(int, lambda self: self._chunks, notify=changed)
@@ -371,9 +380,12 @@ class JobStats(QObject):
                                          else self._part), notify=changed)
 
     @Slot(str)
-    def begin(self, stage: str) -> None:
-        """A job starts on `stage`: the numbers are its from here."""
+    def begin(self, stage: str, owner: str = "") -> None:
+        """A job starts on `stage`: the numbers are its from here. `owner`: which of the stage's
+        pages runs it -- Inpainting's V1, V2 or M2S report the same numbers, and each page shows
+        only its own job's (user, 2026-10-24: M2S's ring mirrored V1's run)."""
         self._stage = stage
+        self._owner = str(owner or "")
         self._live = True
         self._rate = 0.0
         self._chunk = self._chunks = self._done = 0
@@ -392,6 +404,7 @@ class JobStats(QObject):
         self._eta_reset()
         self._eta_tail_per_frame = 0.0
         self._dc = DcEta(self._dc_rates_load()) if stage == "depthcrafter" else None
+        self._pushed_steps = False
         self._batch_reset()
         self.changed.emit()
 
@@ -408,11 +421,16 @@ class JobStats(QObject):
         self._phase = ""
         self._render_done = self._render_total = 0
 
+    def clip_event(self, stage: str) -> None:
+        """clip_changed from any thread (in order with the other reports)."""
+        self._sigClipChanged.emit(str(stage))
+
     @Slot(str)
     def clip_changed(self, stage: str) -> None:
         """The job moved on to another clip (Inpainting's clip name): until it reports, nothing done."""
         if stage != self._stage or (self._chunks == 0 and self._done == 0 and self._part == 0.0):
             return
+        self._eta_chunk_ends()
         self._clear_clip()
         self._eta_reset()
         self.changed.emit()
@@ -434,15 +452,38 @@ class JobStats(QObject):
     def _eta_mean(self) -> float:
         return self._eta_sum / self._eta_n if self._eta_n else self._eta_prev_mean
 
+    def _eta_warm(self) -> bool:
+        """The running chunk is a warm-up (torch.compile): its first step took 5x the others."""
+        return self._eta_n > 0 and self._eta_first > 5 * (self._eta_sum / self._eta_n)
+
+    def _eta_chunk_ends(self, span: Optional[float] = None) -> None:
+        """The running chunk is over (`span`: start to the next one's, when timed). A warm-up's
+        extra time is kept out of the batch's seconds a frame: in it, the first clip read ~10 min
+        of compile as every frame's, and the Batch ETA promised an hour and a half too much
+        (user, 2026-10-24)."""
+        if not self._eta_warm():
+            return
+        if span is not None:
+            self._batch_warm_spans += span
+            self._batch_warm_n += 1
+        else:
+            self._batch_warm_extra += self._eta_first - self._eta_sum / self._eta_n
+
     def _eta_chunk_starts(self, index: int) -> None:
         now = self._clock()
         if index == 0:
+            self._eta_chunk_ends()  # the last clip's last chunk: its render ran on, no span
+            if self._eta_n:         # ...counted once: not again as the running chunk
+                self._eta_prev_mean = self._eta_sum / self._eta_n
+            self._eta_sum, self._eta_n, self._eta_first = 0.0, 0, 0.0
             self._eta_t0 = None     # a new clip: the last one's chunk ran into its render
             self._eta_tail_t0 = None
         elif self._eta_t0 is not None and self._eta_n > 0:
             span = now - self._eta_t0
             mean = self._eta_mean()
-            if not self._eta_first > 5 * mean:     # a warm-up chunk (compile) is no chunk time
+            if self._eta_warm():                    # a warm-up chunk (compile) is no chunk time
+                self._eta_chunk_ends(span)
+            else:
                 self._eta_chunk_s = span
                 self._eta_overhead = max(0.0, span - mean * self._per_chunk)
         if index > 0:
@@ -505,6 +546,9 @@ class JobStats(QObject):
         self._batch_t0 = None           # when the running clip started
         self._batch_frames = 0          # ...and its frames, once known
         self._batch_later = 0.0         # DepthCrafter's segments after the running one: in its ETA
+        self._batch_warm_spans = 0.0    # warm-up chunks, start to start: seconds,
+        self._batch_warm_n = 0          # ...and how many
+        self._batch_warm_extra = 0.0    # warm-ups seen in a first step only (an untimed chunk)
         self._batch_eta = -1.0
 
     def batch_begin(self, stage: str, clips) -> None:
@@ -544,13 +588,24 @@ class JobStats(QObject):
             self._batch_spent_frames += self._batch_frames
         self._batch_t0, self._batch_frames, self._batch_later = now, max(0, int(frames)), 0.0
 
+    def _batch_warm_s(self) -> float:
+        """The warm-ups' time beyond what their chunks would have taken: one-off, not a frame's."""
+        mean = self._eta_mean()
+        normal = self._eta_chunk_s if self._eta_chunk_s > 0 else mean * self._per_chunk
+        warm = self._batch_warm_extra
+        if self._batch_warm_n:
+            warm += max(0.0, self._batch_warm_spans - self._batch_warm_n * normal)
+        if self._eta_warm():                    # the running chunk: its first step's extra so far
+            warm += self._eta_first - mean
+        return warm
+
     def _batch_update(self) -> None:
         left = sum(self._batch.values())
         frames = self._batch_frames
         if left <= 0 or self._eta < 0 or self._batch_t0 is None or frames <= 0:
             self._batch_eta = -1.0
             return
-        took = self._batch_spent + (self._clock() - self._batch_t0) + self._eta
+        took = self._batch_spent + (self._clock() - self._batch_t0) + self._eta - self._batch_warm_s()
         self._batch_eta = self._eta + took / (self._batch_spent_frames + frames + self._batch_later) * left
 
     # ---- feeds (any thread) -----------------------------------------------------
@@ -648,6 +703,13 @@ class JobStats(QObject):
         how many of its frames are finished."""
         self._sigPhase.emit(str(phase), int(done), int(total))
 
+    def step_event(self, stage: str, n: int, total: int, seconds_per_it: float) -> None:
+        """An engine's step, reported by the engine itself (any thread): step `n` of `total`, at its
+        s/it -- what a printed tqdm bar says, without reading it. Inpainting's M2S engine (personal/,
+        2026-10-24) prints other bars beside its tile steps (its chunks, its decode) whose counts could
+        pass for steps; once an engine pushes, printed bars are no steps for the job."""
+        self._sigStep.emit(str(stage), int(n), int(total), float(seconds_per_it))
+
     def steps_per_chunk(self, n: int, per_pass: int = 0) -> None:
         """Inpainting: the steps one chunk takes (tile passes x diffusion steps)."""
         self._sigPerChunk.emit(int(n), int(per_pass))
@@ -702,36 +764,52 @@ class JobStats(QObject):
                 publish = True
         if m and self._stage == "inpainting" and int(m.group(2)) != self._per_pass:
             m = None                                # not a diffusion pass: a loading bar (or before the clip)
+        if m and self._pushed_steps:
+            m = None                                # the engine reports its steps itself (step_event)
         if m:
             n, total = int(m.group(1)), int(m.group(2))
             value = float(m.group(3))
             if m.group(4) == "it/s":
                 value = 1.0 / value if value > 0 else 0.0
-            key = (n, total, text[: m.start()])
-            # One sample per completed step: tqdm redraws the same step many times.
-            if (n, total) != (self._step, self._steps):
-                self._step, self._steps = n, total
-                publish = True
-            if n > 0 and value > 0 and key != self._last_step:
-                self._last_step = key
-                self._rate = value
-                if self._stage == "depthcrafter" and w:
-                    self._part = n / total if total else 0.0
-                    if self._dc is not None:
-                        self._dc.step(n, total, value, self._clock())
-                elif self._per_chunk > 0:
-                    self._steps_in_chunk += 1
-                    self._part = min(1.0, self._steps_in_chunk / self._per_chunk)
-                    if n == 1 and not self._eta_first:
-                        self._eta_first = value
-                    if n >= 2 or total == 1:            # a pass's first step carries its setup
-                        self._eta_sum += value
-                        self._eta_n += 1
-                publish = True
+            publish = self._take_step(n, total, value, (n, total, text[: m.start()]), bool(w)) or publish
             if w and self._stage == "depthcrafter" and n >= total and self._done < self._chunk:
                 self._done = self._chunk
                 publish = True
         if publish:
+            self._eta_update()
+            self.changed.emit()
+
+    def _take_step(self, n: int, total: int, value: float, key, windowed: bool = False) -> bool:
+        """A step: `n` of `total` at `value` s/it; `key` one per completed step (tqdm redraws the same
+        step many times). True when there is something new to show."""
+        publish = False
+        if (n, total) != (self._step, self._steps):
+            self._step, self._steps = n, total
+            publish = True
+        if n > 0 and value > 0 and key != self._last_step:
+            self._last_step = key
+            self._rate = value
+            if self._stage == "depthcrafter" and windowed:
+                self._part = n / total if total else 0.0
+                if self._dc is not None:
+                    self._dc.step(n, total, value, self._clock())
+            elif self._per_chunk > 0:
+                self._steps_in_chunk += 1
+                self._part = min(1.0, self._steps_in_chunk / self._per_chunk)
+                if n == 1 and not self._eta_first:
+                    self._eta_first = value
+                if n >= 2 or total == 1:            # a pass's first step carries its setup
+                    self._eta_sum += value
+                    self._eta_n += 1
+            publish = True
+        return publish
+
+    @Slot(str, int, int, float)
+    def _on_step(self, stage: str, n: int, total: int, value: float) -> None:
+        if stage != self._stage or not getattr(self, "_live", False):
+            return
+        self._pushed_steps = True
+        if self._take_step(n, total, value, ("pushed", self._chunk, n, total)):
             self._eta_update()
             self.changed.emit()
 
@@ -1005,6 +1083,120 @@ class InpaintingChunks:
             self._E.spatial_tiled_process, self._E.InpaintingEngine.process_single_video = self._saved
             if getattr(self, "_saved_encode", None) is not None:
                 self._E.encode_frames_to_mp4 = self._saved_encode
+
+
+class InpaintingV2Chunks:
+    """For one Inpainting V2 run (Wan VACE, the generated engine): its numbers into JobStats as V1's --
+    the chunk ring, "Inference Step n / N" with its s/it, the chunk's frames, "n / N frames inpainted",
+    the clip's and the batch's ETA (user, 2026-10-24: V2's page had a bare bar). Wraps the engine's
+    run_inpaint (a clip; its progress_cb says when each chunk starts) and sets its STEP_HOOK (each
+    denoise step). Every report goes through JobStats' queued signals: this runs on the job's thread.
+    ``restore()`` puts the engine back."""
+
+    STAGE = "inpainting"
+
+    def __init__(self, engine_module, stats: JobStats):
+        self._E = engine_module
+        self._stats = stats
+        self._saved = None
+        self._plan: List[tuple] = []    # the clip's chunks: (first frame, end frame, frames done before)
+        self._frames = 0
+        self._index = 0                 # the chunk running, 1-based (0: none yet)
+        self._range = (-1, -1)
+        self._t = None                  # the last step (or the chunk's start)
+        run = getattr(engine_module, "run_inpaint", None)
+        if run is None or not hasattr(engine_module, "STEP_HOOK"):
+            logger.debug("Inpainting V2 chunk timeline: nothing to hook, skipped")
+            return
+        self._saved = run
+        me = self
+
+        def run_inpaint(engine, video, *a, **kw):
+            try:
+                me._clip_starts(engine, video, kw)
+            except Exception:
+                logger.debug("Could not plan the clip's chunks", exc_info=True)
+            told = kw.get("progress_cb")
+
+            def progress_cb(stage, current, total, message=""):
+                try:
+                    me._progress(stage, int(current), int(total))
+                except Exception:
+                    logger.debug("Could not place the chunk", exc_info=True)
+                if told is not None:
+                    told(stage, current, total, message)
+
+            kw["progress_cb"] = progress_cb
+            return run(engine, video, *a, **kw)
+
+        engine_module.run_inpaint = run_inpaint
+        engine_module.STEP_HOOK = self._step
+
+    def _clip_starts(self, engine, video, kw) -> None:
+        self._vsft = max(1, int(getattr(engine, "vae_scale_factor_temporal", 4) or 4))
+        self._chunk_len = int(kw.get("frames_chunk", 81) or 81)
+        self._overlap = int(kw.get("frames_overlap", 10) or 0)
+        self._plan, self._frames, self._index, self._range, self._t = [], 0, 0, (-1, -1), None
+        tiles = max(1, int(kw.get("tile_num", 1) or 1))
+        steps = max(1, int(kw.get("inference_steps", 1) or 1))
+        st = self._stats
+        st.clip_event(self.STAGE)
+        st.batch_clip(self.STAGE, os.path.basename(str(video)))
+        st.steps_per_chunk(tiles * tiles * steps, steps)     # a chunk: tile_num x tile_num passes
+        st.tail_rate(1e-6)          # it writes each chunk as it lands: nothing renders at the end
+
+    def plan(self, total: int) -> List[tuple]:
+        """The engine's own chunk walk (plan_next_chunk), as its loop takes it."""
+        out, done = [], 0
+        while done < total and len(out) < 100000:
+            start, length = self._E.plan_next_chunk(done, total, self._chunk_len, self._overlap, self._vsft)
+            new = length if done == 0 else length - (done - start)
+            if new <= 0:
+                break
+            out.append((start, start + length, done))
+            done += new
+        return out
+
+    def _progress(self, stage: str, current: int, total: int) -> None:
+        st = self._stats
+        if stage == "inpaint":
+            if not self._plan:
+                self._frames, self._plan = total, self.plan(total)
+                st.frames_event(total, 0, -1, -1)           # a clip starts: the batch counts it
+                st.chunk_event(self.STAGE, 0, len(self._plan), False)
+            self._chunk_landed(current)
+            index = next((k for k, p in enumerate(self._plan, 1) if p[2] == current), self._index + 1)
+            self._index = index
+            first, end = self._plan[index - 1][:2] if index <= len(self._plan) else (current, total)
+            self._range = (first, end)
+            self._t = time.monotonic()
+            st.chunk_event(self.STAGE, index, max(len(self._plan), index), False)
+            st.frames_event(self._frames, current, first, end)
+        elif stage == "export":
+            self._chunk_landed(self._frames)
+
+    def _chunk_landed(self, done: int) -> None:
+        """The running chunk (if any) is inpainted: every frame up to `done` is."""
+        if self._index:
+            self._stats.chunk_event(self.STAGE, self._index, max(len(self._plan), self._index), True)
+            self._stats.frames_event(self._frames, min(done, self._frames), *self._range)
+            self._index = 0
+
+    def _step(self, n: int, total: int) -> None:
+        """STEP_HOOK: denoise step `n` of `total` is done (the job's thread)."""
+        try:
+            now = time.monotonic()
+            took = now - self._t if self._t is not None else 0.0
+            self._t = now
+            self._stats.step_event(self.STAGE, int(n), int(total), took)
+        except Exception:
+            pass
+
+    def restore(self) -> None:
+        if self._saved is not None:
+            self._E.run_inpaint = self._saved
+            self._E.STEP_HOOK = None
+            self._saved = None
 
 
 class DepthCrafterTimeline:

@@ -6,7 +6,9 @@ import Studio
 Column {
     id: rate
     property string stage: ""
+    property string owner: ""         // which of the stage's pages (JobStats.owner): "" = any
     readonly property bool mine: typeof JobStats !== "undefined" && JobStats.stage === stage
+        && (owner === "" || JobStats.owner === owner)
     readonly property real value: mine ? JobStats.rate : 0
     spacing: -2
 

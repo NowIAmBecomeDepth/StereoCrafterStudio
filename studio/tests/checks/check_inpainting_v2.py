@@ -153,10 +153,19 @@ for n in ("x_splatted2.mp4", "y_splatted2.mp4"):
 (tmp / "base").mkdir(); (tmp / "xf").mkdir()
 E.PRE_TRAINED_PATH, E.TRANSFORMER_PATH = str(tmp / "base"), str(tmp / "xf")
 class FakeEngine:
-    text_encoder = object(); _prompt_cache = {}; released = 0
+    text_encoder = object(); _prompt_cache = {}; released = 0; vae_scale_factor_temporal = 4
     def release(self): FakeEngine.released += 1
 calls = []
+import threading
+gate = threading.Event()
 def fake_run(engine, video, out_dir, **kw):
+    if not calls:       # the first clip: a chunk and two steps, held while the page is read
+        kw["progress_cb"]("inpaint", 0, 50, "Processing chunk [0:49]")
+        for n in (1, 2):
+            if E.STEP_HOOK is not None:
+                E.STEP_HOOK(n, 10)
+            time.sleep(0.05)
+        gate.wait(20)
     kw["progress_cb"]("denoise", 1, 1, "done")
     calls.append(os.path.basename(video)); time.sleep(0.2)
 E.load_models = lambda *a, **k: FakeEngine()
@@ -165,11 +174,29 @@ st.setProperty("input_folder", str(inp).replace("\\", "/")); st.setProperty("out
 st.setProperty("move_to_finished", False)
 start = find(v2, lambda c: c.objectName() == "v2Start"); stop = find(v2, lambda c: c.objectName() == "v2Stop")
 click_item(start); pump(0.3)
+# V1's numbers on V2's page, its own job's only (user, 2026-10-24: M2S's ring mirrored V1's run)
+JS = objs["JobStats"]
+end = time.time() + 60
+while JS.property("frames") != 50 and time.time() < end:
+    pump(0.05)
+pump(0.3)
+v2bar = find(v2, lambda c: c.objectName() == "v2ActionBar")
+v1bar = find(page, lambda c: c.objectName() == "actionBar" and c.property("statsOwner") == "v1")
+check("V2's job is V2's in JobStats", (JS.property("stage"), JS.property("owner")) == ("inpainting", "v2"),
+      f"{JS.property('stage')} / {JS.property('owner')}")
+check("...V2's bar shows it: a chunk of how many, 0 / 50 frames inpainted",
+      v2bar is not None and v2bar.property("statsMine") and JS.property("chunks") >= 1
+      and v2bar.property("framesText") == "0 / 50 frames inpainted", v2bar and v2bar.property("framesText"))
+rate = find(v2bar, lambda c: c.objectName() == "jobRateText") if v2bar is not None else None
+check("...with the steps' s/it", rate is not None and rate.property("text") not in ("", "—"), rate and rate.property("text"))
+check("...V1's bar doesn't", v1bar is not None and not v1bar.property("statsMine")
+      and find(v1bar, lambda c: c.objectName() == "jobRateText").property("text") in ("", "—"))
+gate.set()
 end = time.time() + 60
 while (wan.property("busy") or wan.property("loading") or len(calls) < 2) and time.time() < end:
     pump(0.05)
 pump(0.4)
-status = find(v2, lambda c: c.objectName() == "v2Status").property("text")
+status = find(v2bar, lambda c: c.objectName() == "abStatus").property("text")
 check("Start by mouse ran v1's batch", calls == ["x_splatted2.mp4", "y_splatted2.mp4"], str(calls))
 check("v1's finish line in the status", status.startswith("Finished") and "2 done, 0 failed" in status, status)
 check("progress full, Start back, Stop off", wan.property("progress") == 100.0 and start.isEnabled() and not stop.isEnabled())

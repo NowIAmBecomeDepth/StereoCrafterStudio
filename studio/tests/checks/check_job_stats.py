@@ -101,7 +101,7 @@ class FakeEngine:
         return True, None
 fake.InpaintingEngine = FakeEngine
 orig = (fake.spatial_tiled_process, FakeEngine.process_single_video)
-S.begin("inpainting"); pump(0.1)
+S.begin("inpainting", "v1"); pump(0.1)
 # the ring moves with each step: a chunk = 2 x 2 tile passes x 5 steps = 20 steps
 S.steps_per_chunk(20, 5); pump(0.05)
 S.chunk_event("inpainting", 1, 4, False); pump(0.05)
@@ -112,7 +112,7 @@ check("Inpainting: the chunk ring and the clip bar climb with the steps (5 of 20
       abs(S.property("part") - 0.25) < 1e-6 and abs(S.property("fraction") - (0 + 5 / 20) / 4) < 1e-6,
       f"part {S.property('part'):.4f} clip {S.property('fraction'):.4f}")
 check("...and the iteration counter follows the bar", (S.property("step"), S.property("steps")) == (5, 5))
-S.begin("inpainting"); pump(0.1)
+S.begin("inpainting", "v1"); pump(0.1)
 seen = []
 S.changed.connect(lambda: seen.append((S.property("chunk"), S.property("done"), S.property("chunks"))))
 hook = J.InpaintingChunks(fake, S)
@@ -182,7 +182,7 @@ class FakeEngine2:
             marks.append(("done", S.property("framesDone"), S.property("chunk"), S.property("done")))
         return True, None
 fk.InpaintingEngine = FakeEngine2
-S.begin("inpainting"); pump(0.1)
+S.begin("inpainting", "v1"); pump(0.1)
 hook2 = J.InpaintingChunks(fk, S)
 FakeEngine2().process_single_video(input_video_path=str(tmp / "none.mp4"), frames_chunk=25, overlap=10,
                                    process_length=60)
@@ -198,7 +198,7 @@ hook2.restore()
 check("...its log handler taken off afterwards", not flog.handlers, str(flog.handlers))
 # Reverse runs the loop over the reversed clip: the range is shown in real frame numbers
 marks.clear()
-S.begin("inpainting"); pump(0.1)
+S.begin("inpainting", "v1"); pump(0.1)
 hook2 = J.InpaintingChunks(fk, S)
 FakeEngine2().process_single_video(input_video_path=str(tmp / "none.mp4"), frames_chunk=25, overlap=10,
                                    process_length=60, inpaint_direction="Reverse")
@@ -226,7 +226,7 @@ class FakeEngine3:
         pump(0.03)
         return True, None
 fk.InpaintingEngine = FakeEngine3
-S.begin("inpainting"); pump(0.05)
+S.begin("inpainting", "v1"); pump(0.05)
 hook3 = J.InpaintingChunks(fk, S)
 FakeEngine3().process_single_video(input_video_path=str(tmp / "none.mp4"), frames_chunk=25, overlap=0, process_length=60)
 pump(0.1)
@@ -242,7 +242,7 @@ ab = [c for c in walk(ipp, []) if c.objectName() == "actionBar"][0]
 st = [c for c in walk(ab, []) if c.objectName() == "abStatus"][0]
 cb = [c for c in walk(ab, []) if c.objectName() == "clipBar"][0]
 ab.setProperty("status", "Processing video 1 of 3"); ab.setProperty("busy", True)
-S.begin("inpainting"); S.chunk_event("inpainting", 3, 3, True); S.frames_event(60, 60, 50, 60)
+S.begin("inpainting", "v1"); S.chunk_event("inpainting", 3, 3, True); S.frames_event(60, 60, 50, 60)
 S.phase_event("render", 15, 60); pump(0.2)
 check("Page, render: the bar is the render's own (25%), the line says so",
       abs(cb.property("value") - 0.25) < 1e-6 and st.property("text") == "Hi-res blend: 15 / 60 frames rendered"
@@ -254,7 +254,7 @@ check("Page, encode: a full bar and 'Encoding the final video…'", abs(cb.prope
 ab.setProperty("busy", False); pump(0.05)
 
 # the page: the line under the bar and the range under the iteration counter
-S.begin("inpainting"); pump(0.05)
+S.begin("inpainting", "v1"); pump(0.05)
 S.chunk_event("inpainting", 3, 4, False); S.frames_event(60, 40, 30, 55); pump(0.1)
 ab = [c for c in walk(ipp, []) if c.objectName() == "actionBar"][0]
 st = [c for c in walk(ab, []) if c.objectName() == "abStatus"][0]
@@ -284,7 +284,7 @@ check("...and a finish time once the render is known", _eta.startswith("ETA 10 m
 # line -- "Hi-res blend: 0 / 20 frames rendered" -- ran into it)
 S.batch_begin("inpainting", [("D:/in/A_640_splatted4.mp4", 60), ("D:/in/B_640_splatted4.mp4", 60)])
 S.batch_clip("inpainting", "A_640_splatted4"); pump(0.1)
-_bh = [c for c in walk(ipp, []) if c.objectName() == "batchEtaHeader"]
+_bh = [c for c in walk(ab, []) if c.objectName() == "batchEtaHeader"]   # V1's bar (V2's has its own)
 _cb = [c for c in walk(ipp, []) if c.objectName() == "clipBar"][0]
 check("Inpainting's Batch ETA on the Progress heading, not on the status line",
       len(_bh) == 1 and _bh[0].isVisible() and str(_bh[0].property("text")).startswith("Batch ")
