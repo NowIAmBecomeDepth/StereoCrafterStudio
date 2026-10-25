@@ -303,6 +303,69 @@ class StopWhileIdleTests(unittest.TestCase):
         self.assertEqual(cancels, [1])
 
 
+class StopLiveWhileTrackingTests(unittest.TestCase):
+    """user, 2026-10-25: "when i start tracking with sam3 the stop button stays greyed out". _submit drew
+    the buttons as the job was queued -- before the worker had named it "Tracking" -- and nothing drew
+    them again until it ended. The engine's own _submit / _worker_loop / _set_busy_ui on a stand-in."""
+
+    def _editor(self):
+        import queue
+        import threading
+        from types import SimpleNamespace
+        from studio.stages.depthedit.engine import DepthEditEngine as E
+
+        class Btn:
+            def __init__(self):
+                self.state = None
+
+            def configure(self, state=None, **_):
+                self.state = str(state)
+
+        ui = []
+        ed = SimpleNamespace(_jobs=queue.Queue(), _busy_job=None, _stop=threading.Event(),
+                             track_btn=Btn(), render_btn=Btn(), stop_btn=Btn(), render_stop_btn=Btn(),
+                             _refresh_sam_status=lambda: None, _ui=lambda fn, *a: ui.append((fn, a)),
+                             _show_error=lambda *a: None)
+        ed._set_busy_ui = lambda: E._set_busy_ui(ed)
+        ed._submit = lambda name, fn: E._submit(ed, name, fn)
+        return E, ed, ui
+
+    def _drain(self, ui):
+        while ui:
+            fn, a = ui.pop(0)
+            fn(*a)
+
+    def test_stop_is_live_once_the_track_runs_and_while_sam3_loads(self):
+        import threading
+        E, ed, ui = self._editor()
+        started, loading, go_on, finish = (threading.Event() for _ in range(4))
+
+        def track():
+            started.set()
+            go_on.wait(5)
+            ed._busy_job = "Loading SAM 3"              # as _session_for does on a first track
+            loading.set()
+            finish.wait(5)
+            ed._busy_job = "Tracking"
+
+        worker = threading.Thread(target=E._worker_loop, args=(ed,), daemon=True)
+        worker.start()
+        ed._submit("Tracking", track)
+        self.assertTrue(started.wait(5))
+        self._drain(ui)                                 # the UI thread's next poll
+        self.assertEqual(ed.stop_btn.state, "normal", "Stop greyed while the track runs")
+        self.assertEqual(ed.track_btn.state, "disabled")
+        go_on.set()
+        self.assertTrue(loading.wait(5))
+        ed._set_busy_ui()                               # a redraw while SAM 3 loads for the track
+        self.assertEqual(ed.stop_btn.state, "normal", "Stop greyed while SAM 3 loads for the track")
+        finish.set()
+        ed._jobs.put(None)
+        worker.join(5)
+        self._drain(ui)
+        self.assertEqual(ed.stop_btn.state, "disabled", "the track over: nothing to stop")
+
+
 class OverlayRangeTests(unittest.TestCase):
     """audit 2026-09-28 (minor): the overlay tinted a layer's mask on frames
     outside its Start / End range, where the edit does nothing. Out of range

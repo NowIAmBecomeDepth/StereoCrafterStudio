@@ -549,6 +549,15 @@ class SplattingController(QObject):
 
     presetNames = Property("QVariantList", lambda self: list(self._presets), constant=True)
 
+    @Property(str, constant=True)
+    def presetTooltip(self) -> str:
+        """The 8-bit / 10-bit buttons' tooltip, as Merging's (user, 2026-10-25)."""
+        try:
+            from core.ui.encoding_settings import preset_tooltip
+            return preset_tooltip()
+        except Exception:
+            return ""
+
     def _encoding_preset(self) -> str:
         cur = self._values()
         for name, preset in self._presets.items():

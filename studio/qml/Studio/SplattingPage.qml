@@ -453,6 +453,7 @@ ChangeFoldersButton {
                     controlled: true
                     currentIndex: page.sp.presetNames.indexOf(page.sp.encodingPreset)
                     onActivated: (i) => page.sp.applyEncodingPreset(page.sp.presetNames[i])
+                    HoverTip { tip: page.sp.presetTooltip }     // as Merging's (user, 2026-10-25)
                 }
                 Item { Layout.fillWidth: true }
                 // Multi-Map lives on the Output row; with that row folded

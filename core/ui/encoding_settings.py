@@ -120,36 +120,49 @@ PRESET_FIELD_KEYS = _PRESET_STR_KEYS + _PRESET_BOOL_KEYS + _PRESET_INT_KEYS
 # footage actually carries, not on the output you want. Encoding 8-bit source
 # as 10-bit gains nothing but costs size and speed; encoding a 10-bit/HDR
 # source as 8-bit throws away precision and bands the gradients.
-_PRESET_TOOLTIP_TAIL = (
-    "\n\nThese apply YOUR SAVED VERSION of the preset -- open "
-    "Encoding Options and use File > Save as ... Preset to change what "
-    "this button applies. CRF is never touched by a preset.\n"
-    "If neither buttons are lit, custom settings outside of the presets are being used."
+# What a preset does, as Studio's Encoding Settings has it (user, 2026-10-25: the old tail sent you to
+# the Prototype's File > Save as ... Preset, which Studio doesn't have). Said once, after both presets'
+# own lines, where a tooltip shows them together (Merging).
+PRESET_TOOLTIP_TAIL = (
+    "A preset sets every encoding setting except Output CRF. Change any of them in Encoding Settings "
+    "and the preset reads Custom: neither button is lit."
 )
+_PRESET_TOOLTIP_TAIL = "\n\n" + PRESET_TOOLTIP_TAIL
 
 ENCODING_PRESET_TOOLTIPS = {
     PRESET_8BIT: (
         "8-bit encoding preset.\n\n"
-        "Use this when the source is 8-bit SDR:\n"
+        "For 8-bit SDR sources:\n"
         "  \u2022 standard 1080p Blu-ray rips\n"
-        "  \u2022 SDR web rips / streaming captures\n\n"
-        "Encoding an 8-bit source as 10-bit adds no quality -- "
-        "it only makes bigger, slower files."
+        "  \u2022 SDR web rips / streaming captures"
         + _PRESET_TOOLTIP_TAIL
     ),
     PRESET_10BIT: (
         "10-bit encoding preset (H.265 Main10).\n\n"
-        "Use this when the source carries more than 8-bit precision:\n"
+        "For sources with more than 8-bit precision:\n"
         "  \u2022 4K Blu-ray (UHD) rips\n"
         "  \u2022 4K HDR web files\n"
         "  \u2022 1080p SDR you tone-mapped from Dolby Vision yourself\n"
-        "    (e.g. rendered out of DaVinci Resolve first)\n\n"
-        "That last case still benefits from 10-bit even though it is "
-        "SDR and 1080p: tone mapping leaves fine gradients that 8-bit "
-        "would band."
+        "    (e.g. rendered out of DaVinci Resolve first)"
         + _PRESET_TOOLTIP_TAIL
     ),
 }
+
+# Said once under both presets (user, 2026-10-25: "adds no quality" for 8-bit sources and "tone mapping
+# leaves gradients 8-bit would band" read as contradicting each other; and 10-bit isn't slower)
+PRESET_TOOLTIP_ADVICE = (
+    "If you want to be sure no new banding is introduced, render at 10-bit.\n\n"
+    "For visually lossless output to edit in DaVinci Resolve, turn on Enable DNxHR in Encoding "
+    "Settings. DNxHR files are very large -- many times the size of H.264 / H.265 -- so check the "
+    "free space first."
+)
+
+
+def preset_tooltip() -> str:
+    """The 8-bit / 10-bit buttons' tooltip (Splatting's and Merging's pages): each preset's own lines,
+    then the advice and what a preset does -- once each."""
+    own = [ENCODING_PRESET_TOOLTIPS[n].replace(_PRESET_TOOLTIP_TAIL, "") for n in (PRESET_8BIT, PRESET_10BIT)]
+    return "\n\n".join(own + [PRESET_TOOLTIP_ADVICE, PRESET_TOOLTIP_TAIL])
 
 # Anchored to the repo root (two levels up from core/ui/), so a saved override
 # is found regardless of which stage or working directory launched it -- the

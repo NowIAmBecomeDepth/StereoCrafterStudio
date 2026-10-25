@@ -737,6 +737,7 @@ class DepthEditEngine:
                 return
             name, fn = item
             self._busy_job = name
+            self._ui(self._set_busy_ui)  # v2: the buttons as the running job has them
             try:
                 fn()
             except Exception as e:  # a job's failure must not kill the worker
@@ -763,7 +764,7 @@ class DepthEditEngine:
         state = tk.DISABLED if long_job else tk.NORMAL
         for btn in (self.track_btn, self.render_btn):
             btn.configure(state=state)
-        stop_state = tk.NORMAL if self._busy_job in ("Tracking", "Rendering") else tk.DISABLED
+        stop_state = tk.NORMAL if self._busy_job in ("Tracking", "Rendering", "Loading SAM 3") else tk.DISABLED
         self.stop_btn.configure(state=stop_state)
         self.render_stop_btn.configure(state=stop_state)
         self._refresh_sam_status()
@@ -1162,6 +1163,7 @@ class DepthEditEngine:
                 self.engine.load()
             finally:
                 self._busy_job = prev
+                self._ui(self._set_busy_ui)  # v2: back to the job's own buttons
         n = self.engine.open(self._resource_for(layer), offload)
         if n != self._num_frames():
             logger.warning("SAM 3 sees %d frames, the depth map has %d", n, self._num_frames())

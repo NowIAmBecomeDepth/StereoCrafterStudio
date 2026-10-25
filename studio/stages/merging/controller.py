@@ -471,8 +471,8 @@ class MergingController(QObject):
     @Property(str, constant=True)
     def presetTooltip(self) -> str:
         try:
-            from core.ui.encoding_settings import ENCODING_PRESET_TOOLTIPS, PRESET_8BIT, PRESET_10BIT
-            return "\n\n".join(ENCODING_PRESET_TOOLTIPS[n] for n in (PRESET_8BIT, PRESET_10BIT))
+            from core.ui.encoding_settings import preset_tooltip
+            return preset_tooltip()             # Splatting's page shows the same (user, 2026-10-25)
         except Exception:
             return ""
 
