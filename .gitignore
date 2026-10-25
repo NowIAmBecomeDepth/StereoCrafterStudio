@@ -164,6 +164,7 @@ personal/
 /_RUN_*.bat
 /RUN_Splatting_GUI_R.bat
 /StereoCrafter Studio (Prototype).bat
+/VHS Interlace.bat
 /unified_gui/
 /core/ui/inline_preview_panel.py
 /core/ui/preview_autofit.py
@@ -209,3 +210,11 @@ docs/manual/shots/*.png
 
 # the developer's own notes (user, 2026-10-17)
 DepthCrafter_speck_findings.txt
+
+# the promo video's working files: scripts, voice cues, renders (user, 2026-10-19)
+promo/
+
+# the developer's own previews and patches (user, 2026-10-24)
+/README_preview.html
+/social_preview.png
+/dc-clip-order-fix.patch

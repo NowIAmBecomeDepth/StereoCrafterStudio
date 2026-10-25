@@ -31,6 +31,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
+# Windowless (pythonw), every console program Studio starts -- torch.compile's compiler once a kernel,
+# ffmpeg, git -- would open a window that takes the focus: hidden, before anything can start one
+from . import no_console as _no_console  # noqa: E402
+
+_no_console.install()
+
 
 def _missing_dependency(exc: BaseException) -> None:
     msg = ("StereoCrafter Studio needs PySide6, which is not installed in this "
