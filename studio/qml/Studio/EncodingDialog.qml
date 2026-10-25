@@ -70,6 +70,13 @@ Popup {
         picker.open()
     }
 
+    // drags for Merge All's Drop Zones: the window's own get none while this is open
+    FileDropArea {
+        parent: dlg.contentItem ? dlg.contentItem.parent : null
+        anchors.fill: parent
+        enabled: dlg.mergeAll
+    }
+
     Overlay.modal: Rectangle { color: Theme.alpha("#000000", Theme.isDark ? 0.55 : 0.3) }
     enter: Transition {
         ParallelAnimation {
@@ -245,8 +252,22 @@ Popup {
                 FieldRow { label: "DNxHR Profile"; labelWidth: 120; enabled: mAll.dnx; help: dlg.help("dnxhr_profile"); EDrop { key: "mergeall_dnxhr_profile"; model: dlg.ctl ? dlg.ctl.choices.dnxhr_profile : [] } }
                 FieldRow { label: "Audio"; labelWidth: 120; help: dlg.help("mergeall_audio_codec"); EDrop { key: "mergeall_audio_codec"; model: dlg.ctl ? dlg.ctl.choices.mergeall_audio_codec || [] : [] } }
             }
-            PathPick { objectName: "encMergeAudio"; label: "Movie (sound)"; key: "mergeall_audio_file"; file: true; help: dlg.help("mergeall_audio_file") }
-            PathPick { objectName: "encMergeOut"; label: "Output Folder"; key: "mergeall_output_folder"; help: dlg.help("mergeall_output_folder") }
+            ColumnLayout {
+                id: mAllPaths
+                Layout.fillWidth: true
+                spacing: Theme.rowGap
+                PathPick { objectName: "encMergeAudio"; label: "Movie (sound)"; key: "mergeall_audio_file"; file: true; help: dlg.help("mergeall_audio_file") }
+                PathPick { objectName: "encMergeOut"; label: "Output Folder"; key: "mergeall_output_folder"; help: dlg.help("mergeall_output_folder") }
+            }
+            // drag and drop (user, 2026-10-25): the movie and the output folder
+            DropZones {
+                over: mAllPaths
+                modal: true
+                store: dlg.st
+                targets: [{ key: "mergeall_audio_file", label: "Movie (sound)",
+                            files: ["mkv", "mp4", "m2ts", "ts", "mov", "avi", "mka", "ac3", "eac3", "dts", "thd", "flac", "wav"] },
+                          { key: "mergeall_output_folder", label: "Output Folder", folder: true }]
+            }
         }
 
         AccentButton {

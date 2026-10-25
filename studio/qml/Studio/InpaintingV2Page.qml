@@ -200,6 +200,7 @@ Item {
         }
 
         Section {
+            id: pathsSection
             title: "Paths"
             FieldRow {
                 label: "Input file/folder:"
@@ -374,5 +375,14 @@ Item {
                 }
             ]
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the paths
+    DropZones {
+        over: pathsSection
+        store: page.st
+        blocked: page.wan.busy
+        targets: [{ key: "input_folder", label: "Input", folder: true, files: ["mp4", "mkv", "mov", "avi", "webm"] },
+                  { key: "output_folder", label: "Output Folder", folder: true }]
     }
 }

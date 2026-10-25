@@ -72,3 +72,6 @@ ProjectPicker 1.0 ProjectPicker.qml
 GrainHole 1.0 GrainHole.qml
 GlassesIcon 1.0 GlassesIcon.qml
 PopupGrain 1.0 PopupGrain.qml
+singleton FileDrop 1.0 FileDrop.qml
+DropZones 1.0 DropZones.qml
+FileDropArea 1.0 FileDropArea.qml

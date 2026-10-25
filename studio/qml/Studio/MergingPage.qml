@@ -281,6 +281,7 @@ Item {
         spacing: Theme.gap
 
         Section {
+            id: foldersSection
             title: "Folders"
             enabled: page.idle
             headerRight: [
@@ -1495,5 +1496,15 @@ Item {
             onTriggered: page.prompt.ask({ title: "About Merging", message: page.mg.aboutText,
                                            buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the folders
+    DropZones {
+        over: foldersSection
+        store: page.st
+        targets: [{ key: "inpainted_folder", label: "Inpainted", folder: true, files: ["mp4", "mov", "mkv"] },
+                  { key: "original_folder", label: "Original", folder: true, files: ["mp4", "mov", "mkv"] },
+                  { key: "mask_folder", label: "Mask", folder: true, files: ["mp4", "mov", "mkv"] },
+                  { key: "output_folder", label: "Output Folder", folder: true }]
     }
 }

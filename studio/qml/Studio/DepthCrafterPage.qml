@@ -187,6 +187,7 @@ Item {
         spacing: Theme.gap
 
         Section {
+            id: inputSourceSection
             title: "Input Source"
             bodyShown: !page.pathsFolded
             enabled: page.idle
@@ -647,5 +648,14 @@ ChangeFoldersButton {
             onTriggered: page.prompt.ask({ title: "GUI Overview", message: page.help("general_gui_overview"),
                                            buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the paths
+    DropZones {
+        over: inputSourceSection
+        store: page.st
+        targets: [{ key: "input_dir_or_file_var", label: "Input", folder: true, slash: false,
+                    files: ["mp4", "avi", "mov", "mkv", "webm", "flv", "gif", "png", "jpg", "jpeg", "bmp", "tiff", "exr"] },
+                  { key: "output_dir", label: "Output Folder", folder: true, slash: false }]
     }
 }

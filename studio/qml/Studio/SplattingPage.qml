@@ -372,6 +372,7 @@ Item {
         // Open Console stays live during a job (user, 2026-09-30)
 
         Section {
+            id: foldersSection
             title: "Input/Output Folders"
             enabled: page.idle
             headerRight: [
@@ -2057,5 +2058,14 @@ No button lit means custom "
             onTriggered: page.prompt.ask({ title: "About Splatting", message: page.sp.aboutText,
                                            buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the folders
+    DropZones {
+        over: foldersSection
+        store: page.st
+        targets: [{ key: "input_source_clips", label: "Source Clips", folder: true, files: ["mp4", "avi", "mov", "mkv"] },
+                  { key: "input_depth_maps", label: "Depth Maps", folder: true, files: ["mp4", "npz"] },
+                  { key: "output_splatted", label: "Output Splatted", folder: true }]
     }
 }

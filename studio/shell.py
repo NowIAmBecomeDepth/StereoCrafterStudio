@@ -917,6 +917,18 @@ class StudioShell(QObject):
     def urlToPath(self, url: QUrl) -> str:
         return os.path.normpath(url.toLocalFile()) if url.isLocalFile() else url.toString()
 
+    @Slot(QUrl, result="QVariantMap")
+    def dropInfo(self, url: QUrl) -> Dict[str, Any]:
+        """What a drag from Explorer carries (Drop Zones, user 2026-10-25): its
+        path, whether it is a folder, and a file's extension (lower case, no
+        dot). An empty path for anything that is not a local file."""
+        if not url.isLocalFile():
+            return {"path": "", "dir": False, "ext": ""}
+        path = os.path.normpath(url.toLocalFile())
+        is_dir = os.path.isdir(path)
+        ext = "" if is_dir else os.path.splitext(path)[1].lstrip(".").lower()
+        return {"path": path, "dir": is_dir, "ext": ext}
+
     @Slot(str, result=bool)
     def openManual(self, where: str) -> bool:
         """F1 (user, 2026-10-02): the manual, at `where` ("part2.html#splatting";

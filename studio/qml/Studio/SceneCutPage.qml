@@ -71,6 +71,7 @@ Item {
         enabled: page.idle
 
         Section {
+            id: inOutSection
             title: "1. Input & Output"
             // no chapter dropdown (user, 2026-10-11): Scene Cut takes the whole movie, so a
             // project applies Whole Movie on its own (controller refreshChapters)
@@ -276,5 +277,14 @@ Item {
             page.prompt.ask({ title: title, message: text, buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
         function onToast(kind, title, message) { Theme.toast(kind, title, message) }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the paths
+    DropZones {
+        over: inOutSection
+        store: page.st
+        targets: [{ key: "video_path", label: "Video File", files: ["mp4", "mkv", "avi", "mov"],
+                    set: p => page.sc.videoChosen(p) },
+                  { key: "output_dir", label: "Output Folder", folder: true }]
     }
 }

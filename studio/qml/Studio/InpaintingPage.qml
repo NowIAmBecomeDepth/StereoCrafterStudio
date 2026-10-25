@@ -93,14 +93,14 @@ Item {
     FolderPicker {
         id: loFolderDlg; title: "Lo-Res Blend: a folder, or a single clip to inpaint"
         allowFiles: true
-        fileTypes: ["mp4", "mov"]
+        fileTypes: ["mp4", "mov", "mkv"]
         currentFolder: page.st.input_folder
         onAccepted: page.st.input_folder = selectedPath.replace(/\\/g, "/")
     }
     FolderPicker {
         id: hiFolderDlg; title: "Hi-Res Blend: a folder, or a single clip"
         allowFiles: true
-        fileTypes: ["mp4", "mov"]
+        fileTypes: ["mp4", "mov", "mkv"]
         currentFolder: page.st.hires_blend_folder
         onAccepted: page.st.hires_blend_folder = selectedPath.replace(/\\/g, "/")
     }
@@ -170,6 +170,7 @@ Item {
             spacing: Theme.gap
 
             Section {
+                id: foldersSection
                 title: "Folders"
                 bodyShown: !page.pathsFolded
                 enabled: page.idle
@@ -560,5 +561,14 @@ Version: 1.0
                          + "It supports custom mask processing, color transfer and a hi-res finish for high-quality outputs.",
                 buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the folders
+    DropZones {
+        over: foldersSection
+        store: page.st
+        targets: [{ key: "input_folder", label: "Lo-Res Blend", folder: true, files: ["mp4", "mov", "mkv"] },
+                  { key: "hires_blend_folder", label: "Hi-Res Blend", folder: true, files: ["mp4", "mov", "mkv"] },
+                  { key: "output_folder", label: "Output Folder", folder: true }]
     }
 }

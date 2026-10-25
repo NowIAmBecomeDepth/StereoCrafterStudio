@@ -932,6 +932,14 @@ ApplicationWindow {
         }
     }
 
+    // ---- drag and drop (user, 2026-10-25) ----------------------------------------
+    // A folder or a file dragged from Explorer: the window takes the drag, and the
+    // page's (or an open dialog's) DropZones show where it can go -- see FileDrop.
+    FileDropArea {
+        objectName: "fileDropArea"
+        anchors.fill: parent
+    }
+
     // ---- film grain (grain.py; user, 2026-09-28) ---------------------------------
     // One static tile over everything, one grain per SCREEN pixel (outside the
     // UI Scale zoom), never taking the mouse. The previews stay clean: the

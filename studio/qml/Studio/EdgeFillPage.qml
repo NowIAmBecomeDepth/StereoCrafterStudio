@@ -136,6 +136,7 @@ Item {
         // idle-only per section, not on the whole column: Open Console stays live during a fill
 
         Section {
+            id: foldersSection
             title: "Folders"
             enabled: page.idle
             // a chapter of the project: its merged clips and their splats (user, 2026-10-14)
@@ -641,4 +642,12 @@ Item {
     }
 
     readonly property var stageMenus: []
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the folders
+    DropZones {
+        over: foldersSection
+        store: page.st
+        targets: [{ key: "merged_folder", label: "Merged Clips", folder: true },
+                  { key: "mask_folder", label: "Mask Folder", folder: true }]
+    }
 }

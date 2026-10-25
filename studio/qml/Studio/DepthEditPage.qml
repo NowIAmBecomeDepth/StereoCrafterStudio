@@ -1861,6 +1861,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: 6
                 Section {
+                    id: outputSection
                     title: "Output"
                     Layout.fillWidth: true
                     RowLayout {
@@ -1887,5 +1888,19 @@ Item {
                 }
             }
         }
+    }
+
+    // drag and drop (user, 2026-10-25): Drop Zones over the clip and the output folder
+    DropZones {
+        over: clipSection
+        targets: [{ key: "rgb_path", label: "Source Video", files: ["mp4", "mkv", "mov", "avi", "m4v", "webm"],
+                    set: p => page.de.setVar("rgb_path", p) },
+                  { key: "depth_path", label: "Depth Map", files: ["mp4", "mkv"],
+                    set: p => page.de.setVar("depth_path", p) }]
+    }
+    DropZones {
+        over: outputSection
+        targets: [{ key: "output_dir", label: "Output Folder", folder: true,
+                    set: p => page.de.setVar("output_dir", p) }]
     }
 }
