@@ -289,7 +289,7 @@ class StreamingVideoWriter:
         _args = _V2_VIDEO["args"]  # v2: Inpainting's Encoding Settings (set_output_encoding)
         # the settings' encoders (NVENC included) are the system ffmpeg's, as every other stage's
         ffmpeg_exe = "ffmpeg" if _args else imageio_ffmpeg.get_ffmpeg_exe()
-        _muxer = "mov" if output_path.lower().endswith(".mov") else "mp4"
+        _muxer = {".mov": "mov", ".mkv": "matroska"}.get(os.path.splitext(output_path)[1].lower(), "mp4")  # v2: the Container
         cmd = [
             ffmpeg_exe, "-y", "-hide_banner", "-loglevel", "error",
             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{self.width}x{self.height}",

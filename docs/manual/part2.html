@@ -827,6 +827,10 @@
     <li><span class="set">Enable DNxHR</span> saves the full-size result as DNxHR (a <code>.mov</code>
       made for editing) instead of H.264 / H.265, so the picture stays visually lossless as it passes
       through Inpainting and Merging. The files are <b>very large</b>: several GB per minute.</li>
+    <li><span class="set">Container</span>: the file type of the H.264 / H.265 results, <b>MP4</b> (the
+      default) or <b>MKV</b>. An MKV cut short by a crash or a full disk still plays up to where it stopped.
+      Inpainting and Merging read either, and they have the same choice in their own Encoding Settings.
+      With Enable DNxHR on, the files are always <code>.mov</code>.</li>
     <li><span class="set">DNxHR Profile</span>: match it to your source. <b>8-bit</b> (SQ / HQ) suits
       1080p Blu-rays and web rips; <b>10-bit</b> (HQX / 444) is for HDR and 10-bit SDR sources, such as
       4K Blu-rays.</li>
@@ -1002,7 +1006,8 @@
       <b>Use Sage Attention (for V2)</b> is the same for Inpainting V2, and <b>Load / Save V2 Settings</b>
       keep V2's settings in a file of their own.</li>
     <li><b>Encoding Settings</b> (how the files are saved, for V1 and V2 alike: <b>10-bit (Main10)</b> writes
-      10-bit HEVC; <b>Enable DNxHR</b>, off by default, writes DNxHR .mov files for an all-DNxHR pipeline),
+      10-bit HEVC; <b>Enable DNxHR</b>, off by default, writes DNxHR .mov files for an all-DNxHR pipeline;
+      <b>Container</b> picks MP4 or MKV for the other files),
       <b>Load / Save Settings</b>,
       <b>Reset to Default</b>, <b>Restore Finished</b> (moves clips back out of <code>finished</code> to run
       them again) and <b>Enable Debugging</b>.</li>

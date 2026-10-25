@@ -2010,6 +2010,9 @@ class MergingPreviewEngine:
             splatted2_matches = glob.glob(splatted2_pattern) + glob.glob(
                 os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mov")
             )
+            # v2: Splatting may write MKV grids (Encoding Settings' Container, 2026-10-25)
+            splatted4_matches += glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted4*.mkv"))
+            splatted2_matches += glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mkv"))
             # Explicitly selected splat file wins over glob discovery.
             if _explicit_splat:
                 _ebn = os.path.basename(_explicit_splat).lower()
@@ -2842,7 +2845,7 @@ class MergingPreviewEngine:
             else:
                 cands = glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mp4")) + glob.glob(
                     os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mov")
-                )
+                ) + glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mkv"))  # v2: MKV
                 cands = [c for c in cands if "_splatted2d" in os.path.basename(c).lower()]
                 splat = cands[0] if cands else None
             if not splat:

@@ -86,6 +86,8 @@ DEFAULTS: Dict[str, Any] = {
     "encoding_nvenc_aq_strength": 8,
     "dnxhr_fullres_split": False,
     "dnxhr_profile": "HQX (10-bit 4:2:2)",
+    # Container (user, 2026-10-25): MP4 or MKV for a non-DNxHR output (DNxHR writes .mov)
+    "output_container": "MP4",
     "encoding_preset": "Custom",
     # depth pre-processing
     "depth_gamma": "1.0",

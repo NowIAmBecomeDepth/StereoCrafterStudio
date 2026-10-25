@@ -77,6 +77,7 @@ SPLATTER_DEFAULT_CONFIG = {
     "encoding_nvenc_temporal_aq": False,
     "encoding_nvenc_aq_strength": 8,
     "dnxhr_fullres_split": False,
+    "output_container": "MP4",
     "dnxhr_profile": "HQX",
     "sbs_enabled": False,
 }

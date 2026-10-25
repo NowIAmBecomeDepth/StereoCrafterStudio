@@ -34,6 +34,8 @@ STRINGS: Dict[str, str] = {
     "output_crf": "23",
     "color_tags": "Auto",
     "dnxhr_profile": "HQX (10-bit 4:2:2)",
+    # Container (user, 2026-10-25): MP4 or MKV for a non-DNxHR output (DNxHR writes .mov)
+    "output_container": "MP4",
     "grain_seed": "-1",
     # Merge All SBS to 1 Video (user, 2026-10-11; studio/merge_all.py): Settings > Encoding > Merge All.
     # The movie file's soundtrack goes in ("" = none); "" output folder = the project's (or episode's) folder.
@@ -236,7 +238,7 @@ def current_settings(values: Dict[str, Any]) -> Dict[str, Any]:
         "nvenc_lookahead": v["nvenc_lookahead"], "nvenc_spatial_aq": v["nvenc_spatial_aq"],
         "nvenc_temporal_aq": v["nvenc_temporal_aq"], "nvenc_aq_strength": v["nvenc_aq_strength"],
         "color_tags": v["color_tags"], "dnxhr_fullres_split": v["dnxhr_fullres_split"],
-        "dnxhr_profile": v["dnxhr_profile"],
+        "dnxhr_profile": v["dnxhr_profile"], "output_container": v.get("output_container", "MP4"),
         "mask_binarize_threshold": float(v["mask_binarize_threshold"]),
         "mask_dilate_kernel_size": int(v["mask_dilate_kernel_size"]),
         "mask_blur_kernel_size": int(v["mask_blur_kernel_size"]),

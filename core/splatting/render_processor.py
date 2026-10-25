@@ -266,6 +266,7 @@ class RenderProcessor:
         encoding_options: Optional[dict] = None,
         dnxhr_fullres_split: bool = False,
         dnxhr_profile: str = "HQX",  # short key; resolved via the SQ/HQ/HQX/444 map
+        output_container: str = "MP4",  # MP4 or MKV for the non-DNxHR outputs (user, 2026-10-25)
         is_test_mode: bool = False,
         test_target_frame_idx: Optional[int] = None,
         mask_mode: str = "SC",
@@ -383,8 +384,9 @@ class RenderProcessor:
         else:
             suffix = f"_splatted2{flip_suffix}" if dual_output else f"_splatted4{flip_suffix}"
         res_suffix = f"_{width}"
+        _container_ext = ".mkv" if str(output_container or "").strip().upper() == "MKV" else ".mp4"
         final_output_video_path = os.path.normpath(
-            f"{os.path.splitext(output_video_path_base)[0]}{res_suffix}{suffix}.mp4"
+            f"{os.path.splitext(output_video_path_base)[0]}{res_suffix}{suffix}{_container_ext}"
         )
         logger.info(f"==> Target Output Path: {final_output_video_path}")
 

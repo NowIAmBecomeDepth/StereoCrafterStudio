@@ -490,7 +490,9 @@ def inpaint_clips(values: dict) -> List[str]:
         return [folder]
     if not os.path.isdir(folder):
         return []
-    return sorted(glob.glob(os.path.join(folder, "*.mp4")) + glob.glob(os.path.join(folder, "*.mov")))
+    # .mkv too: Splatting's Container may be MKV (user, 2026-10-25), as the engine's own glob
+    return sorted(glob.glob(os.path.join(folder, "*.mp4")) + glob.glob(os.path.join(folder, "*.mov"))
+                  + glob.glob(os.path.join(folder, "*.mkv")))
 
 
 #: Inpainting V2's input types (its engine's VIDEO_EXTENSIONS).
@@ -533,8 +535,8 @@ def inpaint_hires_of(low_res: str, hires_folder: str) -> str:
     if not base:
         return ""
     # <base>_<width><core>: the clip's own hi-res, not a longer clip's (sweep 2026-10-14c)
-    own = re.compile(re.escape(base) + r"_\d+" + re.escape(core) + r"\.(?:mp4|mov)$", re.IGNORECASE)
-    hits = [m for ext in (".mp4", ".mov")
+    own = re.compile(re.escape(base) + r"_\d+" + re.escape(core) + r"\.(?:mp4|mkv|mov)$", re.IGNORECASE)
+    hits = [m for ext in (".mp4", ".mov", ".mkv")
             for m in glob.glob(os.path.join(hires_folder, f"{glob.escape(base)}_*{core}{ext}"))
             if os.path.normcase(m) != os.path.normcase(low_res) and own.match(os.path.basename(m))]
     return hits[0] if hits else ""

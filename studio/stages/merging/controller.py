@@ -134,7 +134,8 @@ def _choices() -> Dict[str, list]:
         out.update({"codec": list(eu.CODEC_OPTIONS), "encoding_encoder": list(eu.ENCODER_OPTIONS),
                     "encoding_quality": list(eu.QUALITY_PRESETS), "encoding_tune": list(eu.CPU_TUNE_OPTIONS),
                     "bit_depth": list(eu.BIT_DEPTH_OPTIONS), "pix_fmt": list(eu.PIX_FMT_OPTIONS),
-                    "dnxhr_profile": list(eu.DNXHR_PROFILE_OPTIONS)})
+                    "dnxhr_profile": list(eu.DNXHR_PROFILE_OPTIONS),
+                    "output_container": list(eu.OUTPUT_CONTAINERS)})
     except Exception:
         logger.debug("encoding lists unavailable", exc_info=True)
     from studio import merge_all

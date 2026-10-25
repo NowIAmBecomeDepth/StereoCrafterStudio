@@ -45,7 +45,8 @@ def _matches(folder: str, pattern: str) -> List[str]:
     if not folder:
         return []
     folder = glob.escape(folder)
-    return glob.glob(os.path.join(folder, pattern + ".mp4")) + glob.glob(os.path.join(folder, pattern + ".mov"))
+    # .mkv too: Splatting's Container may be MKV (user, 2026-10-25)
+    return [m for ext in (".mp4", ".mov", ".mkv") for m in glob.glob(os.path.join(folder, pattern + ext))]
 
 
 def needs_original(base_name: str, core_name: str, mask_folder: str,

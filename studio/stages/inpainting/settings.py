@@ -62,6 +62,8 @@ DEFAULTS: Dict[str, Any] = {
     # it is set off once, then left to the user (normalise)
     "inpaint_dnxhr_reviewed": True,
     "dnxhr_profile": "HQX (10-bit 4:2:2)",
+    # Container (user, 2026-10-25): MP4 or MKV for a non-DNxHR output (DNxHR writes .mov)
+    "output_container": "MP4",
     # Encoding options: v1 keeps these in app_config (Options > Encoding
     # Settings) and the engine reads them from there.
     "codec": "H.265",
@@ -127,7 +129,7 @@ _ATTR_EXCEPTIONS = {
 #: Settings that are app_config only in v1 (no tk variable).
 ENCODING_KEYS = ("codec", "encoding_encoder", "encoding_quality", "encoding_tune", "bit_depth", "pix_fmt",
                  "nvenc_lookahead_enabled", "nvenc_lookahead", "nvenc_spatial_aq", "nvenc_temporal_aq",
-                 "nvenc_aq_strength", "color_tags", "dnxhr_fullres_split", "dnxhr_profile")
+                 "nvenc_aq_strength", "color_tags", "dnxhr_fullres_split", "dnxhr_profile", "output_container")
 
 # Option lists: v1's own. The encoding ones mirror core.common.encoding_utils,
 # which the controller prefers when it imports; these are the fallback.
@@ -143,6 +145,7 @@ CHOICES: Dict[str, list] = {
     "pix_fmt": ["Auto", "yuv420p", "yuv420p10le", "p010le"],
     "color_tags": ["Off", "Auto", "BT.709 L", "BT.709 F", "BT.2020 PQ", "BT.2020 HLG"],
     "dnxhr_profile": ["SQ (8-bit 4:2:2)", "HQ (8-bit 4:2:2)", "HQX (10-bit 4:2:2)", "444 (10-bit 4:4:4)"],
+    "output_container": ["MP4", "MKV"],
 }
 
 

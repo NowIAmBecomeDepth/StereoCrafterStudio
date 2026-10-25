@@ -189,6 +189,8 @@ class ProcessingSettings:
     encoding_nvenc_aq_strength: int = 8
     dnxhr_fullres_split: bool = False
     dnxhr_profile: str = "HQX"
+    # MP4 or MKV for a non-DNxHR output (Encoding Settings' Container; user, 2026-10-25)
+    output_container: str = "MP4"
     is_test_mode: bool = False
     test_target_frame_idx: Optional[int] = None
     skip_lowres_preproc: bool = False
@@ -780,6 +782,7 @@ class BatchProcessor:
                 encoding_options=encoding_options,
                 dnxhr_fullres_split=settings.dnxhr_fullres_split,
                 dnxhr_profile=settings.dnxhr_profile,
+                output_container=settings.output_container,
                 is_test_mode=settings.is_test_mode,
                 test_target_frame_idx=settings.test_target_frame_idx,
                 mask_mode=settings.mask_mode,

@@ -1250,6 +1250,7 @@ class MergingEngine:
                 "color_tags": self.color_tags_var.get(),
                 "dnxhr_fullres_split": self.dnxhr_fullres_split_var.get(),
                 "dnxhr_profile": self.dnxhr_profile_var.get(),
+                "output_container": self.output_container_var.get(),  # v2: MP4 / MKV (user, 2026-10-25)
                 # Mask params
                 "mask_binarize_threshold": float(self.mask_binarize_threshold_var.get()),
                 "mask_dilate_kernel_size": int(self.mask_dilate_kernel_size_var.get()),
@@ -1695,6 +1696,7 @@ class MergingEngine:
                         _cands = glob.glob(
                             os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mp4")
                         ) + glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mov"))
+                        _cands += glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mkv"))  # v2: MKV
                         # Case-insensitive filter for the 'D' variant, so a plain
                         # single-eye _splatted2 can never be mistaken for the grid.
                         _cands = [c for c in _cands if "_splatted2d" in os.path.basename(c).lower()]
@@ -1722,6 +1724,9 @@ class MergingEngine:
                     splatted2_matches = glob.glob(splatted2_pattern) + glob.glob(
                         os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mov")
                     )
+                    # v2: Splatting may write MKV grids (Encoding Settings' Container, 2026-10-25)
+                    splatted4_matches += glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted4*.mkv"))
+                    splatted2_matches += glob.glob(os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mkv"))
 
                     # DNxHR split mode: splat and mask live in two separate files,
                     # {prefix}_splat.mov (+ {prefix}_mask.mp4), typically in sibling
@@ -2181,6 +2186,8 @@ class MergingEngine:
                 use_dnxhr_out = bool(settings.get("dnxhr_fullres_split", False))
                 if use_dnxhr_out:
                     output_path = os.path.splitext(output_path)[0] + ".mov"
+                elif str(settings.get("output_container", "MP4")).strip().upper() == "MKV":  # v2: the Container
+                    output_path = os.path.splitext(output_path)[0] + ".mkv"
 
                 # Encode to a .partial name and rename only on success. ffmpeg
                 # used to write straight to output_path from the first frame, so

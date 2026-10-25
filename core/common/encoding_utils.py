@@ -413,6 +413,22 @@ def dnxhr_video_args(profile_label: str) -> List[str]:
     return ["-c:v", "dnxhd", "-profile:v", prof, "-pix_fmt", pix]
 
 
+#: The containers a non-DNxHR output may be written in (user, 2026-10-25: Encoding Settings'
+#: Container, MP4 or MKV); DNxHR always writes a .mov.
+OUTPUT_CONTAINERS = ("MP4", "MKV")
+#: Every container a stage writes -- what the next stage looks for among its inputs.
+OUTPUT_EXTS = (".mp4", ".mkv", ".mov")
+
+
+def output_ext(settings: Dict[str, Any]) -> str:
+    """The extension a stage's output takes from its Encoding Settings: .mov with Enable DNxHR,
+    else the Container's (.mp4 unless MKV)."""
+    s = settings or {}
+    if s.get("dnxhr_fullres_split"):
+        return ".mov"
+    return ".mkv" if str(s.get("output_container") or "").strip().upper() == "MKV" else ".mp4"
+
+
 def video_args_from_settings(settings: Dict[str, Any]) -> "tuple[List[str], str]":
     """(ffmpeg video arguments, the file extension) for a stage's Encoding Settings:
     codec, encoding_encoder, encoding_quality, encoding_tune, bit_depth, pix_fmt,
@@ -453,4 +469,4 @@ def video_args_from_settings(settings: Dict[str, Any]) -> "tuple[List[str], str]
         args += ["-profile:v", a["profile"]]
     if a["codec"] == "libx265":
         args += ["-x265-params", "log-level=error"]
-    return args, ".mp4"
+    return args, output_ext(s)

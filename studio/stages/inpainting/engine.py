@@ -2050,9 +2050,9 @@ class InpaintingEngine:
         logger.debug(f"Hi-Res Search Pattern: {search_pattern} (+ .mov)")
         matches = glob.glob(search_pattern) + glob.glob(
             os.path.join(hires_blend_folder, f"{base_pattern_no_dim}_*{_suffix_core}.mov")
-        )
+        ) + glob.glob(os.path.join(hires_blend_folder, f"{base_pattern_no_dim}_*{_suffix_core}.mkv"))  # v2: MKV
 
-        _own = re.compile(re.escape(base_pattern_no_dim) + r"_\d+" + re.escape(_suffix_core) + r"\.(?:mp4|mov)$",
+        _own = re.compile(re.escape(base_pattern_no_dim) + r"_\d+" + re.escape(_suffix_core) + r"\.(?:mp4|mkv|mov)$",
                           re.IGNORECASE)
         matches = [m for m in matches if _own.match(os.path.basename(m))]  # v2: this clip's own (sweep 2026-10-14c)
         logger.debug(f"Hi-Res Glob Matches Found: {[os.path.basename(m) for m in matches]}")
@@ -2582,7 +2582,8 @@ class InpaintingEngine:
                 .replace("_splatted2", "")
             )
 
-        _ext = ".mov" if self.app_config.get("dnxhr_fullres_split") else ".mp4"  # v2: Enable DNxHR
+        from core.common.encoding_utils import output_ext as _output_ext
+        _ext = _output_ext(self.app_config)  # v2: Enable DNxHR: .mov; else the Container (MP4 / MKV)
         output_video_filename = f"{video_name_for_output}{output_suffix}{flip_tag}{_ext}"
         output_video_path = os.path.join(save_dir, output_video_filename)
 
@@ -3316,6 +3317,7 @@ class InpaintingEngine:
             else:
                 input_videos = sorted(
                     glob.glob(os.path.join(input_folder, "*.mp4")) + glob.glob(os.path.join(input_folder, "*.mov"))
+                    + glob.glob(os.path.join(input_folder, "*.mkv"))  # v2: Splatting's Container may be MKV
                 )
             _only = getattr(self, "only_videos", None)  # v2: Process Selected
             if _only:

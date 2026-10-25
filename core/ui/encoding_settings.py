@@ -65,10 +65,9 @@ ENCODING_PRESETS = {
         "nvenc_spatial_aq": True,
         "nvenc_temporal_aq": True,
         "nvenc_aq_strength": 8,
-        # DNxHR mezzanine for 8-bit too: the main output is a 4:2:2 DNxHR
-        # .mov (SBS/grid, same layout as the 10-bit path), not a split.
-        # 8-bit H.264 4:2:0 showed a clear compression loss between stages.
-        "dnxhr_fullres_split": True,
+        # DNxHR off (user, 2026-10-25: "no where at all ... any dnxhr defaults on"): a preset picks
+        # the H.264 / H.265 setup; Enable DNxHR is the user's own switch. The profile stays ready.
+        "dnxhr_fullres_split": False,
         "dnxhr_profile": DNXHR_PROFILE_8BIT,
     },
     PRESET_10BIT: {
@@ -84,7 +83,7 @@ ENCODING_PRESETS = {
         "nvenc_spatial_aq": True,
         "nvenc_temporal_aq": True,
         "nvenc_aq_strength": 8,
-        "dnxhr_fullres_split": True,
+        "dnxhr_fullres_split": False,     # off, as the 8-bit preset (user, 2026-10-25)
         "dnxhr_profile": DNXHR_PROFILE_10BIT,
     },
 }
@@ -124,8 +123,8 @@ PRESET_FIELD_KEYS = _PRESET_STR_KEYS + _PRESET_BOOL_KEYS + _PRESET_INT_KEYS
 # the Prototype's File > Save as ... Preset, which Studio doesn't have). Said once, after both presets'
 # own lines, where a tooltip shows them together (Merging).
 PRESET_TOOLTIP_TAIL = (
-    "A preset sets every encoding setting except Output CRF. Change any of them in Encoding Settings "
-    "and the preset reads Custom: neither button is lit."
+    "A preset sets every encoding setting except Output CRF and Container, and leaves Enable DNxHR "
+    "off. Change any of them in Encoding Settings and the preset reads Custom: neither button is lit."
 )
 _PRESET_TOOLTIP_TAIL = "\n\n" + PRESET_TOOLTIP_TAIL
 

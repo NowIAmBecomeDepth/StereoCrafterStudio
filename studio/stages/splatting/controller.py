@@ -88,13 +88,15 @@ def _choices() -> Dict[str, list]:
                 "pix_fmt": ["Auto", "yuv420p", "yuv420p10le", "p010le"],
                 "color_tags": ["Off", "Auto", "BT.709 L", "BT.709 F", "BT.2020 PQ", "BT.2020 HLG"],
                 "dnxhr_profile": ["SQ (8-bit 4:2:2)", "HQ (8-bit 4:2:2)", "HQX (10-bit 4:2:2)",
-                                  "444 (10-bit 4:4:4)"]})
+                                  "444 (10-bit 4:4:4)"],
+                "output_container": ["MP4", "MKV"]})
     try:
         from core.common import encoding_utils as eu
         out.update({"codec": list(eu.CODEC_OPTIONS), "encoding_encoder": list(eu.ENCODER_OPTIONS),
                     "encoding_quality": list(eu.QUALITY_PRESETS), "encoding_tune": list(eu.CPU_TUNE_OPTIONS),
                     "bit_depth": list(eu.BIT_DEPTH_OPTIONS), "pix_fmt": list(eu.PIX_FMT_OPTIONS),
-                    "dnxhr_profile": list(eu.DNXHR_PROFILE_OPTIONS)})
+                    "dnxhr_profile": list(eu.DNXHR_PROFILE_OPTIONS),
+                    "output_container": list(eu.OUTPUT_CONTAINERS)})
     except Exception:
         pass
     if "Auto" not in out["encoding_tune"]:

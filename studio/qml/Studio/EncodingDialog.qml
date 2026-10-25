@@ -155,6 +155,18 @@ Popup {
             // Low Res CRF under Full Res CRF, in the right column (user, 2026-10-02)
             Item { visible: dlg.dualCrf; Layout.fillWidth: true }
             FieldRow { visible: dlg.dualCrf; label: "Low Res CRF"; labelWidth: 120; help: dlg.help("output_crf_low") || dlg.help("output_crf"); EBox { key: "output_crf_low" } }
+            // MP4 or MKV for the H.264 / H.265 outputs (user, 2026-10-25); DNxHR always writes .mov
+            FieldRow {
+                objectName: "encContainerRow"
+                label: "Container"; labelWidth: 120
+                enabled: dlg.st ? !dlg.st[dlg.k("dnxhr_fullres_split")] : false
+                help: dlg.help("output_container")
+                      || "The file type the H.264 / H.265 outputs are written in: MP4 (the default, plays almost "
+                       + "everywhere) or MKV (Matroska: a file cut short by a crash or a full disk still plays up to "
+                       + "where it stopped). The next stages read either. With Enable DNxHR on, the outputs are "
+                       + "always .mov."
+                EDrop { key: dlg.k("output_container"); model: dlg.ctl && dlg.ctl.choices.output_container ? dlg.ctl.choices.output_container : ["MP4", "MKV"] }
+            }
         }
 
         RowLayout {
