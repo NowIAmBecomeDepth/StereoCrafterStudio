@@ -4850,6 +4850,9 @@ class SplattingPreviewEngine:
                 self._live_conv = None
 
         # --- 3D Modes and SBS Update ---
+        _left_hook = getattr(self, "left_eye_hook", None)  # v2: the Depth Map Editor's masks, left eye only
+        if _left_hook is not None and left_eye_tensor_resized is not None:
+            left_eye_tensor_resized = _left_hook(left_eye_tensor_resized)
         if preview_source == "Anaglyph 3D":
             left_np = (left_eye_tensor_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             right_np = (right_eye_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
@@ -5876,6 +5879,21 @@ class SplattingPreviewEngine:
     # -- v1 SplatterGUI.update_gui_from_sidecar (splatting_gui.py:10773)
     def update_gui_from_sidecar(self, depth_map_path: str):
         """Reads the sidecar config for the given depth map path and updates GUI sliders."""
+        _kept = None  # v2: the same clip again, no sidecar: its per-clip settings stay (see gen PATCHES)
+        try:
+            _pvw = getattr(self, "previewer", None)
+            _src = (_pvw.video_list[_pvw.current_video_index].get("source_video")
+                    if _pvw is not None and 0 <= _pvw.current_video_index < len(_pvw.video_list) else None)
+            if (_src and _src == getattr(self, "_last_loaded_source_video", None) and depth_map_path
+                    and (not self.update_slider_from_sidecar_var.get() or not os.path.exists(
+                        self.sidecar_manager.resolve_sidecar_path(depth_map_path, self._get_sidecar_base_folder(),
+                                                                  self.APP_CONFIG_DEFAULTS["SIDECAR_EXT"])))):
+                _kept = {"vars": {_n: getattr(self, _n).get() for _n in (
+                    "boost_amount_var", "pop_amount_var", "frame_break_bars_var", "fb_erode_left_var",
+                    "fb_erode_right_var", "fb_erode_global_var", "fb_edge_blur_var")},
+                    "keyframes": self.keyframe_track, "dilate": self.dilate_regions}
+        except Exception:
+            _kept = None
         # Pop Out Boost is scene-specific, not a persistent setting -- leaving it
         # dialed in would silently boost the brightest/nearest thing in whatever
         # clip loads next. Every clip load starts from Amount = 0 unconditionally
@@ -5926,6 +5944,18 @@ class SplattingPreviewEngine:
         # here, then the existing restore-from-sidecar block below still
         # overwrites this with the real thing if this clip has one saved.
         self.dilate_regions = dilate_regions.DilateRegions()
+
+        if _kept is not None:  # v2: back as the clip was just at
+            self._fb_setting_preset = True
+            try:
+                for _n, _v in _kept["vars"].items():
+                    getattr(self, _n).set(_v)
+            finally:
+                self._fb_setting_preset = False
+            self.keyframe_track, self.dilate_regions = _kept["keyframes"], _kept["dilate"]
+            self._kf_redraw_markers()
+            self._kf_refresh_summary()
+            self._fb_refresh_presets()
 
         # 1. Video Change Detection (for suppression flag)
         current_source_video = None

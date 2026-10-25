@@ -407,11 +407,36 @@ class DepthEditController(QObject):
         self._warp_req += 1
         req = self._warp_req
         self._warp_glasses = bool(glasses)
+        self._warp_idx, self._warp_holes = idx, holes
         self._set_warp_note("")
         source = sr_display.SOURCE if glasses else ("Splat Result" if holes else "Dubois Anaglyph")
+        # the masks and shapes on the left eye only (user, 2026-10-25); the holes view shows no left eye
+        overlay = None if holes else self._left_overlay(idx)
         sp.preview.render_external(video, idx, codes, source, holes,
                                    lambda img, err, req=req: self._sigWarp.emit(req, img, err),
-                                   stage="depthedit", depth=str(eng.depth_path_var.get() or ""))
+                                   stage="depthedit", depth=str(eng.depth_path_var.get() or ""),
+                                   left_overlay=overlay)
+
+    def _left_overlay(self, idx: int):
+        """The 3D view's masks and shapes for its left eye: (colour HxWx3, strength HxW), float 0..1 at
+        the frame's size -- the other views' overlay exactly (the masks tinted, the selected layer's
+        outline; Outline only), worked out from it drawn over black and over white. None with the
+        overlay off or nothing to draw."""
+        import numpy as np
+        eng = self._engine
+        if not eng.overlay_var.get() or eng.project is None or not eng.project.layers:
+            return None
+        if eng.rgb is not None and idx < len(eng.rgb):
+            h, w = eng.rgb[idx].shape[:2]
+        else:
+            h, w = eng._unit(idx).shape[:2]
+        black = self._overlay(np.zeros((h, w, 3), np.uint8), idx, smooth=True).astype(np.float32)
+        white = self._overlay(np.full((h, w, 3), 255, np.uint8), idx, smooth=True).astype(np.float32)
+        strength = np.clip(1.0 - (white - black).mean(axis=2) / 255.0, 0.0, 1.0)
+        if not (strength > 0.004).any():
+            return None
+        colour = np.clip(black / 255.0 / np.maximum(strength, 1e-3)[..., None], 0.0, 1.0)
+        return colour.astype(np.float32), strength.astype(np.float32)
 
     def _on_warp(self, req: int, img, err: str) -> None:
         if req != self._warp_req or self._engine is None or self._engine.view_var.get() != self.VIEW_3D:
@@ -421,7 +446,9 @@ class DepthEditController(QObject):
             return
         self._set_warp_note("")
         self.provider.put("frame", img)
-        self._markers = {}
+        # its clicks, boxes and gradient over the picture, to edit on -- not on the holes view's right eye
+        self._markers = ({} if getattr(self, "_warp_holes", True)
+                         else self._marker_data(min(getattr(self, "_warp_idx", 0), max(0, self._engine._num_frames() - 1))))
         self._serial += 1
         if self._warp_glasses:
             self._stereo_serial = self._serial

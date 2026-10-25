@@ -133,6 +133,27 @@ want = 30 + 20 * (12 - 5) / 15
 check("...and the frames between follow it", abs(pv.property("keyed")["max_disp"] - want) < 1e-6 and abs(shown() - want) < 0.51,
       f"{shown():.2f} vs {want:.2f}")
 
+# turned in one drag on a key (user, 2026-10-25: Pop Out Boost on a dynamic key "jumps back to the initial
+# position and begins to slide towards where i want it very slowly"): every notch is the newest -- the
+# dial never goes back to an older value, and is there when the hand stops
+pv.seek(20); settle()
+start, seen = shown(), []
+for k in range(1, 31):
+    QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", "max_disp"), Q_ARG("QVariant", start + 20.0 * k / 30))
+    pump(0.016)
+    seen.append(shown())
+back = [(a, b) for a, b in zip(seen, seen[1:]) if b < a - 1e-6]
+check("a drag on a keyframe: the dial never goes back to an older value", not back, f"{back[:4]} in {[round(v, 1) for v in seen]}")
+pump(0.3)
+check("...and it is where the hand stopped, at once", abs(shown() - (start + 20.0)) < 1e-6, shown())
+settle()
+kf = {k["frame"]: k for k in (json.loads(next((FIX / "depth").glob("*.fssidecar")).read_text(encoding="utf-8"))
+                             .get("keyframe_track") or [])}
+check("...the keyframe saved with the last value", abs(kf.get(20, {}).get("values", {}).get("max_disp_var", -1) - (start + 20.0)) < 1e-6
+      and abs(shown() - (start + 20.0)) < 1e-6, str(kf.get(20, {}).get("values", {}).get("max_disp_var")))
+QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", "max_disp"), Q_ARG("QVariant", start)); settle()
+pv.seek(12); settle()                                  # between the keys again
+
 # off a keyframe: nothing changes; a hint, once
 before = dict(pv.property("keyed"))
 QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", "max_disp"), Q_ARG("QVariant", 10.0)); settle()

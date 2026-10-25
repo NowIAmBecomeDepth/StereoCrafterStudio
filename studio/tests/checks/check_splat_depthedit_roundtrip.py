@@ -70,6 +70,16 @@ until(lambda: pv.property("loaded") and not pv.property("loading"), 90); pump(0.
 live = str(pv.property("currentDepth"))
 check("Splatting has the clip loaded, with its depth map", pv.property("loaded") and live.endswith("clipB_depth.mp4"), live)
 original = md5(live)
+# what the clip was just at, with no sidecar saved (user, 2026-10-25: back from a re-edit "the settings reset
+# if i didnt have a sidecar saved rather than remember what it was just at") -- per-clip ones and a page one
+sp._set("auto_save_sidecar", False)
+KEPT = {"boost_amount": 0.4, "pop_amount": 0.3, "frame_break_bars": 0.08, "fb_erode_left": 2.0, "max_disp": 42.0}
+for k, v in KEPT.items():
+    sp._set(k, v)
+pump(1.5)
+setting = lambda k: sp.settings.value(k)  # noqa: E731
+check("...set to what the clip is at (no sidecar)", all(abs(float(setting(k)) - v) < 1e-6 for k, v in KEPT.items())
+      and not list((FIX / "depth").rglob("*.fssidecar")), {k: setting(k) for k in KEPT})
 
 # ---- Edit Depth: the Depth Map Editor on this clip
 btn = find(stage.property("pages").property(1).toQObject(), lambda c: c.objectName() == "editDepthMap")
@@ -108,6 +118,13 @@ check("...back on Splatting, the SAME clip reloaded (the batch's second, not its
       and pv.property("videoIndex") == 1
       and norm(list(pv.property("clipPaths"))[pv.property("videoIndex")]) == norm(clip) and pv.property("loaded"),
       f"stage {stage.property('current')}")
+pump(1.0)
+check("...the clip's settings as it was just at, no sidecar needed (Boost, Pop, Frame Break, its erode, Disparity)",
+      all(abs(float(setting(k)) - v) < 1e-6 for k, v in KEPT.items()), {k: setting(k) for k in KEPT})
+eng_sp = pv._engine
+check("...and the preview draws with them", eng_sp is not None and abs(float(eng_sp.boost_amount_var.get()) - 0.4) < 1e-6
+      and abs(float(eng_sp.frame_break_bars_var.get()) - 0.08) < 1e-6,
+      None if eng_sp is None else (eng_sp.boost_amount_var.get(), eng_sp.frame_break_bars_var.get()))
 
 # ---- Edit Depth again: the editor reads the kept original, not the edited map
 click(btn)

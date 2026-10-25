@@ -91,8 +91,9 @@
       <span class="btn">&gt;</span> buttons, or the arrow keys.</li>
     <li>Zoom in with the mouse wheel, about the point under the pointer, as in Splatting and Merging;
       drag with the middle button to move around. The <span class="set">Zoom</span> box after the frame counter
-      picks a size, or <span class="set">Fit</span> for the whole frame again. In the 3D view, which takes no
-      clicks, the left button drags too and a double-click zooms in, or back to Fit.</li>
+      picks a size, or <span class="set">Fit</span> for the whole frame again. In the 3D view's
+      <b>Right Eye + Holes</b>, which takes no clicks, the left button drags too and a double-click zooms in,
+      or back to Fit.</li>
   </ul>
   <figure class="shot">
     <div class="frame"><div class="canvas"><img src="shots/21_de_depth.webp" alt="The depth map in colour"></div></div>
@@ -525,6 +526,12 @@
      -- a single edit, or a depth map from another program -- is shown too: with Splatting's settings as they are
      on its page (or the clip's sidecar beside the map, if it has one). Splatting goes back to its own clips,
      where it was, when you open it again.</p>
+  <p>You can keep editing in the 3D view. In <b>Anaglyph</b> and <b>Glasses-Free 3D</b> the tools work as in
+     the other views -- clicks, boxes, the gradient, shapes -- and the layers' masks and shapes are drawn on the
+     <b>left eye only</b>, so through glasses you see them on one eye while the 3D stays clean. The left eye is
+     where the frame is, so the masks line up there; the right eye is shifted by the depth. Untick
+     <span class="set">Masks</span> to judge the 3D without them. <b>Right Eye + Holes</b> shows no left eye, so it's for looking only. Each
+     change redraws the 3D view, which takes a moment longer than the flat views.</p>
   <figure class="shot">
     <div class="frame"><div class="canvas"><img src="shots/29_de_3d.webp" alt="The 3D view, Anaglyph"></div></div>
     <figcaption>The <b>3D</b> view, <b>Anaglyph</b>: the frame through Splatting's own preview with the edit in, before

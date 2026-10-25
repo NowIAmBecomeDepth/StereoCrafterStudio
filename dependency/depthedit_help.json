@@ -4,7 +4,7 @@
   "load_clip": "Read both videos into memory for editing. If an edit of this clip was saved before in the output folder, it is reopened.",
   "import_depthcrafter": "Browse the clips of the most recent DepthCrafter job. The matching depth map is filled in for you.",
   "view": "RGB shows the colour clip, Depth the original depth map, Edited the depth map with every enabled layer applied. Brighter is nearer.",
-  "overlay": "Tint each layer's mask in its colour. The selected layer is drawn stronger and outlined.",
+  "overlay": "Tint each layer's mask in its colour. The selected layer is drawn stronger and outlined. In the 3D view they're drawn on the left eye only.",
   "colormap": "Show depth in colour instead of grey. Small steps in depth are much easier to see: the colour comes from the map's full 10 bits, so even a single level of difference changes it.",
   "tool": "What a click on the picture does. Add: mark part of an object (Ctrl+click starts another object). Remove: cut an area out of the mask. Box: drag around an object. Gradient: drag from the near end of the object to its far end. Right-click always removes. Shape: draw a mask that holds on every frame, for a locked-off shot -- nothing to track (pick Points, Rectangle or Ellipse beside the tool).",
   "layers": "Each layer is one selection -- one or more objects -- and the depth edit applied inside it. Layers apply bottom to top, so a lower layer's edit is what the one above it sees.",

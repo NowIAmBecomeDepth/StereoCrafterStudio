@@ -539,8 +539,8 @@ Item {
             readonly property real dh: dw / aspect
             // Zoom (user, 2026-10-13: "the same zooming function splatting and merging use"):
             // the wheel ~12% a notch about the point under the pointer, a double-click in the
-            // 3D view 50% closer (zoomed in: back to Fit), a drag with the middle button -- or
-            // the left one in the 3D view, which takes no clicks -- pans. 1 = Fit; the
+            // 3D view's Right Eye + Holes 50% closer (zoomed in: back to Fit), a drag with the middle
+            // button -- or the left one there, which takes no clicks -- pans. 1 = Fit; the
             // picture's own pixels, nothing re-rendered.
             property real zoom: 1
             readonly property real maxZoom: 8
@@ -781,12 +781,15 @@ Item {
                 objectName: "dePictureMouse"
                 anchors.fill: parent
                 enabled: !!page.s.hasClip
-                // no SAM clicks in the 3D view: its picture is shifted, not the map's
                 readonly property bool view3d: page.s.view === "3D"
+                // the 3D view edits like the others (user, 2026-10-25): its Anaglyph and Glasses-Free
+                // pictures hold the left eye where the frame is, the masks drawn on it alone -- only
+                // Right Eye + Holes, a shifted picture, is to look at: there the left button pans
+                readonly property bool look3d: view3d && page.de.viewOptions.warpMode === "holes"
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 preventStealing: true           // a Box drag is never taken for a page scroll
                 hoverEnabled: page.s.tool === "Shape"     // the polygon's line follows the pointer
-                cursorShape: panning ? Qt.ClosedHandCursor : view3d ? (picture.zoom > 1.001 ? Qt.OpenHandCursor : Qt.ArrowCursor)
+                cursorShape: panning ? Qt.ClosedHandCursor : look3d ? (picture.zoom > 1.001 ? Qt.OpenHandCursor : Qt.ArrowCursor)
                              : (edgeDrag || hoverEdge) ? ((edgeDrag || hoverEdge).axis === "x" ? Qt.SizeHorCursor : Qt.SizeVerCursor)
                              : Qt.CrossCursor
                 // dragging one edge of a shape (user, 2026-10-25): an upright edge sideways, a flat one up or
@@ -871,10 +874,10 @@ Item {
                     shapeCanvas.dragRect = [inside.x, inside.y, inside.x, inside.y]
                 }
                 onPressed: (m) => {
-                    if (m.button === Qt.MiddleButton || (view3d && m.button === Qt.LeftButton)) {
+                    if (m.button === Qt.MiddleButton || (look3d && m.button === Qt.LeftButton)) {
                         panning = true; panFrom = Qt.point(m.x, m.y); return
                     }
-                    if (view3d) return
+                    if (look3d) return
                     const r = rel(m.x, m.y)
                     if (page.s.tool === "Shape") { shapePress(m, r); return }
                     const more = (m.modifiers & (Qt.ShiftModifier | Qt.ControlModifier)) !== 0
@@ -895,7 +898,7 @@ Item {
                     page.de.click(r.x, r.y, (m.modifiers & Qt.ControlModifier) !== 0)
                 }
                 onDoubleClicked: (m) => {
-                    if (view3d && m.button === Qt.LeftButton) { picture.toggleAt(m.x, m.y); return }
+                    if (look3d && m.button === Qt.LeftButton) { picture.toggleAt(m.x, m.y); return }
                     // a double-click closes the polygon: its second press added the same point again
                     if (page.s.tool === "Shape" && page.shapeDraft.length >= 4) {
                         page.shapeDraft = page.shapeDraft.slice(0, -1); page.closeShape()

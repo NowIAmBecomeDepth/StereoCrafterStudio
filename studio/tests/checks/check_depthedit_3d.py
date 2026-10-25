@@ -140,6 +140,72 @@ d_holes = float(np.abs(arr(img_holes) - arr(img_edit)).mean()) if ok and img_hol
 check("Right Eye + Holes differs from the anaglyph", ok and d_holes > 1.0, f"mean |diff| {d_holes:.2f}")
 de.setViewOption("warpMode", "anaglyph"); pump(0.2)
 
+# Editing in the 3D view, the masks on the LEFT eye only (user, 2026-10-25: "you can see the shapes and
+# masks tracked on the left eye" -- "or even better have it only show in the left eye")
+got = {}
+def sbs(overlay):
+    got.clear()
+    codes = depth_io.from_unit(eng._edited_unit(FRAME), eng.info)
+    pv.render_external(rgb_path, FRAME, codes, "Side-by-Side", False, lambda img, err: got.update(img=img, err=err),
+                       depth=depth_path, left_overlay=overlay)
+    until(lambda: "img" in got, 90)
+    return got.get("img")
+plain = sbs(None)
+colour = np.zeros((320, 512, 3), np.float32); colour[..., 0] = 1.0
+alpha = np.zeros((320, 512), np.float32); alpha[100:220, 50:200] = 1.0
+red = sbs((colour, alpha))
+if plain is not None and red is not None and plain.width() == red.width():
+    P, R_ = arr(plain), arr(red)
+    half = P.shape[1] // 2
+    hh, hw = P.shape[0], half
+    box = (slice(int(0.35 * hh), int(0.6 * hh)), slice(int(0.15 * hw), int(0.35 * hw)))
+    l_box = R_[:, :half][box]
+    d_left = float(np.abs(R_[:, :half] - P[:, :half]).mean())
+    d_right = float(np.abs(R_[:, half:] - P[:, half:]).mean())
+else:
+    l_box, d_left, d_right = None, 0.0, 999.0
+check("Splatting's render: an overlay given for the left eye lands there, red where it was laid",
+      l_box is not None and d_left > 2.0 and float(l_box[..., 0].mean()) > 200 and float(l_box[..., 1].mean()) < 40,
+      f"left mean |diff| {d_left:.2f}")
+check("...the right eye untouched (made from the clean frame)", d_right < 0.5, f"right mean |diff| {d_right:.2f}")
+
+eng.overlay_var.set(True); pump(0.2)
+ov = de._left_overlay(FRAME)
+inside = ov is not None and float(ov[1][int(0.5 * ov[1].shape[0]), int(0.47 * ov[1].shape[1])]) > 0.1
+outside = ov is not None and float(ov[1][int(0.9 * ov[1].shape[0]), int(0.05 * ov[1].shape[1])]) < 0.01
+check("the editor's left-eye overlay: the layer's mask, nothing outside it", inside and outside,
+      None if ov is None else (ov[1].shape, float(ov[1].max())))
+ok, img_ov = view3d()
+eng.overlay_var.set(False); pump(0.2)
+ok2, img_no = view3d()
+d_ov = float(np.abs(arr(img_ov) - arr(img_no)).mean()) if ok and ok2 and img_ov is not None and img_no is not None else 0.0
+check("...the 3D view shows the masks with the overlay on, not with it off", d_ov > 0.2, f"mean |diff| {d_ov:.2f}")
+eng.overlay_var.set(True); pump(0.2)
+
+page = find(extra, lambda c: c.objectName() == "depthEditPage")
+shown = find(find(page, lambda c: c.objectName() == "dePicture"), lambda c: c.objectName() == "deImage").parentItem()
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtTest import QTest
+def mdrag(a, b):
+    pa = shown.mapToScene(QPointF(a[0] * shown.width(), a[1] * shown.height()))
+    pb = shown.mapToScene(QPointF(b[0] * shown.width(), b[1] * shown.height()))
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, QPoint(round(pa.x()), round(pa.y()))); pump(0.1)
+    for k in range(1, 6):
+        q = pa + (pb - pa) * (k / 5)
+        QTest.mouseMove(win, QPoint(round(q.x()), round(q.y()))); pump(0.05)
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, QPoint(round(pb.x()), round(pb.y()))); pump(0.5)
+n_shapes = lambda: sum(len(ly.shapes or []) for ly in eng.project.layers)  # noqa: E731
+de.setVar("tool", "Shape"); de.setShapeKind("Rectangle"); pump(0.4)
+before = n_shapes()
+mdrag((0.6, 0.2), (0.85, 0.5))
+check("in the 3D view (Anaglyph) a Rectangle drag draws a shape", n_shapes() == before + 1, f"{before} -> {n_shapes()}")
+until(lambda: not S().get("busyJob"), 30); ok, _ = view3d()
+de.setViewOption("warpMode", "holes"); pump(0.3); ok, _ = view3d()
+before = n_shapes()
+mdrag((0.1, 0.6), (0.3, 0.9))
+check("...Right Eye + Holes (no left eye shown) takes no edit: the drag pans", n_shapes() == before, f"{before} -> {n_shapes()}")
+de.setViewOption("warpMode", "anaglyph"); de.setVar("tool", "Add"); pump(0.3)
+
 # Glasses-Free 3D (user, 2026-10-11; studio/sr_display.py): offered only with an SR display
 # (faked: offscreen never touches the SR service); the edited pair to the weaver at full size,
 # the editor showing its left eye

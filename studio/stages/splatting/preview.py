@@ -95,6 +95,32 @@ def same_clip(entries, path: str, key: str = "source_video") -> str:
     return str(path)
 
 
+def _left_overlay_hook(overlay, flip: bool):
+    """The Depth Map Editor's masks over the 3D view's LEFT eye (render_external; user, 2026-10-25):
+    `overlay` = (colour HxWx3, strength HxW), float 0..1 at the frame's size -- fitted to the eye the
+    preview made, mirrored when the clip is. None: no hook."""
+    if overlay is None:
+        return None
+    colour, alpha = overlay
+
+    def hook(left):
+        import numpy as np
+        import torch
+        import torch.nn.functional as F
+        if left is None or left.dim() != 4:
+            return left
+        h, w = left.shape[-2:]
+        c = torch.from_numpy(np.ascontiguousarray(colour, np.float32)).to(left.device, left.dtype).permute(2, 0, 1)[None]
+        a = torch.from_numpy(np.ascontiguousarray(alpha, np.float32)).to(left.device, left.dtype)[None, None]
+        if tuple(c.shape[-2:]) != (h, w):
+            c = F.interpolate(c, size=(h, w), mode="bilinear", align_corners=False)
+            a = F.interpolate(a, size=(h, w), mode="bilinear", align_corners=False)
+        if flip:
+            c, a = torch.flip(c, dims=[3]), torch.flip(a, dims=[3])
+        return left * (1.0 - a) + c * a
+    return hook
+
+
 def _to_qimage(pil_image) -> Optional[QImage]:
     if pil_image is None:
         return None
@@ -441,7 +467,8 @@ class SplattingPreview(QObject):
         track.set_keyframe(self._frame, entry.get("type", "static"), values)    # the copy, now: no jump back
         self._kf_rev += 1
         self._drop_play_cache()
-        self._submit("kf_value", (self._frame, var, float(value)))
+        self._kf_sent = getattr(self, "_kf_sent", 0) + 1
+        self._submit("kf_value", (self._frame, var, float(value), self._kf_sent))
         self.changed.emit()
         return True
 
@@ -712,7 +739,7 @@ class SplattingPreview(QObject):
     # ---- the Depth Map Editor's 3D view (user, 2026-09-30) -------------------------------
 
     def render_external(self, video: str, frame: int, codes, mode: str, holes: bool, reply,
-                        stage: str = "depthedit", depth: str = "") -> None:
+                        stage: str = "depthedit", depth: str = "", left_overlay=None) -> None:
         """This preview's own render of ``video`` at ``frame`` -- its settings,
         sidecar, keyframes and effects, exactly as Splatting would show it --
         with ``codes`` (the edited map's 10-bit Y codes, HxW, what the editor's
@@ -727,13 +754,18 @@ class SplattingPreview(QObject):
         on its own, with ``depth`` (the editor's map) as its map: Splatting's settings
         as they are on its page, or the clip's sidecar beside the map if it has one.
         Splatting goes back to its own clips, at the clip and frame it was on, when it
-        is shown again (refreshIfStale)."""
+        is shown again (refreshIfStale).
+
+        ``left_overlay``: (colour HxWx3, strength HxW) float32 0..1, frame-sized -- the editor's masks
+        and shapes, laid over the LEFT eye only, after the warp (user, 2026-10-25: "have it only show
+        in the left eye"); the right eye is made from the clean frame."""
         with self._cv:
             self._jobs = deque(j for j in self._jobs if not (j is not None and j[0] == "ext_depth"))
         self._ext_stale = True
         self._submit("ext_depth", {"video": str(video), "frame": int(frame), "codes": codes,
                                    "mode": str(mode), "holes": bool(holes), "reply": reply,
-                                   "stage": str(stage), "depth": str(depth or "")})
+                                   "stage": str(stage), "depth": str(depth or ""),
+                                   "left_overlay": left_overlay})
 
     @Slot()
     def refreshIfStale(self) -> None:
@@ -809,9 +841,11 @@ class SplattingPreview(QObject):
             pv._depth_bit_depth = 10
             eng.preview_source_var.set(arg["mode"])
             eng.mask_highlight_var.set(bool(arg["holes"]))
+            eng.left_eye_hook = _left_overlay_hook(arg.get("left_overlay"), bool(flip))
             try:
                 img = pv.processing_callback({"source_video": src, "depth_map": dep}, pv.current_params)
             finally:
+                eng.left_eye_hook = None
                 pv._depth_bit_depth = saved[0]
                 eng.preview_source_var.set(saved[1])
                 eng.mask_highlight_var.set(saved[2])
@@ -908,6 +942,19 @@ class SplattingPreview(QObject):
                 for job in self._jobs:
                     if (job is not None and job[0] == "editor" and job[1].get("ed") == arg.get("ed")
                             and job[1].get("op") == arg.get("op") and same_attr(job)):
+                        merged = dict(job[2])
+                        merged.update(changes)
+                        changes = merged
+                    else:
+                        kept.append(job)
+                self._jobs = kept
+            # A keyed dial turned (setKeyValue): only the newest value for a key and setting is worth
+            # applying -- a job a notch redrew the frame and saved the sidecar each, the queue crawled
+            # behind the hand, and every older result pulled the dial back (user, 2026-10-25)
+            if kind == "kf_value":
+                kept = deque()
+                for job in self._jobs:
+                    if job is not None and job[0] == "kf_value" and tuple(job[1][:2]) == tuple(arg[:2]):
                         merged = dict(job[2])
                         merged.update(changes)
                         changes = merged
@@ -1090,7 +1137,7 @@ class SplattingPreview(QObject):
         elif kind == "kf_clear":
             eng._kf_clear_current()
         elif kind == "kf_value":
-            frame, var, value = arg
+            frame, var, value, seq = arg
             entry = eng.keyframe_track.frame_at(frame)
             if entry is not None:
                 values = dict(entry.get("values") or {})
@@ -1099,6 +1146,7 @@ class SplattingPreview(QObject):
                 eng._kf_autosave()
                 if pv.source_readers:
                     pv.update_preview()
+            self._kf_done = max(getattr(self, "_kf_done", 0), int(seq))
         elif kind == "kf_curve":
             frame, curve = arg
             if eng.keyframe_track.set_curve(frame, curve):
@@ -1181,6 +1229,7 @@ class SplattingPreview(QObject):
             "keyframes": [{"frame": int(f), "kind": str(k), "curve": eng.keyframe_track.curve_at(f)}
                           for f, k, _v in eng.keyframe_track.items_sorted()],
             "kf_list": eng.keyframe_track.to_list(),
+            "kf_done": getattr(self, "_kf_done", 0),     # the last keyed dial turn applied
             "depth": (pv.video_list[pv.current_video_index].get("depth_map") or ""
                       if 0 <= pv.current_video_index < len(pv.video_list) else ""),
         }
@@ -1472,7 +1521,9 @@ class SplattingPreview(QObject):
         self._fb_clip = bool(result.get("fb_clip"))
         self._maps = result.get("maps") or []
         self._keyframes = result.get("keyframes") or []
-        if "kf_list" in result:
+        if "kf_list" in result and int(result.get("kf_done", 0)) >= getattr(self, "_kf_sent", 0):
+            # (only a copy with every keyed dial turn in it: an older one -- even one handled after the
+            # worker finished the newest turn -- would pull the dial back; user, 2026-10-25)
             from core.common.keyframes import KeyframeTrack
             self._kf_track = KeyframeTrack.from_dict(result["kf_list"])
             self._kf_rev += 1
