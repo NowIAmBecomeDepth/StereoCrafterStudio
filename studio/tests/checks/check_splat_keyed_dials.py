@@ -188,6 +188,22 @@ check("the keyed dial turned by hand: its keyframe takes it", abs(pv.property("k
 check("...and the clip's own setting is left alone", abs(float(sp.settings.value("max_disp")) - 60) < 1e-6,
       sp.settings.value("max_disp"))
 
+# the picture moves with a keyed dial in the anaglyph too (user, 2026-10-25: "the live preview still does
+# not update when i move any dials" -- the preview read Disparity / Convergence / Gamma off the dials' base
+# values, over this frame's keyframed ones)
+import hashlib as _hl
+def _pic():
+    img = pv.provider._images.get("frame")
+    return None if img is None else _hl.md5(bytes(img.constBits())[:img.sizeInBytes()]).hexdigest()
+sp._set("preview_source", "Dubois Anaglyph"); settle()
+pv.seek(20); settle()
+for _key, _val in (("max_disp", 20.0), ("zero_disparity_anchor", 0.3), ("depth_gamma", 1.6)):
+    _p0 = _pic()
+    QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", _key), Q_ARG("QVariant", _val)); settle()
+    check(f"Dubois Anaglyph, on a keyframe: turning {_key} redraws the picture with it",
+          _p0 is not None and _pic() != _p0 and abs(pv.property("keyed")[_key] - _val) < 1e-6)
+sp._set("preview_source", "Splat Result"); settle()
+
 # Full Preview's floating dials (user, 2026-10-14): Convergence, Disparity and Gamma under the
 # frame slider -- the page's own dials, keyframes and all
 from PySide6.QtGui import QWindow

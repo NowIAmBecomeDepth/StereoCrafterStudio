@@ -4025,10 +4025,10 @@ class SplattingPreviewEngine:
             current_source_dict = self.previewer.video_list[self.previewer.current_video_index]
             depth_map_path = current_source_dict.get("depth_map")
 
-        gui_config = {
-            "convergence_plane": float(self.zero_disparity_anchor_var.get()),
-            "max_disparity": float(self.max_disp_var.get()),
-            "gamma": float(self.depth_gamma_var.get()),
+        gui_config = {  # v2: the settings handed in first -- this frame's keyframes are in them
+            "convergence_plane": float(params.get("convergence_point", self.zero_disparity_anchor_var.get())),
+            "max_disparity": float(params.get("max_disp", self.max_disp_var.get())),
+            "gamma": float(params.get("depth_gamma", self.depth_gamma_var.get())),
         }
 
         merged_config = gui_config.copy()
