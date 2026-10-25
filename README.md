@@ -152,7 +152,7 @@ Studio checks the driver and FFmpeg when it starts and tells you what's missing.
 
 ## Installing
 
-1. Put `_install/StereoCrafter_1click_Installer.bat` in the folder you want Studio in, and run it. It installs
+1. Put `_install/StereoCrafter_Studio_Installer.bat` in the folder you want Studio in, and run it. It installs
    [uv](https://docs.astral.sh/uv/), Python 3.13 and every package.
 2. Open Studio and get the models in **Settings > Studio > Models**: press Download on the ones your stages need
    (DepthCrafter, Stable Video Diffusion and StereoCrafter for the main pipeline, about 7.5 GB). Stable Video
