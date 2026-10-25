@@ -98,8 +98,11 @@ _THEME_OVERRIDES = {
     # True Black truly black (user, 2026-09-27): the window and the sections
     # #000; the sections' grey outline (section_border) sets them apart, and
     # the bars' empty track lifts a little so it still shows.
+    # Its clip lists' bars (user, 2026-10-24): filled or not they read the same grey -- the grey is
+    # their empty track there, the fill white
     "True Black": {"panel_bar": "#4a4a4a", "tab_accent": "#a6a6a6",
-                   "bg": "#000000", "panel_bg": "#000000", "panel_trough": "#1a1a1a"},
+                   "bg": "#000000", "panel_bg": "#000000", "panel_trough": "#1a1a1a",
+                   "list_bar": "#ffffff", "list_trough": "#4a4a4a"},
 }
 
 
@@ -139,6 +142,9 @@ def palette_for_qml(name: str, p: dict) -> dict:
         "trough": p.get("panel_trough", "#262b31"),
         "accent": accent,
         "accentInk": p.get("tab_accent", accent),
+        # the clip lists' row bars (Upcoming Jobs): the accent over the trough, unless the theme says
+        "listFill": p.get("list_bar", accent),
+        "listTrack": p.get("list_trough", p.get("panel_trough", "#262b31")),
         "accentFg": "#101010" if _luminance(accent) > 0.36 else "#ffffff",
         # v1's section outline colour (ctk_theme: ctk_outline, else the
         # palette's section_border, else its bar) -- View > Show Section Outlines.

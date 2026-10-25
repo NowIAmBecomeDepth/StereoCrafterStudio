@@ -94,6 +94,9 @@ Item {
     property color field: p.field
     property color trough: p.trough
     property color accent: p.accent
+    // the clip lists' row bars (Upcoming Jobs): fill and empty track -- True Black's own
+    property color listFill: p.listFill || p.accent
+    property color listTrack: p.listTrack || p.trough
     property color accentInk: p.accentInk
     property color accentFg: p.accentFg
     // View > Show Section Outlines (v1): a 1px line round every section in

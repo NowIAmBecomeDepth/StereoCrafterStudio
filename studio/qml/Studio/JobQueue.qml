@@ -699,6 +699,8 @@ Section {
                     Layout.preferredWidth: queue.barWidth
                     implicitHeight: 6
                     value: queue.progressOf(row.modelData)
+                    tint: Theme.listFill
+                    track: Theme.listTrack
                     shimmer: false
                 }
                 // one bar per pass, its letter before it; a pass the job
@@ -732,6 +734,8 @@ Section {
                                 Layout.preferredWidth: queue.barWidth
                                 implicitHeight: 5
                                 value: queue.passProgressOf(row.modelData, passRow.index, frames.n)
+                                tint: Theme.listFill
+                                track: Theme.listTrack
                                 shimmer: false
                             }
                         }

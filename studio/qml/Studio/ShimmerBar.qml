@@ -7,6 +7,7 @@ Item {
     id: root
     property real value: 0       // 0..1
     property color tint: Theme.accent
+    property color track: Theme.trough   // the empty part
     property bool shimmer: value > 0 && value < 1
 
     implicitWidth: 300
@@ -18,7 +19,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: height / 2
-        color: Theme.trough
+        color: root.track
     }
     Rectangle {
         id: fill
