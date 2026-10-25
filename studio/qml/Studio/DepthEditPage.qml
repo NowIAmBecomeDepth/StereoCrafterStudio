@@ -724,7 +724,9 @@ Item {
                 visible: shown.visible && page.s.tool === "Shape"
                 property point hover: Qt.point(-1, -1)
                 property var dragRect: null          // [ax, ay, bx, by] frame-relative, or null
+                property var edgePreview: null       // a shape with one edge being dragged: its corners, or null
                 readonly property string key: JSON.stringify(page.shapeDraft) + JSON.stringify(dragRect)
+                                              + JSON.stringify(edgePreview)
                 onKeyChanged: requestPaint()
                 onHoverChanged: if (page.shapeDraft.length) requestPaint()
                 onWidthChanged: requestPaint()
@@ -751,6 +753,12 @@ Item {
                             ctx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay))
                         }
                         ctx.stroke()
+                    }
+                    if (edgePreview && edgePreview.length >= 3) {          // the shape as the edge drag leaves it
+                        ctx.beginPath()
+                        const [ex, ey] = px(edgePreview[0]); ctx.moveTo(ex, ey)
+                        for (let k = 1; k < edgePreview.length; ++k) { const [x, y] = px(edgePreview[k]); ctx.lineTo(x, y) }
+                        ctx.closePath(); ctx.strokeStyle = "#ffd84a"; ctx.stroke()
                     }
                     const pts = page.shapeDraft
                     if (!pts.length) return
@@ -779,7 +787,41 @@ Item {
                 preventStealing: true           // a Box drag is never taken for a page scroll
                 hoverEnabled: page.s.tool === "Shape"     // the polygon's line follows the pointer
                 cursorShape: panning ? Qt.ClosedHandCursor : view3d ? (picture.zoom > 1.001 ? Qt.OpenHandCursor : Qt.ArrowCursor)
-                                                                    : Qt.CrossCursor
+                             : (edgeDrag || hoverEdge) ? ((edgeDrag || hoverEdge).axis === "x" ? Qt.SizeHorCursor : Qt.SizeVerCursor)
+                             : Qt.CrossCursor
+                // dragging one edge of a shape (user, 2026-10-25): an upright edge sideways, a flat one up or
+                // down -- that side stretches, nothing else moves. Points and Rectangle shapes of the selected
+                // layer; a press on an edge (no shape half drawn, no Ctrl) takes it before a new shape.
+                property var edgeDrag: null          // {shape, edge, axis} while dragging
+                property var hoverEdge: null         // the edge under the pointer, for the cursor
+                function edgeAt(mx, my) {
+                    if (page.s.tool !== "Shape" || page.shapeDraft.length) return null
+                    const list = page.s.shapes || []
+                    let best = null, bestD = 7 * 7
+                    for (let i = list.length - 1; i >= 0; --i) {           // the shape drawn last is on top
+                        const es = list[i].edges || []
+                        for (let k = 0; k < es.length; ++k) {
+                            const ax = shown.x + es[k][0][0] * shown.width, ay = shown.y + es[k][0][1] * shown.height
+                            const bx = shown.x + es[k][1][0] * shown.width, by = shown.y + es[k][1][1] * shown.height
+                            const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy
+                            const t = len2 > 0 ? Math.max(0, Math.min(1, ((mx - ax) * dx + (my - ay) * dy) / len2)) : 0
+                            const qx = ax + t * dx - mx, qy = ay + t * dy - my, d = qx * qx + qy * qy
+                            if (d < bestD) { bestD = d; best = { shape: i, edge: k, axis: Math.abs(dx) < Math.abs(dy) ? "x" : "y" } }
+                        }
+                    }
+                    return best
+                }
+                // the dragged shape's corners as the edge moved `delta` (frame-relative) leaves them
+                function edgeMoved(e, delta) {
+                    const es = (page.s.shapes || [])[e.shape].edges
+                    const pts = es.map((s) => [s[0][0], s[0][1]])
+                    const i = e.axis === "x" ? 0 : 1
+                    for (const k of [e.edge, (e.edge + 1) % pts.length]) pts[k][i] = Math.min(Math.max(pts[k][i] + delta, 0), 1)
+                    return pts
+                }
+                function edgeDelta(m) {
+                    return edgeDrag.axis === "x" ? (m.x - start.x) / shown.width : (m.y - start.y) / shown.height
+                }
                 property point start
                 property bool dragging: false
                 property bool panning: false
@@ -807,6 +849,10 @@ Item {
                 property bool shapeDragging: false
                 function shapePress(m, r) {
                     const inside = Qt.point(Math.min(Math.max(r.x, 0), 1), Math.min(Math.max(r.y, 0), 1))
+                    if (m.button === Qt.LeftButton && !(m.modifiers & Qt.ControlModifier)) {
+                        const e = edgeAt(m.x, m.y)
+                        if (e) { edgeDrag = e; start = Qt.point(m.x, m.y); shapeCanvas.edgePreview = edgeMoved(e, 0); return }
+                    }
                     if (page.s.shapeKind === "Points" || !page.s.shapeKind) {
                         if (m.button === Qt.RightButton) { page.shapeDraft = page.shapeDraft.slice(0, -1); return }
                         if (m.button !== Qt.LeftButton) return
@@ -858,6 +904,8 @@ Item {
                 onPositionChanged: (m) => {
                     if (panning) { picture.panBy(m.x - panFrom.x, m.y - panFrom.y); panFrom = Qt.point(m.x, m.y); return }
                     if (page.s.tool === "Shape") {
+                        if (edgeDrag) { shapeCanvas.edgePreview = edgeMoved(edgeDrag, edgeDelta(m)); return }
+                        if (!pressed) hoverEdge = edgeAt(m.x, m.y)
                         shapeCanvas.hover = Qt.point(m.x, m.y)
                         if (shapeDragging) {
                             const a = rel(start.x, start.y), b = rel(m.x, m.y)
@@ -874,6 +922,13 @@ Item {
                 }
                 onReleased: (m) => {
                     if (panning) { panning = false; return }
+                    if (edgeDrag) {
+                        const e = edgeDrag, d = edgeDelta(m)
+                        edgeDrag = null; shapeCanvas.edgePreview = null
+                        if (Math.abs(e.axis === "x" ? m.x - start.x : m.y - start.y) >= 3)
+                            page.de.moveShapeEdge(e.shape, e.edge, e.axis, d)
+                        return
+                    }
                     if (shapeDragging) {
                         shapeDragging = false
                         const d = shapeCanvas.dragRect
@@ -892,8 +947,9 @@ Item {
                     page.de.drag(a.x, a.y, b.x, b.y)
                 }
                 onCanceled: { panning = false; dragging = false; dragBox.visible = false; dragLine.visible = false
-                              shapeDragging = false; shapeCanvas.dragRect = null }
-                onExited: shapeCanvas.hover = Qt.point(-1, -1)
+                              shapeDragging = false; shapeCanvas.dragRect = null
+                              edgeDrag = null; shapeCanvas.edgePreview = null }
+                onExited: { shapeCanvas.hover = Qt.point(-1, -1); hoverEdge = null }
             }
             Column {
                 anchors.centerIn: parent

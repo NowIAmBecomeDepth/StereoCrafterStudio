@@ -24,6 +24,36 @@ from core.depthedit.project import Project, masks_path_for  # noqa: E402
 TRI = {"kind": "Points", "pts": [[0.1, 0.1], [0.5, 0.1], [0.1, 0.5]]}
 
 
+class MoveEdgeTest(unittest.TestCase):
+    """One edge dragged (user, 2026-10-25): "drag a line and it extends only that one line of a shape.
+    vertical lines can be dragged horizontally and horizontal lines dragged vertically"."""
+
+    L = {"kind": "Points", "pts": [[.1, .1], [.5, .1], [.5, .2], [.2, .2], [.2, .6], [.1, .6]]}   # an L
+    BOX = {"kind": "Rectangle", "pts": [[.6, .5], [.2, .1]]}
+
+    def test_an_l_arm_extends_and_nothing_else_moves(self):
+        out = SH.move_edge(self.L, 1, "x", .2)                      # the top arm's end, out to the right
+        self.assertEqual(out["pts"], [[.1, .1], [.7, .1], [.7, .2], [.2, .2], [.2, .6], [.1, .6]])
+        out = SH.move_edge(self.L, 4, "y", .1)                      # the upright arm's foot, down
+        self.assertEqual(out["pts"][4:], [[.2, .7], [.1, .7]])
+        self.assertEqual(out["pts"][:4], self.L["pts"][:4])
+
+    def test_a_rectangle_moves_one_side(self):
+        self.assertEqual(SH.edges(self.BOX)[0], [[.2, .1], [.6, .1]], "top first, whatever corners it was drawn by")
+        self.assertEqual(SH.move_edge(self.BOX, 1, "x", .1)["pts"], [[.2, .1], [.7, .5]])        # right, out
+        self.assertEqual(SH.move_edge(self.BOX, 0, "y", -.05)["pts"], [[.2, .05], [.6, .5]])     # top, up
+
+    def test_an_edge_never_slides_along_itself_and_stays_in_the_frame(self):
+        self.assertEqual(SH.move_edge(self.BOX, 0, "x", .3)["pts"], [[.2, .1], [.6, .5]])
+        self.assertEqual(SH.move_edge(self.BOX, 1, "x", 5)["pts"], [[.2, .1], [1.0, .5]])
+        self.assertEqual(SH.move_edge(self.L, 0, "y", -1)["pts"][:2], [[.1, 0.0], [.5, 0.0]])
+
+    def test_ellipses_have_no_edges(self):
+        ell = {"kind": "Ellipse", "pts": [[.1, .1], [.4, .4]]}
+        self.assertEqual(SH.edges(ell), [])
+        self.assertEqual(SH.move_edge(ell, 0, "x", .1)["pts"], ell["pts"])
+
+
 class DrawTest(unittest.TestCase):
     def test_a_point_connector_fills_its_outline(self):
         m = SH.draw([TRI], 100, 200)

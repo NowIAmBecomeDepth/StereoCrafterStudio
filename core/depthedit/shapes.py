@@ -83,3 +83,49 @@ def fill(layer, frames: int) -> None:
     layer.masks_hi = None
     layer.shape_frames = max(0, int(frames))
     layer.tracked = bool(mask.any())
+
+
+# ---- moving one edge (user, 2026-10-25: "drag a line and it extends only that one line of a shape.
+# vertical lines can be dragged horizontally and horizontal lines dragged vertically") ------------------
+
+#: The kinds whose edges can be dragged: a polygon's sides, a rectangle's four
+EDGE_KINDS = ("Points", "Rectangle")
+
+
+def edges(shape: Dict[str, Any]) -> List[List[List[float]]]:
+    """The shape's edges as [[x, y], [x, y]] pairs (frame-relative), in its own order: a polygon's sides
+    from each point to the next (the last back to the first); a rectangle's top, right, bottom, left.
+    None for other kinds."""
+    kind, pts = shape.get("kind"), [[float(x), float(y)] for x, y in shape.get("pts", [])]
+    if kind == "Points" and len(pts) >= 3:
+        return [[pts[k], pts[(k + 1) % len(pts)]] for k in range(len(pts))]
+    if kind == "Rectangle" and len(pts) == 2:
+        x0, x1 = sorted((pts[0][0], pts[1][0]))
+        y0, y1 = sorted((pts[0][1], pts[1][1]))
+        return [[[x0, y0], [x1, y0]], [[x1, y0], [x1, y1]], [[x1, y1], [x0, y1]], [[x0, y1], [x0, y0]]]
+    return []
+
+
+def move_edge(shape: Dict[str, Any], edge: int, axis: str, delta: float) -> Dict[str, Any]:
+    """The shape with edge `edge` moved `delta` (frame-relative) along `axis` ("x": an upright edge moved
+    sideways; "y": a flat one moved up or down) -- both its ends, nothing else. A rectangle keeps its
+    two corners; an edge dragged past the opposite one turns the rectangle over. Clamped to the frame."""
+    out = {"kind": shape.get("kind"), "pts": [[float(x), float(y)] for x, y in shape.get("pts", [])],
+           "cut": bool(shape.get("cut", False))}
+    i = 0 if axis == "x" else 1
+    sides = edges(out)
+    if not sides or not 0 <= int(edge) < len(sides):
+        return out
+    edge = int(edge)
+    if out["kind"] == "Points":
+        n = len(out["pts"])
+        for k in (edge, (edge + 1) % n):
+            out["pts"][k][i] = min(max(out["pts"][k][i] + float(delta), 0.0), 1.0)
+        return out
+    (x0, y0), (_, _), (x1, y1), _ = (sides[0][0], sides[1][0], sides[2][0], sides[3][0])
+    box = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+    side = {0: "y0", 1: "x1", 2: "y1", 3: "x0"}[edge]
+    if side[0] == ("x" if i == 0 else "y"):          # the edge moves across itself, never along
+        box[side] = min(max(box[side] + float(delta), 0.0), 1.0)
+    out["pts"] = [[box["x0"], box["y0"]], [box["x1"], box["y1"]]]
+    return out

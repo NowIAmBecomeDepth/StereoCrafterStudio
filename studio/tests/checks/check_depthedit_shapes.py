@@ -179,6 +179,32 @@ de.undo(); pump(0.4)
 layer = eng.project.layers[eng.selected]
 check("...and Undo brings them back", len(layer.shapes) == 3 and layer.masks.frames() == list(range(N)))
 
+# one edge dragged (user, 2026-10-25: "drag a line and it extends only that one line of a shape. vertical
+# lines can be dragged horizontally and horizontal lines dragged vertically"): Points and Rectangle
+de.setShapeKind("Rectangle"); pump(0.3)
+poly0 = [list(p) for p in layer.shapes[0]["pts"]]          # (.2,.2) (.6,.2) (.6,.7) (.2,.7): edge 1 the right
+n_undo = len(de._history._undo)
+drag((0.6, 0.45), (0.66, 0.40))                           # the right edge, dragged out (and a little up)
+poly = layer.shapes[0]["pts"]
+check("Points: dragging the upright right edge moves just it, sideways -- no new shape",
+      len(layer.shapes) == 3 and all(abs(poly[k][0] - 0.66) < 0.01 for k in (1, 2))
+      and [poly[k][1] for k in (1, 2)] == [poly0[k][1] for k in (1, 2)] and [poly[0], poly[3]] == [poly0[0], poly0[3]],
+      (poly0, poly))
+check("...the mask stretches with it, on every frame", layer.masks.get(N - 1)[int(0.45 * H), int(0.63 * W)]
+      and layer.masks.frames() == list(range(N)))
+check("...one Undo step", len(de._history._undo) == n_undo + 1 and S().get("undoLabel") == "Move shape edge",
+      S().get("undoLabel"))
+rect0 = [list(p) for p in layer.shapes[1]["pts"]]        # (.7,.1) (.95,.4): its top edge at y .1
+drag((0.82, 0.1), (0.86, 0.04))                          # the flat top edge, dragged up (and a little right)
+rect = layer.shapes[1]["pts"]
+check("Rectangle: dragging its flat top edge moves just it, up -- the sides stay",
+      len(layer.shapes) == 3 and abs(min(rect[0][1], rect[1][1]) - 0.04) < 0.01
+      and sorted([rect[0][0], rect[1][0]]) == sorted([rect0[0][0], rect0[1][0]])
+      and max(rect[0][1], rect[1][1]) == max(rect0[0][1], rect0[1][1]), (rect0, rect))
+de.undo(); pump(0.4)
+layer = eng.project.layers[eng.selected]
+check("...Undo puts the edge back", sorted(p[1] for p in layer.shapes[1]["pts"]) == sorted(p[1] for p in rect0))
+
 de.setVar("tool", "Add"); pump(0.3)
 check("another tool: the shape row hidden", not kind_box.isVisible()
       and not find(page, lambda c: c.objectName() == "deShapeRow").isVisible())

@@ -1243,6 +1243,33 @@ class DepthEditController(QObject):
             eng._schedule_preview()
         self._edit("Cut shape" if cut else "Shape", action)
 
+    @Slot(int, int, str, float)
+    def moveShapeEdge(self, index: int, edge: int, axis: str, delta: float) -> None:
+        """One edge of the selected layer's shape `index` moved `delta` (frame-relative) along `axis` --
+        an upright edge sideways ("x"), a flat one up or down ("y"): that side of the shape stretches,
+        nothing else moves (user, 2026-10-25). Points and Rectangle shapes; Undo puts it back."""
+        from core.depthedit import shapes as SH
+        eng = self._engine
+        layer = eng._layer() if eng is not None and eng.codes is not None else None
+        if layer is None or not 0 <= index < len(layer.shapes or []) or axis not in ("x", "y") or not delta:
+            return
+        if eng._job_pending():
+            eng._status("Wait for the current job to finish before moving a shape's edge.")
+            return
+        moved = SH.move_edge(layer.shapes[index], edge, axis, delta)
+        if not SH.valid(moved) or moved["pts"] == layer.shapes[index]["pts"]:
+            return
+
+        def action():
+            shapes = list(layer.shapes)
+            shapes[index] = moved
+            layer.shapes = SH.clean(shapes)
+            SH.fill(layer, eng._num_frames())
+            eng._status(f"{layer.name}: a {moved['kind'].lower()}'s edge moved -- on every frame.")
+            eng._refresh_layer_panel()
+            eng._schedule_preview()
+        self._edit("Move shape edge", action)
+
     @Slot()
     def clearShapes(self) -> None:
         """The selected layer's shapes gone, and its mask with them."""
@@ -1502,6 +1529,10 @@ class DepthEditController(QObject):
             s["hasLayer"] = eng._layer() is not None
             s["shapeKind"] = self._shape_kind
             s["shapeCount"] = len(getattr(eng._layer(), "shapes", None) or []) if eng._layer() is not None else 0
+            # the selected layer's shapes, for dragging one edge (2026-10-25): kind, points, edges
+            from core.depthedit import shapes as _SH
+            s["shapes"] = [{"kind": sh["kind"], "pts": sh["pts"], "edges": _SH.edges(sh)}
+                           for sh in (getattr(eng._layer(), "shapes", None) or [])] if eng._layer() is not None else []
             s["controls"] = self._controls(M, eng)
             layer = eng._layer()
             track = layer.keys if layer is not None else None
