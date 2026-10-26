@@ -70,16 +70,16 @@ def _model(b):
 tabs_bar = next(b for b in bars if "Extra" in _model(b))          # the stage strip (not a page's own)
 from PySide6.QtCore import QObject
 menu = next(m for m in tabs_bar.findChildren(QObject, "tabHoverMenu"))
-labels = find_all(tabs_bar, lambda c: c.metaObject().className().startswith("QQuickText") and c.property("text") in ("EXTRA", "Extra", "DEPTHCRAFTER", "DepthCrafter"))
+labels = find_all(tabs_bar, lambda c: c.metaObject().className().startswith("QQuickText") and c.property("text") in ("EXTRA", "Extra", "DEPTH MAP", "Depth Map", "SPLATTING", "Splatting"))
 tab = {str(t.property("text")).lower(): t.parentItem().parentItem() for t in labels}
-extra_tab, dc_tab = tab["extra"], tab["depthcrafter"]
+extra_tab, dm_tab, sp_tab = tab["extra"], tab["depth map"], tab["splatting"]
 stage = find_all(root, lambda c: c.objectName() == "stage")[0]
 extra = stage.property("pages").property(4).toQObject()
 
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 0), Q_ARG("QVariant", True)); pump(0.5)
 extra.setProperty("tool", 2); pump(0.2)                      # last used: Edge Fill
 
-move(dc_tab); pump(0.4)
+move(sp_tab); pump(0.4)
 check("hovering a tab without a menu opens nothing", not menu.property("opened"))
 move(extra_tab); pump(0.05)
 check("...nor at once on Extra (a pass across the strip)", not menu.property("opened"))
@@ -88,7 +88,8 @@ check("hovering Extra drops down its tools", menu.property("opened"))
 rows = [r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible()]
 names = [str(r.property("modelData")) for r in sorted(rows, key=lambda r: r.mapToScene(QPointF(0, 0)).y())]
 check("...the three, in pipeline order", names == ["Scene Cut", "Depth Map Editor", "Edge Fill"], str(names))
-check("...the one last used ticked", menu.property("ticked") == 2, str(menu.property("ticked")))
+# no tick for the one last used (user, 2026-10-25: "i don't think theres any use case for it")
+check("...none ticked", not [i for r in rows for i in find_all(r, lambda c: c.metaObject().className().startswith("Icon")) if i.isVisible()])
 check("...under the Extra tab", rows and abs(rows[0].mapToScene(QPointF(0, 0)).x() - extra_tab.mapToScene(QPointF(0, 0)).x()) < 20)
 check("hovering alone switches nothing", stage.property("current") == 0, str(stage.property("current")))
 
@@ -109,6 +110,27 @@ move(extra_tab); pump(0.5)
 opened = menu.property("opened")
 QTest.mouseMove(win, QPoint(int(win.width() / 2), int(win.height() * 0.8))); pump(0.6)
 check("leaving the tab and the list closes it", opened and not menu.property("opened"), f"opened first {opened}")
+
+# Depth Map: its two models drop down too (user, 2026-10-25)
+dcpage = stage.property("pages").property(0).toQObject()
+QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 1), Q_ARG("QVariant", True)); pump(0.5)
+QTest.mouseMove(win, QPoint(int(win.width() / 2), int(win.height() * 0.8))); pump(0.5)
+move(dm_tab); pump(0.6)
+rows = [r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible()]
+names = [str(r.property("modelData")) for r in sorted(rows, key=lambda r: r.mapToScene(QPointF(0, 0)).y())]
+check("hovering Depth Map drops down DepthCrafter and VDA", menu.property("opened") and names == ["DepthCrafter", "VDA"], str(names))
+check("...under the Depth Map tab", rows and abs(rows[0].mapToScene(QPointF(0, 0)).x() - dm_tab.mapToScene(QPointF(0, 0)).x()) < 20)
+vda_row = next(r for r in rows if r.property("modelData") == "VDA")
+move(vda_row); pump(0.4); click(vda_row); pump(0.6)
+check("picking VDA opens Depth Map on its VDA tab", stage.property("current") == 0 and dcpage.property("engine") == 1,
+      f"stage {stage.property('current')} engine {dcpage.property('engine')}")
+QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 1), Q_ARG("QVariant", True)); pump(0.5)
+click(dm_tab); pump(0.6)
+check("...and a click on Depth Map opens the tab last used", stage.property("current") == 0 and dcpage.property("engine") == 1)
+move(dm_tab); pump(0.6)
+dc_row = next(r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible() and r.property("modelData") == "DepthCrafter")
+move(dc_row); pump(0.4); click(dc_row); pump(0.6)
+check("...picking DepthCrafter goes back to it", stage.property("current") == 0 and dcpage.property("engine") == 0)
 
 _lj = h0 == (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None); print("last_jobs unchanged:", _lj)
 print("FAILS", len(fails), fails, flush=True)

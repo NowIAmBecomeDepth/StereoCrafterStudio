@@ -229,7 +229,41 @@ Item {
                             }
                         }
                     }
-                    FieldRow { label: "Input Size"; help: page.help("input_size"); VBox { objectName: "vdaInputSize"; key: "input_size" } }
+                    // typed, or picked from the sizes the model takes (user, 2026-10-25: "a dropdown of compatible
+                    // resolution numbers" -- "allow the box to be custom typed too"); a typed size snaps up to a
+                    // multiple of 14 (settings.coerce: 512 -> 518)
+                    FieldRow {
+                        label: "Input Size"
+                        help: page.help("input_size")
+                        RowLayout {
+                            spacing: 6
+                            VBox { objectName: "vdaInputSize"; key: "input_size"; boxWidth: 80 }
+                            AccentButton {
+                                id: sizesBtn
+                                objectName: "vdaInputSizes"
+                                kind: "outline"
+                                iconGlyph: Theme.icon.down
+                                implicitWidth: 34
+                                onClicked: sizesMenu.opened ? sizesMenu.close() : sizesMenu.popup(sizesBtn, 0, sizesBtn.height + 4)
+                                HoverTip { tip: "The sizes the model takes (multiples of 14). 518 is what it's trained at; 392 is iw3's default." }
+                            }
+                            StudioMenu {
+                                id: sizesMenu
+                                objectName: "vdaInputSizesMenu"
+                                Instantiator {
+                                    model: page.vda.choices.input_size
+                                    delegate: MenuItem {
+                                        required property var modelData
+                                        objectName: "vdaInputSizeItem"
+                                        text: String(modelData) + (modelData === 518 ? "  (trained)" : modelData === 392 ? "  (iw3 default)" : "")
+                                        onTriggered: page.st.input_size = modelData
+                                    }
+                                    onObjectAdded: (i, item) => sizesMenu.insertItem(i, item)
+                                    onObjectRemoved: (i, item) => sizesMenu.removeItem(item)
+                                }
+                            }
+                        }
+                    }
                     FieldRow {
                         label: "Mode"
                         help: page.help("run_mode")

@@ -96,6 +96,25 @@ check("...DepthCrafter's tab first", dcpage.property("engine") == 0 and one("vda
 dcpage.setProperty("engine", 1); pump(0.8)
 check("...the second shows VDA's page and hides DepthCrafter's", one("vdaPage") is not None and one("pageContent") is None)
 check("...with its own Input and Output boxes", one("vdaInput") is not None and one("vdaOutput") is not None)
+from studio.stages.vda import settings as VS
+# Input Size (user, 2026-10-25): typed, or picked from the sizes the model takes
+isz = one("vdaInputSize")
+check("Input Size is a box you type in, showing the size set (392)", isz is not None and isz.property("text") in ("392", 392),
+      str(isz.property("text") if isz is not None else None))
+from PySide6.QtCore import QObject
+sm = next(o for o in win.findChildren(QObject) if o.objectName() == "vdaInputSizesMenu")
+QMetaObject.invokeMethod(one("vdaInputSizes"), "clicked"); pump(0.6)
+_items = [o for o in win.findChildren(QObject) if o.objectName() == "vdaInputSizeItem"]
+_texts = [str(o.property("text")) for o in _items]
+check("...and its button lists the sizes the model takes",
+      sm.property("opened") and [int(t.split()[0]) for t in _texts] == VS.INPUT_SIZES, str(_texts))
+_pick = next(o for o in _items if str(o.property("text")).startswith("518"))
+QMetaObject.invokeMethod(_pick, "triggered"); pump(0.5)
+check("...picking 518 sets it", int(vst.value("input_size")) == 518, str(vst.value("input_size")))
+vst.setProperty("input_size", "500"); pump(0.5)
+check("...a size typed that the model can't take snaps up to one it can (500 -> 504)", int(vst.value("input_size")) == 504,
+      str(vst.value("input_size")))
+vst.setProperty("input_size", 392); pump(0.3)
 check("...and the weights it has: no download offered for Small", vda.property("weightsInstalled") is True
       and one("vdaWeightsMissing") is None)
 

@@ -50,9 +50,10 @@ HELP: Dict[str, str] = {
     "model_size": "Small (Apache-2.0) is fastest; Large (CC-BY-NC-4.0, non-commercial) is the most detailed "
                   "and what iw3 runs as VDA_L. Base sits between them (also CC-BY-NC-4.0). Each is its own "
                   "download in Settings > Studio > Models.",
-    "input_size": "The short side the frames are run at, a multiple of 14 (518 is what the model is trained "
-                  "at; 392 is iw3's default). Higher keeps finer detail and costs time and memory. The map is "
-                  "written at about this size; Splatting scales it to its own.",
+    "input_size": "The short side the frames are run at -- the sizes the model can take, all multiples of 14. "
+                  "518 is what the model is trained at; 392 is iw3's default. Higher keeps finer detail and costs "
+                  "time and memory (Large at 518 used about 12 GB on a 1920x800 clip; much above it, a 16 GB card "
+                  "may run out). The map is written at about this size; Splatting scales it to its own.",
     "run_mode": "Online (iw3's): 32-frame windows, each joined to the last, so memory stays the same however "
                 "long the clip is. Offline: Video Depth Anything's own reference loop, which holds the whole "
                 "clip in memory -- short clips, and comparing.",

@@ -17,8 +17,6 @@ Item {
     // A tab with choices under it (user, 2026-10-18: Extra's three tools): {tab index: [names]}. Hovering
     // the tab drops them down; picking one sends menuPicked. A click on the tab itself is as before.
     property var menus: ({})
-    // the choice each menu shows ticked: {tab index: item index}
-    property var menuCurrent: ({})
     signal menuPicked(int index, int item)
     readonly property alias hoverMenu: hoverMenu
     // a backing under the labels over thin glass (Theme.bed); Main's strip
@@ -157,7 +155,6 @@ Item {
         property var tab: null            // a tab delegate: its own `hovered` is read (an Item-typed one hides it)
         property int tabIndex: -1
         readonly property var items: tabIndex >= 0 ? (root.menus[tabIndex] || []) : []
-        readonly property int ticked: tabIndex >= 0 && root.menuCurrent[tabIndex] !== undefined ? root.menuCurrent[tabIndex] : -1
         parent: tab || root
         x: 0
         y: (tab ? tab.height : root.height) - 4
@@ -215,22 +212,15 @@ Item {
                     objectName: "tabMenuItem"
                     required property int index
                     required property string modelData
-                    width: Math.max(200, rowLabel.implicitWidth + 44)
+                    width: Math.max(200, rowLabel.implicitWidth + 28)
                     height: 32
                     radius: 6
                     color: rowHover.hovered ? Theme.alpha(Theme.accent, 0.16) : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.dur(120) } }
-                    Icon {
-                        x: 8
-                        anchors.verticalCenter: parent.verticalCenter
-                        glyph: Theme.icon.check
-                        size: 12
-                        color: Theme.accentInk
-                        visible: rowItem.index === hoverMenu.ticked
-                    }
+                    // no tick for the one last used (user, 2026-10-25: "i don't think theres any use case for it")
                     Text {
                         id: rowLabel
-                        x: 28
+                        x: 14
                         anchors.verticalCenter: parent.verticalCenter
                         text: rowItem.modelData
                         color: Theme.fg

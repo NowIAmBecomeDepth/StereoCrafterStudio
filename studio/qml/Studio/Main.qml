@@ -593,13 +593,14 @@ ApplicationWindow {
             numberedCount: 4          // the four stages; Extra is not a fifth
             bed: false                // stripBed
             onActivated: (i) => stage.show(i, false)
-            // Extra's tools drop down on hover; a click on Extra still opens the one last used (user, 2026-10-18)
-            menus: ({ 4: ["Scene Cut", "Depth Map Editor", "Edge Fill"] })
-            menuCurrent: ({ 4: p4.tool })
+            // Extra's tools drop down on hover; a click on Extra still opens the one last used (user, 2026-10-18).
+            // Depth Map's two models too (user, 2026-10-25), its click the tab last used.
+            menus: ({ 0: ["DepthCrafter", "VDA"], 4: ["Scene Cut", "Depth Map Editor", "Edge Fill"] })
             onMenuPicked: (i, item) => {
-                if (i !== 4) return
-                p4.tool = item
-                stage.show(4, false)
+                if (i === 0) p0.engine = item
+                else if (i === 4) p4.tool = item
+                else return
+                stage.show(i, false)
             }
         }
         // Live VRAM (job_stats.VramMonitor: NVML every 2 s, the whole GPU),

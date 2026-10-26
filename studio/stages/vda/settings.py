@@ -34,9 +34,15 @@ DEFAULTS = _localize(DEFAULTS)
 
 RUN_MODES = ["Online", "Offline"]
 
+#: Input Size's menu (user, 2026-10-25: "a dropdown of compatible resolution numbers"): multiples of 14, the
+#: only sizes the model takes -- every 56 (four patches) from 280, with 392 (iw3's default) and 518 (what the
+#: model is trained at) among them. A size saved before that isn't listed still shows, and is kept.
+INPUT_SIZES = [280, 336, 392, 448, 518, 560, 616, 672, 728, 784, 840, 896, 952, 1008]
+
 
 def choices() -> Dict[str, list]:
-    return {"model_size": list(SIZES), "run_mode": list(RUN_MODES), "normalise_mode": list(NORMALISE_MODES)}
+    return {"model_size": list(SIZES), "run_mode": list(RUN_MODES), "normalise_mode": list(NORMALISE_MODES),
+            "input_size": list(INPUT_SIZES)}
 
 
 def coerce(key: str, value: Any) -> Any:
@@ -50,7 +56,7 @@ def coerce(key: str, value: Any) -> Any:
                 return value.strip().lower() in ("1", "true", "yes", "on")
             return bool(value)
         if isinstance(default, int):
-            number = int(float(value))
+            number = int(float(value))      # (Input Size's menu holds numbers: not checked against it)
             if key == "input_size":
                 return snap_input(number)
             if key == "ema_buffer":

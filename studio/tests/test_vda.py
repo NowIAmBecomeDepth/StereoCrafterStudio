@@ -154,6 +154,15 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(S.coerce("ema_buffer", 0), 1)
         self.assertIs(S.coerce("use_fp16", "false"), False)
 
+    def test_input_size_menu_holds_only_sizes_the_model_takes(self):
+        # user, 2026-10-25: "a dropdown of compatible resolution numbers" (beside the typed box)
+        sizes = S.choices()["input_size"]
+        self.assertTrue(all(v % 14 == 0 and M.snap_input(v) == v for v in sizes), sizes)
+        self.assertIn(392, sizes)                 # iw3's default
+        self.assertIn(S.DEFAULTS["input_size"], sizes)
+        self.assertEqual(sizes, sorted(sizes))
+        self.assertEqual(S.coerce("input_size", "518"), 518)    # the menu's pick, as the page writes it
+
     def test_own_folders_under_depthcrafters_keys(self):
         # the clip list, Send to Splatting and chapters read them as DepthCrafter's
         self.assertIn("input_dir_or_file_var", S.DEFAULTS)
