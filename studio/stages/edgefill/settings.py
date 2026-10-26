@@ -15,6 +15,8 @@ STRINGS: Dict[str, str] = {
     "merged_folder": "",       # the merged clips (Full SBS and / or _L / _R)
     "mask_folder": "",         # their splats (_splatted2*), which say how wide each strip is
     "size": "560 (sharper texture)",
+    # Pre-fill (user, 2026-10-26): what ROSE sees under its mask -- it isn't blanked
+    "prefill": "Blur",
 }
 INTS: Dict[str, int] = {
     "steps": 6,                # ROSE's denoising steps per window
@@ -34,6 +36,9 @@ DEFAULTS: Dict[str, Any] = {**STRINGS, **INTS, **BOOLS}
 #: Native: the clip's own size in tiles, the sharpest and ~2.4x 560's time (user, 2026-10-14)
 SIZES = ["560 (sharper texture)", "784 (straighter lines)", "Native (tiled, sharpest)"]
 TILE_RANGE = (120, 420)
+#: Blur: a wide blur from beside the strip (erase.prefill_frames); Stretched: the last good column
+#: across it, as before 2026-10-26 (it came back as horizontal streaks)
+PREFILLS = ["Blur", "Stretched"]
 
 
 def height(value: Any) -> int:
@@ -59,6 +64,8 @@ def coerce(key: str, value: Any) -> Any:
             return v
         if key == "size":
             return value if value in SIZES else SIZES[0]
+        if key == "prefill":
+            return value if value in PREFILLS else PREFILLS[0]
         if key in STRINGS:
             return str(value)
     except (TypeError, ValueError, OverflowError):      # "inf" (bug sweep 2026-10-14)

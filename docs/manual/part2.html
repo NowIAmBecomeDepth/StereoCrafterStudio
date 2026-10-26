@@ -1394,6 +1394,11 @@
       own size, in overlapping tiles near ROSE's own size faded into each other: the sharpest and closest to the real
       picture (a wall's ridges and rivets, straight lines), about 2&ndash;2.5&times; 560's time. With 784 and Native the
       fill's colour is matched to the picture beside the strip (ROSE drifts a few levels at those sizes).</li>
+    <li><span class="set">Pre-fill</span> is what ROSE starts from in the strip: it sees what is under its
+      mask, and that steers its fill. <b>Blur</b> (the default) puts a wide blur of the picture beside the strip
+      there, so ROSE invents what's behind it. <b>Stretched</b> copies the last column before the strip across
+      it, which ROSE tends to keep as horizontal streaks -- though on a picture that really is horizontal lines,
+      a building's floors, it can be the closer guess.</li>
     <li><span class="set">Right Edge Too</span>: Splatting leaves the strip on the right eye's left edge, so by
       default that is the only edge Edge Fill measures and fills. Tick it to look at the right eye's right edge
       as well, for a clip whose strip really is on that side; the clips are measured again when you change it.</li>

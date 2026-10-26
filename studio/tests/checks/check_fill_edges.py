@@ -63,6 +63,9 @@ def fake_worker(job_path, n_chunks, steps, progress, stop, lo, hi, bars=False):
     """ROSE's stand-in: the frames back, the masked part magenta; a little slow, so busy shows.
     Its step bars as the real loop draws them (erase.step_bar; test_rose_stop runs that loop)."""
     job = json.load(open(job_path, encoding="utf-8")); jobs_seen.append(job)
+    for c in job["chunks"]:                      # the Pre-fill under the mask: the last column stretched?
+        fr, mw = np.load(c["frames"]), int((np.load(c["masks"])[0, 0] > 0).sum())
+        job["stretched"] = bool((fr[:, :, :mw] == fr[:, :, mw:mw + 1]).all())
     for s in range(steps + 1) if bars else ():
         progress(lo + (hi - lo) * s / steps, f"ROSE: window 1 of {n_chunks}, step {s} of {steps}")
         E.step_bar(1, n_chunks, s, steps, 0.12 if s else None)
@@ -163,6 +166,9 @@ check("...Steps and Resolution on the left, the grid on the right",
       bool(left and grid_sec and steps_box and size_box)
       and steps_box[0].mapToScene(QPointF(0, 0)).x() < grid_sec[0].mapToScene(QPointF(0, 0)).x()
       and size_box[0].mapToScene(QPointF(0, 0)).x() < grid_sec[0].mapToScene(QPointF(0, 0)).x())
+prefill_box = shown("fillEdgesPrefill")
+check("...Pre-fill beside them: Blur, or Stretched", bool(prefill_box) and list(ef.property("prefills")) == ["Blur", "Stretched"]
+      and prefill_box[0].property("currentText") == "Blur", str(prefill_box and prefill_box[0].property("currentText")))
 tiles = shown("fillEdgesTile")
 check("...as a grid: one tile per clip, side by side", len(tiles) == 2
       and abs(tiles[0].mapToScene(QPointF(0, 0)).y() - tiles[1].mapToScene(QPointF(0, 0)).y()) < 1, str(len(tiles)))
@@ -314,6 +320,8 @@ check("...the bar's status names the clip", until(lambda: f"shot_{W}_merged_full
 check("...and it finishes", until(lambda: not ef.property("busy"), 120), ef.property("status"))
 check("...ROSE got the typed steps, for the ticked clip only", len(jobs_seen) == 1 and jobs_seen[0]["steps"] == 9,
       str([j["steps"] for j in jobs_seen]))
+check("...the strip pre-filled with the blur (Pre-fill's default), not the column stretched",
+      jobs_seen and jobs_seen[0].get("stretched") is False, str([j.get("stretched") for j in jobs_seen]))
 check("...the right eye's file rewritten, the left eye's left alone",
       F._file_id(os.path.join(OUT, f"shot_{W}_merged_full_sbs_R.mov")) != r_id
       and F._file_id(os.path.join(OUT, f"shot_{W}_merged_full_sbs_L.mov")) == l_id)
@@ -328,7 +336,7 @@ check("...and a finish notification, as the stages give (sweep 2026-10-14b)", ("
 pump(0.5)
 con = objs["Logs"].tab("extra")
 text = con.allText()
-want = ["=== Edge Fill: 1 clip(s); 9 steps, size 560, grain on, detail on ===", "  Detail: ", f"[1/1] shot_{W}_merged_full_sbs",
+want = ["=== Edge Fill: 1 clip(s); 9 steps, size 560, pre-fill blur, grain on, detail on ===", "  Detail: ", f"[1/1] shot_{W}_merged_full_sbs",
         "  Strip: R eye left edge 26 px", "  ROSE: ", "  Wrote shot_", "  Filled in ", "=== Edge Fill done: 1 filled"]
 check("the console's Extra tab tells the fill", all(w in text for w in want),
       str([w for w in want if w not in text]) + " | " + text[-1500:])

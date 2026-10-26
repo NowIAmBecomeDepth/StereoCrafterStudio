@@ -199,6 +199,16 @@ Item {
                     boxWidth: 190
                 }
             }
+            FieldRow {
+                label: "Pre-fill"; labelWidth: 110
+                help: page.help("prefill")
+                Dropdown {
+                    objectName: "fillEdgesPrefill"
+                    store: page.st; key: "prefill"
+                    model: page.ef.prefills
+                    boxWidth: 190
+                }
+            }
             CheckField {
                 objectName: "fillEdgesGrain"
                 store: page.st

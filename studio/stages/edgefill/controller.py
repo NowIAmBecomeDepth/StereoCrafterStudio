@@ -57,6 +57,11 @@ HELP: Dict[str, str] = {
         "and it takes about twice as long. Native: the clip's own size, in overlapping tiles near ROSE's own "
         "size -- the sharpest and closest to the real picture (ridges, rivets, lines all kept), about 2.5x "
         "560's time; its colour is matched to the picture beside the strip (784's too)."),
+    "prefill": (
+        "What ROSE starts from in the strip -- it sees under its mask, so what is there steers its fill. "
+        "Blur: a wide blur of the picture beside the strip, so ROSE invents what's there. Stretched: the "
+        "last column before the strip copied across it, which ROSE tends to keep as horizontal streaks; "
+        "on a picture that really is horizontal lines (a building's floors) it can be the closer guess."),
     "grain": (
         "Adds grain like the picture's next to the strip -- measured per brightness, the fill's own grain "
         "counted -- so the filled strip isn't smoother than the frame."),
@@ -168,6 +173,7 @@ class EdgeFillController(QObject):
     settings = Property(QObject, lambda self: self._map, constant=True)
     help = Property("QVariantMap", lambda self: HELP, constant=True)
     sizes = Property("QVariantList", lambda self: list(S.SIZES), constant=True)
+    prefills = Property("QVariantList", lambda self: list(S.PREFILLS), constant=True)
 
     def _values(self) -> Dict[str, Any]:
         return {k: self._map.value(k) for k in self._map.keys()}
@@ -539,6 +545,7 @@ class EdgeFillController(QObject):
         detail = bool(v.get("detail", True))
         both_edges = bool(v.get("both_edges", False))
         height = S.height(v.get("size"))
+        prefill = S.coerce("prefill", v.get("prefill"))
         # an H.264 / H.265 clip is written again with Merging's encoder settings (app.py sets .merging)
         merging = getattr(self, "merging", None)
         enc = merging._values() if merging is not None else {}
@@ -608,7 +615,7 @@ class EdgeFillController(QObject):
                 bar["open"] = part < 1
 
             size = str(v.get("size") or "").split(" ")[0] or str(height)
-            logger.info(f"=== Edge Fill: {len(names)} clip(s); {steps} steps, size {size}, "
+            logger.info(f"=== Edge Fill: {len(names)} clip(s); {steps} steps, size {size}, pre-fill {prefill.lower()}, "
                         f"grain {'on' if grain else 'off'}, detail {'on' if detail else 'off'} ===")
             try:
                 from studio.gpu_jobs import wait_for_gpu
@@ -640,7 +647,8 @@ class EdgeFillController(QObject):
                         draw_bar(frac, text)
                     try:
                         r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain, settings=enc,
-                                           rose_height=height, detail=detail, both_edges=both_edges)
+                                           rose_height=height, detail=detail, both_edges=both_edges,
+                                           prefill=prefill)
                     except Stopped:
                         end_bar()
                         logger.info(f"  Stopped: {name} is as it was.")

@@ -12,8 +12,11 @@ pass, on Merging's finished clips:
   2. hands ROSE (rose_worker.py, in its own environment) a crop at that edge
      at about ROSE_HEIGHT px tall, masked just past the fill's fade -- wider and
      ROSE carries lines straight on from further in, off where they slope --
-     with the last good column stretched over the masked part (black there, or
-     the old smear, leaks in, and left a seam line at the mask's edge);
+     with the masked part pre-filled as erase.prefill_frames' wide blur from
+     beside it: ROSE sees under its mask, so black there, or the old smear,
+     leaked in and left a seam line; the last good column stretched across it
+     came back as horizontal streaks (2026-10-26: +0.7 dB on two clips, the
+     streaks gone);
   3. keeps ROSE's fill where the mask's holes were -- row by row, frame by frame, as far as
      each row's hole reaches in (plus STRIP_PAD), like Inpainting V1's Hi-Res Blend -- faded
      into the picture over FEATHER px; ROSE itself works a straight strip as wide as the widest;
@@ -738,9 +741,10 @@ def detail_gain(real: List[np.ndarray], filled: List[np.ndarray], cols: Optional
 def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
          steps: int = STEPS, grain: bool = True, settings: Optional[Dict] = None,
          strips: Optional[Dict] = None, rose_height: int = ROSE_HEIGHT, detail: bool = False,
-         both_edges: bool = False) -> Dict:
+         both_edges: bool = False, prefill: str = "Blur") -> Dict:
     """Refill the edge strips of one merged clip, its files rewritten in place -- each eye's usual edge
-    (USUAL_EDGE), or every edge with a strip with `both_edges`. Returns {"edges": [...], "files": [...]}
+    (USUAL_EDGE), or every edge with a strip with `both_edges`. `prefill`: what ROSE sees under its
+    mask -- "Blur" (erase.prefill_frames) or "Stretched" (the last good column across it). Returns {"edges": [...], "files": [...]}
     or {"skipped": why}. Raises E.Stopped, RuntimeError."""
     if not rose_env.ready():
         raise RuntimeError("ROSE isn't set up: Set Up ROSE in the Depth Map Editor's Erase first.")
@@ -834,9 +838,12 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                     frames = np.empty((length, tb - ta, rw, 3), np.uint8)
                     for t in range(length):
                         frames[t] = e.small[min(a + t, n - 1)][ta:tb]
-                    frames[:, :, :mw] = frames[:, :, mw:mw + 1]        # the last good column, stretched
                     masks = np.zeros((length, tb - ta, rw), np.uint8)
                     masks[:, :, :mw] = 255
+                    if prefill == "Stretched":
+                        frames[:, :, :mw] = frames[:, :, mw:mw + 1]    # the last good column, stretched
+                    else:
+                        frames = E.prefill_frames(frames, masks > 0)    # a wide blur from beside the strip
                     fp, mp, op = (os.path.join(tmp, f"e{k}w{j}t{ti}_{s}.npy") for s in ("frames", "masks", "clean"))
                     np.save(fp, frames)
                     np.save(mp, masks)

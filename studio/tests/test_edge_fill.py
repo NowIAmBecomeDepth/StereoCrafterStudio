@@ -209,6 +209,58 @@ class EdgeFillTest(unittest.TestCase):
         self.assertEqual(rh, 80 if round(72 / 16) * 16 == 80 else 64)
         self.assertLess(rw, W)
 
+    def test_rose_gets_the_strip_prefilled_smooth_not_stretched(self):
+        """2026-10-26: ROSE sees under its mask (its pipeline doesn't blank it), and the last good
+        column stretched across the strip came back as horizontal streaks. The strip goes to ROSE
+        as erase.prefill_frames' wide blur from around it -- no dark bar, no copied column."""
+        got = []
+
+        def worker(job_path, *a, **k):
+            with open(job_path, encoding="utf-8") as f:
+                for c in json.load(f)["chunks"]:
+                    got.append((np.load(c["frames"]), np.load(c["masks"]) > 0))
+            _fake_worker(job_path, *a, **k)
+        g = F.find_groups(self.out)[0]
+        with mock.patch.object(E, "_run_worker", worker),                 mock.patch.object(F.rose_env, "ready", lambda: True),                 mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
+            F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), grain=False, settings={})
+        self.assertTrue(got)
+        for frames, masks in got:
+            mw = int(masks[0, 0].sum())
+            self.assertGreater(mw, STRIP)
+            strip = frames[:, :, :mw].astype(np.float32)
+            stretched = np.repeat(frames[:, :, mw:mw + 1], mw, axis=2).astype(np.float32)
+            self.assertGreater(np.abs(strip - stretched).mean(), 2.0, "not the last good column stretched")
+            self.assertGreater(strip.std(axis=2).mean(), 1.0, "it varies across the strip, like the picture")
+            self.assertGreater(np.abs(strip.mean(axis=(0, 1, 2)) - (20, 10, 40)).max(), 30, "the dark bar is gone")
+            np.testing.assert_array_equal(frames, E.prefill_frames(frames, masks), "erase's pre-fill, as it is")
+
+    def test_prefill_stretched_is_the_last_good_column(self):
+        """The Pre-fill dropdown's other choice: the last good column across the strip, as before."""
+        got = []
+
+        def worker(job_path, *a, **k):
+            with open(job_path, encoding="utf-8") as f:
+                for c in json.load(f)["chunks"]:
+                    got.append((np.load(c["frames"]), np.load(c["masks"]) > 0))
+            _fake_worker(job_path, *a, **k)
+        g = F.find_groups(self.out)[0]
+        with mock.patch.object(E, "_run_worker", worker), \
+                mock.patch.object(F.rose_env, "ready", lambda: True), \
+                mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
+            F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), grain=False, settings={},
+                   prefill="Stretched")
+        self.assertTrue(got)
+        for frames, masks in got:
+            mw = int(masks[0, 0].sum())
+            np.testing.assert_array_equal(frames[:, :, :mw], np.repeat(frames[:, :, mw:mw + 1], mw, axis=2))
+
+    def test_prefill_setting_is_one_of_its_choices(self):
+        from studio.stages.edgefill import settings as ES
+        self.assertEqual(ES.DEFAULTS["prefill"], "Blur")
+        self.assertEqual(ES.coerce("prefill", "Stretched"), "Stretched")
+        self.assertEqual(ES.coerce("prefill", "nonsense"), "Blur")
+        self.assertEqual(ES.normalise({})["prefill"], "Blur")
+
     def test_no_strip_no_rose(self):
         g = F.find_groups(self.out)[0]
         with mock.patch.object(E, "_run_worker", _fake_worker), mock.patch.object(F.rose_env, "ready", lambda: True):
