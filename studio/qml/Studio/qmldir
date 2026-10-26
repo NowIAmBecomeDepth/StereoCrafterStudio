@@ -35,6 +35,7 @@ ChapterPicker 1.0 ChapterPicker.qml
 ChangeFoldersButton 1.0 ChangeFoldersButton.qml
 FlipDrag 1.0 FlipDrag.qml
 DepthCrafterPage 1.0 DepthCrafterPage.qml
+VdaPage 1.0 VdaPage.qml
 InpaintingPage 1.0 InpaintingPage.qml
 ActionBar 1.0 ActionBar.qml
 EncodingDialog 1.0 EncodingDialog.qml

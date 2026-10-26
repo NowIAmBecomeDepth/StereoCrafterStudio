@@ -307,7 +307,10 @@ def nvenc_available() -> bool:
 class DepthWriter:
     """Stream (H, W) uint16 Y codes into a 10-bit HEVC MP4."""
 
-    def __init__(self, path: str, info: ClipInfo, use_nvenc: Optional[bool] = None) -> None:
+    def __init__(self, path: str, info: ClipInfo, use_nvenc: Optional[bool] = None,
+                 metadata: Optional[dict] = None) -> None:
+        """`path` may be a partial_output .part name (the container comes from the name under it);
+        `metadata`: container tags, {key: value} (VDA marks its maps, core.vda.output)."""
         self.path = path
         self.info = info
         self.use_nvenc = nvenc_available() if use_nvenc is None else use_nvenc
@@ -325,12 +328,16 @@ class DepthWriter:
         # pixel at code 944, just above the tv ceiling, came back as 943. With
         # both sides tagged the same there is nothing to convert.
         tags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", rng]
+        extra = []
+        for key, value in (metadata or {}).items():
+            extra += ["-metadata", f"{key}={value}"]
+        from core.common.partial_output import ffmpeg_output_args
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", f"{info.width}x{info.height}",
             "-r", info.fps, *tags, "-i", "pipe:0",
-            "-an", *codec, "-tag:v", "hvc1", *tags,
-            path,
+            "-an", *codec, "-tag:v", "hvc1", *tags, *extra,
+            *ffmpeg_output_args(path),
         ]
         self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_NO_WINDOW)
         self._err: list = []

@@ -55,7 +55,7 @@ check("a console window, hidden at start (no drawer in the main window)",
       con is not None and not con.isVisible()
       and find(win.contentItem(), lambda c: c.objectName() == "consoleShadow") is None)
 names = [t["name"] for t in con.property("tabs")]
-check("tabs: the four stages, Extra, All", names == ["DepthCrafter", "Splatting", "Inpainting", "Merging", "Extra", "All"],
+check("tabs: the four stages, Extra, All", names == ["Depth Map", "Splatting", "Inpainting", "Merging", "Extra", "All"],
       str(names))
 check("a window of its own, not kept above Studio's", con.transientParent() is None)
 check("the UI thread gets the GIL quickly during a job (switch interval 0.5 ms)",

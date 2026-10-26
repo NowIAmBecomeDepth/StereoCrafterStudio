@@ -217,7 +217,7 @@ class LogModel(QAbstractListModel):
 
 #: The console window's tabs, in order: the four stages, Extra (Scene Cut and
 #: the Depth Map Editor, as on the main window), then everything.
-TABS = (("depthcrafter", "DepthCrafter"), ("splatting", "Splatting"), ("inpainting", "Inpainting"),
+TABS = (("depthcrafter", "Depth Map"), ("splatting", "Splatting"), ("inpainting", "Inpainting"),
         ("merging", "Merging"), ("extra", "Extra"), ("all", "All"))
 
 #: Logger-name prefixes that belong to one tab. A name matches a prefix

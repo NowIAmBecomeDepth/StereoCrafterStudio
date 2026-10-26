@@ -28,6 +28,9 @@ Item {
     property real flipAngle: 0
     property var prompt: null            // Main's PromptDialog
     property var consoleRef: null        // Main's ConsoleWindow
+    // the sub tabs (user, 2026-10-25), as Inpainting's: 0 = DepthCrafter, 1 = Video Depth Anything (VdaPage.qml).
+    // Main's openStage(0, 1) picks VDA -- Splatting's "Rerun with Video Depth Anything".
+    property int engine: 0
 
     readonly property var dc: DepthCrafter
     readonly property var st: dc.settings
@@ -52,8 +55,10 @@ Item {
     // widths nothing clips at here. Wide as soon as the column starts in,
     // narrow only once it has gone, so it never animates in a window too small.
     // (2026-10-10: plus Upcoming Jobs' least width)
-    readonly property int requiredWidth: 36 + (grid.mergeFrac > 0 ? 3 : 2) * (grid.colMin + Theme.gap) + grid.listMin
-    readonly property real requiredHeight: content.y + content.implicitHeight + Theme.gap + actionBar.implicitHeight + 12
+    readonly property int requiredWidth: engine === 1 ? vdaPage.requiredWidth
+                                         : 36 + (grid.mergeFrac > 0 ? 3 : 2) * (grid.colMin + Theme.gap) + grid.listMin
+    readonly property real requiredHeight: engine === 1 ? vdaPage.y + vdaPage.requiredHeight
+                                           : content.y + content.implicitHeight + Theme.gap + actionBar.implicitHeight + 12
 
     transform: Rotation {
         origin.x: page.width / 2; origin.y: page.height / 2
@@ -73,7 +78,7 @@ Item {
     }
     function help(k) { return page.dc.help[k] || "" }
 
-    onActiveChanged: if (active) { dc.refreshSceneCut(); dc.refreshChapters() }
+    onActiveChanged: if (active) { dc.refreshSceneCut(); dc.refreshChapters(); VDA.refreshSceneCut(); VDA.refreshChapters() }
 
     // ---- runner prompts and toasts --------------------------------------
     Connections {
@@ -177,14 +182,31 @@ Item {
         onAccepted: page.dc.saveSettingsTo(Shell.urlToPath(selectedFile))
     }
 
+    // ---- engine switch: DepthCrafter | VDA (as Inpainting's V1 | V2) ----
+    StageTabBar {
+        id: engineSwitch
+        objectName: "dcEngineSwitch"
+        x: 14
+        y: 0
+        implicitHeight: 34
+        numbered: false
+        model: ["DepthCrafter", "VDA"]       // user, 2026-10-25: "rename the tab to vda"
+        currentIndex: page.engine
+        onActivated: (i) => page.engine = i
+    }
+
     // ---- the page -------------------------------------------------------
     ColumnLayout {
         id: content
         objectName: "pageContent"
         x: 18
-        y: 14
+        y: engineSwitch.y + engineSwitch.height + 6
         width: page.width - 36
         spacing: Theme.gap
+        opacity: page.engine === 0 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
+        transform: Translate { x: page.engine === 0 ? 0 : -40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
 
         Section {
             id: inputSourceSection
@@ -524,6 +546,9 @@ ChangeFoldersButton {
     ActionBar {
         id: actionBar
         statsStage: "depthcrafter"
+        opacity: page.engine === 0 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
         anchors.left: parent.left
         anchors.right: parent.right
         // this stage's own tips, typed out above the bar (user, 2026-09-27)
@@ -584,7 +609,7 @@ ChangeFoldersButton {
 
     // v1's menus for this stage. Main puts them on the menu bar after the
     // Studio / View / GPU menus while this tab is showing.
-    readonly property var stageMenus: [fileMenu, helpMenu]
+    readonly property var stageMenus: engine === 1 ? vdaPage.stageMenus : [fileMenu, helpMenu]
     // ...and after them, the custom resolution presets (user, 2026-10-05)
     readonly property Component settingsExtra: Component { DcPresetEditor { dc: page.dc } }
 
@@ -648,6 +673,21 @@ ChangeFoldersButton {
             onTriggered: page.prompt.ask({ title: "GUI Overview", message: page.help("general_gui_overview"),
                                            buttons: [{ text: "OK", code: 1, kind: "filled" }] })
         }
+    }
+
+    // ---- Video Depth Anything ------------------------------------------------
+    VdaPage {
+        id: vdaPage
+        objectName: "vdaPage"
+        y: engineSwitch.y + engineSwitch.height
+        width: page.width
+        height: page.height - y
+        prompt: page.prompt
+        consoleRef: page.consoleRef
+        opacity: page.engine === 1 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
+        transform: Translate { x: page.engine === 1 ? 0 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
     }
 
     // drag and drop (user, 2026-10-25): Drop Zones over the paths

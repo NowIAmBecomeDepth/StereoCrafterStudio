@@ -63,7 +63,8 @@ def announce(kind: str, title: str, text: str) -> None:
 
 #: verdict's stage names -> the GpuJobs id their job claimed the GPU under.
 _JOB_IDS = {"DepthCrafter": "depthcrafter", "Splatting": "splatting", "Inpainting": "inpainting",
-            "Inpainting V2": "inpainting", "Merging": "merging", "Scene Cut": "scenecut"}
+            "Inpainting V2": "inpainting", "Merging": "merging", "Scene Cut": "scenecut",
+            "Video Depth Anything": "depthcrafter_vda"}
 
 
 def verdict(stage: str, outcome: Outcome, stopped: bool = False, seconds=None) -> Verdict:

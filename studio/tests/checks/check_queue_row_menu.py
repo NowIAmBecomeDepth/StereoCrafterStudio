@@ -151,8 +151,10 @@ jc.rescan()
 sq = find_all(win.contentItem(), lambda c: c.objectName() == "splatJobQueue")[0]
 check("Splatting: two clips listed", until(lambda: len(rows(sq)) == 2, 30))
 opened, texts = action(sq, "clipB", "splat")
-check("right-click a clip: Splat This Clip Now, Test Render and Rerun in DepthCrafter",
-      opened and texts == ["Splat This Clip Now", "Test Render", "Rerun in DepthCrafter"], str(texts))
+# Rerun with Video Depth Anything beside it (user, 2026-10-25)
+check("right-click a clip: Splat This Clip Now, Test Render, Rerun in DepthCrafter and with Video Depth Anything",
+      opened and texts == ["Splat This Clip Now", "Test Render", "Rerun in DepthCrafter",
+                           "Rerun with Video Depth Anything"], str(texts))
 run_to_end(sp)
 outs = sorted(os.path.basename(p) for p in glob.glob(str(FIX / "out" / "**" / "*.mp4"), recursive=True))
 check("Splat This Clip Now splats that clip only (clipB)", outs and all(o.startswith("clipB") for o in outs), str(outs))
@@ -209,7 +211,28 @@ check("Rerun in DepthCrafter: the clip is DepthCrafter's input",
 check("...its depth map's folder is the output",
       os.path.normcase(str(dst.value("output_dir"))) == os.path.normcase(str(FIX / "depth")), str(dst.value("output_dir")))
 check("...and DepthCrafter's page is showing", stage.property("current") == 0, str(stage.property("current")))
+dcpage = stage.property("pages").property(0).toQObject()
+check("...on its DepthCrafter tab", dcpage.property("engine") == 0, str(dcpage.property("engine")))
 check("...nothing started", dc.property("busy") is False)
+
+# Rerun with Video Depth Anything (user, 2026-10-25): its tab, the clip loaded, its own folders
+vda = objs["VDA"]; vst = vda.property("settings")
+vda_toasts = []
+vda.toast.connect(lambda *a: vda_toasts.append(a))
+_dc_in = str(dst.value("input_dir_or_file_var"))
+show(1)
+opened, _t = action(sq, "clipA", "rerunVda"); pump(0.8)
+check("Rerun with Video Depth Anything: the clip is VDA's input",
+      n(vst.value("input_dir_or_file_var")) == n(FIX / "src" / "clipA.mp4"), str(vst.value("input_dir_or_file_var")))
+check("...its depth map's folder is the output", n(vst.value("output_dir")) == n(FIX / "depth"), str(vst.value("output_dir")))
+check("...DepthCrafter's page, on its Video Depth Anything tab", stage.property("current") == 0
+      and dcpage.property("engine") == 1, f"{stage.property('current')} / {dcpage.property('engine')}")
+check("...a toast says it's ready", any(t[1] == "Ready to re-run" for t in vda_toasts), str(vda_toasts[-1:]))
+check("...DepthCrafter's own folders untouched, nothing started", str(dst.value("input_dir_or_file_var")) == _dc_in
+      and vda.property("busy") is False)
+show(1)
+opened, _t = action(sq, "clipA", "rerun"); pump(0.8)
+check("...and Rerun in DepthCrafter goes back to the DepthCrafter tab", dcpage.property("engine") == 0)
 
 # ================= the flip card, dragged =================
 show(1)

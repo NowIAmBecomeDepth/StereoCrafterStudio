@@ -45,6 +45,16 @@ var GROUPS = [
         "A long full-video job? Save Checkpoint keeps the finished denoising, so a failed save can resume without running it again.",
         "A clip done? Right-click its row in Upcoming Jobs and choose Send to Splatting to take just that clip on."
     ] },
+    // DepthCrafter's Video Depth Anything tab (user, 2026-10-25)
+    { key: "vda", title: "Video Depth Anything", tips: [
+        "Video Depth Anything is far faster than DepthCrafter: try it first, and keep DepthCrafter for the shots it gets wrong.",
+        "Replacing a DepthCrafter map? The old one moves into a DepthCrafter folder beside it, and Splatting shows the new one at once.",
+        "Right-click a clip in Splatting's Upcoming Jobs and choose Rerun with Video Depth Anything to redo just that clip's depth.",
+        "Small is quickest and Apache-2.0; Base and Large are sharper but for non-commercial use only.",
+        "Input Size sets the detail: 518 is what the model is trained at, higher keeps finer edges and costs memory.",
+        "A long shot whose depth range really changes? Normalise with EMA lets the range follow it, as iw3 does.",
+        "Short on VRAM? Pick a smaller Model or a lower Input Size; Online mode needs the same memory however long the clip."
+    ] },
     { key: "splatting", title: "Splatting", tips: [
         "Double-click the preview to zoom in on that spot; double-click again to see the whole frame.",
         "Holes too big for inpainting? Dual Eye shares the shift between both eyes, so each eye gets smaller holes.",

@@ -75,6 +75,7 @@ from . import log_model as _log_model  # noqa: E402
 from .platform_win import Backdrop, WindowFrame  # noqa: E402
 from .shell import StudioShell  # noqa: E402
 from .stages.depthcrafter.controller import DepthCrafterController  # noqa: E402
+from .stages.vda.controller import VdaController  # noqa: E402
 from .stages.inpainting.controller import InpaintingController  # noqa: E402
 from .stages.inpainting_v2.controller import InpaintingV2Controller  # noqa: E402
 from .stages.merging.controller import MergingController  # noqa: E402
@@ -140,6 +141,7 @@ def build(app: QGuiApplication):
     _recycle_bin.ASK_PERMANENT = shell.ask_permanent
     backdrop = Backdrop()
     depthcrafter = DepthCrafterController(shell)
+    vda = VdaController(shell)          # DepthCrafter's VDA tab (user, 2026-10-25)
     inpainting = InpaintingController(shell)
     inpainting_v2 = InpaintingV2Controller(shell, sibling=inpainting)
     inpainting.sibling = inpainting_v2
@@ -149,6 +151,7 @@ def build(app: QGuiApplication):
     scenecut = SceneCutController(shell)
     depthedit = DepthEditController(shell)
     depthedit.splatting = splatting      # the editor's 3D view renders through Splatting's preview
+    vda.splatting = splatting            # a re-run clip is shown afresh there when its new map lands
     edgefill = EdgeFillController(shell)
     edgefill.merging = merging           # an H.264 / H.265 clip is written again with Merging's encoder settings
     # Put Back's Depth Map (user, 2026-10-15; core.removal.putback): the clean clip's depth map and
@@ -181,7 +184,10 @@ def build(app: QGuiApplication):
     # v1's shell request_job: one stage renders at a time, and a stage about
     # to start has every other stage's resident GPU state released first.
     jobs = GpuJobs()
-    for stage_id, name, ctl in (("depthcrafter", "DepthCrafter", depthcrafter), ("splatting", "Splatting", splatting),
+    # VDA: an id of its own, so GpuJobs keeps it from running beside DepthCrafter (one id never refuses
+    # itself); it logs to DepthCrafter's console tab (log_model: the id's first part)
+    for stage_id, name, ctl in (("depthcrafter", "DepthCrafter", depthcrafter),
+                                ("depthcrafter_vda", "Video Depth Anything", vda), ("splatting", "Splatting", splatting),
                                 ("inpainting", "Inpainting", inpainting), ("inpainting", "Inpainting V2", inpainting_v2),
                                 ("merging", "Merging", merging), ("scenecut", "Scene Cut", scenecut),
                                 ("depthedit", "Depth Map Editor", depthedit), ("edgefill", "Edge Fill", edgefill)):
@@ -259,7 +265,7 @@ def build(app: QGuiApplication):
     objects = {"Shell": shell, "Backdrop": backdrop, "WinFrame": frame, "ConsoleFrame": console_frame,
                "ConsoleBackdrop": console_backdrop,
                "Log": logs.tab("all"), "Logs": logs, "Updater": updater,
-               "DepthCrafter": depthcrafter, "Inpainting": inpainting, "InpaintingV2": inpainting_v2,
+               "DepthCrafter": depthcrafter, "VDA": vda, "Inpainting": inpainting, "InpaintingV2": inpainting_v2,
                "Splatting": splatting, "Merging": merging, "SceneCut": scenecut,
                "DepthEdit": depthedit, "EdgeFill": edgefill, "Beginner": beginner, "GpuJobs": jobs,
                "JobStats": job_stats, "Vram": vram, "Folders": folders, "Glasses3D": glasses, "Models": models}
@@ -306,7 +312,7 @@ def build(app: QGuiApplication):
 
 
 #: Each job stage's Stop now slot (audit #13): the one the page's Stop runs.
-_STOP_NOW = {"DepthCrafter": "cancel", "SceneCut": "abort", "Splatting": "stop", "Inpainting": "stop",
+_STOP_NOW = {"DepthCrafter": "cancel", "VDA": "stop", "SceneCut": "abort", "Splatting": "stop", "Inpainting": "stop",
              "InpaintingV2": "stop", "InpaintingM2S": "stop", "Merging": "stop", "EdgeFill": "stop"}
 
 
@@ -436,7 +442,7 @@ def main() -> int:
         # every stage after it, and the shell's own save
         # Edge Fill first: it waits for its fill (ROSE ended, the clip's files as they were), well
         # inside the exit watchdog, before the slower stages' shutdowns (bug sweep 2026-10-14b)
-        for name in ("EdgeFill", "Vram", "DepthCrafter", "Inpainting", "InpaintingV2", "InpaintingM2S", "Splatting",
+        for name in ("EdgeFill", "Vram", "DepthCrafter", "VDA", "Inpainting", "InpaintingV2", "InpaintingM2S", "Splatting",
                      "Merging", "SceneCut", "DepthEdit", "Models"):
             if name not in objects:         # a personal/ engine this install doesn't have
                 continue

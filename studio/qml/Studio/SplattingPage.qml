@@ -206,7 +206,14 @@ Item {
     function rerunInDepthCrafter(path) {
         if (DepthCrafter.busy) { Theme.toast("warning", "DepthCrafter is busy", "Wait for its job to finish, then try again."); return }
         DepthCrafter.loadForRerun(path, page.sp.depthFolderFor(path))
-        Shell.openStage(0, -1)
+        Shell.openStage(0, 0)          // DepthCrafter's own tab
+    }
+    // ...or through Video Depth Anything (user, 2026-10-25): its tab, the clip loaded. The DepthCrafter
+    // map there moves into DepthCrafter/ when the new one lands, and the clip shows here afresh
+    function rerunWithVda(path) {
+        if (VDA.busy) { Theme.toast("warning", "Video Depth Anything is busy", "Wait for its job to finish, then try again."); return }
+        VDA.loadForRerun(path, page.sp.depthFolderFor(path))
+        Shell.openStage(0, 1)
     }
 
     // Edit Depth Map: this clip's depth map, straight into the Depth Map Editor
@@ -1872,11 +1879,13 @@ No button lit means custom "
                 // right-click a clip (user, 2026-10-10)
                 rowActions: [{ id: "splat", text: "Splat This Clip Now" }, { id: "test", text: "Test Render" },
                              { id: "rerun", text: "Rerun in DepthCrafter" },
+                             { id: "rerunVda", text: "Rerun with Video Depth Anything" },
                              { id: "send", text: "Send to Inpainting", whenDone: true }]
                 onRowAction: (id, path) => {
                     if (id === "splat") page.sp.startClip(path)
                     else if (id === "test") page.sp.testClip(path)      // into Test Renders (user, 2026-10-15)
                     else if (id === "rerun") page.rerunInDepthCrafter(path)
+                    else if (id === "rerunVda") page.rerunWithVda(path)
                     else if (id === "send") sendOn(path, page.sp, "inpainting", Inpainting, 2)
                 }
                 busy: page.sp.busy

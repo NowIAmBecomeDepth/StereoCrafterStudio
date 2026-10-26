@@ -150,13 +150,33 @@ SSCD = Part("SSCD", "", "", "SceneCut", (("sscd_disc_large.torchscript.pt", 1781
             url="https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_large.torchscript.pt",
             sha256="16a196359f91e5fc4e774d5679244c8a661c182309ad4ede0c7e83f6a9861fa0")
 
+#: Video Depth Anything (DepthCrafter's VDA tab; user, 2026-10-25): one checkpoint per size, all in one folder
+VDA_S = Part("Video Depth Anything Small", "depth-anything/Video-Depth-Anything-Small",
+             "256875362cff76724b920335dfb4b29dd611f66e", "VideoDepthAnything",
+             (("video_depth_anything_vits.pth", 116440756),), key="vda_s")
+VDA_B = Part("Video Depth Anything Base", "depth-anything/Video-Depth-Anything-Base",
+             "7231d0c6e260f54f103eba5005d01f6efa4f43db", "VideoDepthAnything",
+             (("video_depth_anything_vitb.pth", 458247082),), key="vda_b")
+VDA_L = Part("Video Depth Anything Large", "depth-anything/Video-Depth-Anything-Large",
+             "7aafbcb5c6af0bac741aad2b6471894fb4761afa", "VideoDepthAnything",
+             (("video_depth_anything_vitl.pth", 1538392012),), key="vda_l")
+
 PARTS: Dict[str, Part] = {p.key: p for p in (SVD, DEPTHCRAFTER, STEREOCRAFTER, WAN_VACE, STEREOCRAFTER2,
-                                             STEREOCRAFTER2_FP8, SAM3, OMNISHOTCUT, DINOV3, SSCD)}
+                                             STEREOCRAFTER2_FP8, SAM3, OMNISHOTCUT, DINOV3, SSCD,
+                                             VDA_S, VDA_B, VDA_L)}
 
 #: The rows of the Models window, in the stages' order.
 MODELS: Tuple[Model, ...] = (
     Model("depthcrafter", "DepthCrafter", "DepthCrafter", (DEPTHCRAFTER,),
           page="https://huggingface.co/tencent/DepthCrafter"),
+    Model("vda_s", "Video Depth Anything Small", "DepthCrafter (VDA)", (VDA_S,),
+          page="https://huggingface.co/depth-anything/Video-Depth-Anything-Small", note="Apache-2.0."),
+    Model("vda_b", "Video Depth Anything Base", "DepthCrafter (VDA)", (VDA_B,),
+          page="https://huggingface.co/depth-anything/Video-Depth-Anything-Base",
+          note="CC-BY-NC-4.0: non-commercial use only."),
+    Model("vda_l", "Video Depth Anything Large", "DepthCrafter (VDA)", (VDA_L,),
+          page="https://huggingface.co/depth-anything/Video-Depth-Anything-Large",
+          note="CC-BY-NC-4.0: non-commercial use only."),
     Model("svd", "Stable Video Diffusion 1.1", "DepthCrafter, Inpainting", (SVD,), gated=True,
           page="https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1",
           tip="Studio uses only its VAE and image encoder: 1.5 GB of the repository's 18 GB. DepthCrafter and "

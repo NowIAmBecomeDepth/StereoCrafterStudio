@@ -7,7 +7,7 @@ import Studio
 // The Studio window, arranged as v1's unified shell (unified_gui/shell.py):
 //
 //   menu strip   Studio  View  GPU  | then the showing stage's own menus
-//   tab strip    1. DepthCrafter  2. Splatting  3. Inpainting  4. Merging  Extra
+//   tab strip    1. Depth Map  2. Splatting  3. Inpainting  4. Merging  Extra
 //   the stage page
 //   status bar
 //
@@ -201,7 +201,8 @@ ApplicationWindow {
     color: Theme.ground
 
     // v1 calls the last tab "Extra" (unified_gui/shell.py BONUS_TITLE).
-    readonly property var stageNames: ["DepthCrafter", "Splatting", "Inpainting", "Merging", "Extra"]
+    // "Depth Map" (user, 2026-10-25): its two models, DepthCrafter and VDA, are its sub tabs
+    readonly property var stageNames: ["Depth Map", "Splatting", "Inpainting", "Merging", "Extra"]
     // where each stage is in the manual (F1, and its section of Settings --
     // user, 2026-10-04); Extra: the tool showing
     function manualAt(i) {
@@ -210,6 +211,8 @@ ApplicationWindow {
             return extra && extra.tool === 1 ? "part3.html" : extra && extra.tool === 2 ? "part2.html#fill-edges"
                                                                            : "part2.html#scenecut"
         }
+        if (i === 0 && stage.pages && stage.pages[0] && stage.pages[0].engine === 1)
+            return "part2.html#vda"          // DepthCrafter's Video Depth Anything tab
         return ["part2.html#depthcrafter", "part2.html#splatting", "part2.html#inpainting",
                 "part2.html#merging"][i] || ""
     }
@@ -402,7 +405,8 @@ ApplicationWindow {
 
     // Every stage that runs jobs, as the status bar and the close guard name it.
     readonly property var jobStages: [
-        { name: "DepthCrafter", ctl: DepthCrafter }, { name: "Splatting", ctl: Splatting },
+        { name: "DepthCrafter", ctl: DepthCrafter }, { name: "Video Depth Anything", ctl: VDA },
+        { name: "Splatting", ctl: Splatting },
         { name: "Inpainting", ctl: Inpainting }, { name: "Inpainting V2", ctl: InpaintingV2 },
         { name: "Merging", ctl: Merging }, { name: "Scene Cut", ctl: SceneCut },
         { name: "Depth Map Editor", ctl: DepthEdit }, { name: "Edge Fill", ctl: EdgeFill }]
@@ -484,7 +488,7 @@ ApplicationWindow {
             property string tip: "Writes every stage's settings to disk now (they are also saved when Studio closes)."
             // every stage (audit 2026-09-28, minor: only DepthCrafter + Inpainting)
             onTriggered: {
-                DepthCrafter.save(); Splatting.save(); Inpainting.save(); InpaintingV2.save()
+                DepthCrafter.save(); VDA.save(); Splatting.save(); Inpainting.save(); InpaintingV2.save()
                 Merging.save(); SceneCut.save(); DepthEdit.save(); Shell.save()
                 Theme.toast("success", "Settings saved", "Every stage's settings are on disk.")
             }
