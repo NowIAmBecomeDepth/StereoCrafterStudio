@@ -65,8 +65,23 @@ class SettingsAtTests(unittest.TestCase):
         self.assertTrue(K.update_key_value(tr, 5, ("brightness",), 0.3))
         self.assertEqual(tr.frame_at(5)["type"], "dynamic")
         self.assertAlmostEqual(tr.frame_at(5)["values"]["brightness"], 0.3)
-        self.assertFalse(K.update_key_value(tr, 6, ("brightness",), 0.5))      # not on a key
         self.assertFalse(K.update_key_value(tr, 5, ("mode",), "Add"))          # not keyed
+
+    def test_off_a_key_a_change_adds_a_dynamic_key(self):
+        # user, 2026-10-25: keyed controls stay live -- off a key the change went to the hidden base value
+        tr = KeyframeTrack()
+        tr.set_keyframe(5, "static", snap(brightness=0.1, contrast=1.5))
+        self.assertTrue(K.update_key_value(tr, 9, ("brightness",), 0.5))
+        self.assertEqual(tr.frame_at(9)["type"], "dynamic")
+        self.assertAlmostEqual(tr.frame_at(9)["values"]["brightness"], 0.5)
+        self.assertAlmostEqual(tr.frame_at(9)["values"]["contrast"], 1.5)        # the rest as the frame had them
+        self.assertAlmostEqual(K.settings_at(LayerSettings(), tr, 9).brightness, 0.5)
+        self.assertAlmostEqual(tr.frame_at(5)["values"]["brightness"], 0.1)      # the key before untouched
+
+    def test_a_layer_without_keys_keeps_its_own_value(self):
+        tr = KeyframeTrack()
+        self.assertFalse(K.update_key_value(tr, 3, ("brightness",), 0.5))
+        self.assertTrue(tr.is_empty())
 
 
 class ProjectTests(unittest.TestCase):

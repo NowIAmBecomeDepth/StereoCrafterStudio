@@ -132,6 +132,18 @@ check("Splatting's preview comes back on clipA, with the new map",
       and os.path.basename(list(pv.property("clipPaths"))[int(pv.property("videoIndex"))]) == "clipA.mp4",
       str(pv.property("currentDepth")))
 check("the source clip stayed where it was (a single clip isn't moved)", (FIX / "src" / "clipA.mp4").is_file())
+# the VDA badge (user, 2026-10-25): on the clip whose map VDA made, in Splatting's list
+q = pv.queue
+def _vda_rows():
+    names = [str(c) for c in q.property("clips")]
+    fx = q.property("clipFx")
+    return {nm: bool(len(f) > 8 and f[8]) for nm, f in zip(names, fx)}
+q.rescan()
+check("Splatting's list: the VDA badge on clipA, not on clipB (DepthCrafter's still)",
+      until(lambda: _vda_rows() == {"clipA.mp4": True, "clipB.mp4": False}, 30), str(_vda_rows()))
+show(1); pump(0.6)
+badge = [c for c in find_all(win.contentItem(), lambda c: c.objectName() == "fxVda") if c.isVisible()]
+check("...drawn on its row", len(badge) == 1, str(len(badge)))
 
 # ---- a folder run --------------------------------------------------------------------------
 vst.setProperty("input_dir_or_file_var", str(FIX / "src")); pump(0.8)
@@ -147,6 +159,16 @@ check("...clipA's earlier VDA map replaced, its DepthCrafter map kept once; clip
 recd = json.loads(Path(jh._RECORD_PATH).read_text(encoding="utf-8")) if Path(jh._RECORD_PATH).exists() else {}
 dcrec = recd.get("depthcrafter") or {}
 check("the job handoff names the output folder, as DepthCrafter's", n(dcrec.get("depth", "")) == n(FIX / "depth"), str(dcrec))
+# its progress in the console's Depth Map tab (user, 2026-10-25: "add vda job progress to the depth map tab"):
+# a drawn bar per pass and clip, kept as a line when the pass ends
+logs = objs["Logs"]
+def _bars(tab):
+    return [r for r in logs.tab(tab)._rows if r[0].startswith("VDA ") and r[4]]
+dm = _bars("depthcrafter")
+check("the Depth Map console tab shows VDA's progress as bars, depth and encode, for each clip",
+      all(any(r[0].startswith(f"VDA {ph} {c}.mp4") and r[4][1] >= 0.999 for r in dm)
+          for ph in ("depth", "encode") for c in ("clipA", "clipB")), str([r[0] for r in dm][-6:]))
+check("...and not in another stage's tab", not _bars("splatting"), str([r[0] for r in _bars("splatting")][:3]))
 
 # ---- a size not downloaded -----------------------------------------------------------------
 show(0); dcpage.setProperty("engine", 1); pump(0.5)

@@ -101,7 +101,7 @@ Section {
     readonly property int rowHeight: 52       // room for the clip's still (user, 2026-09-27)
     // a row with badges besides the sidecar's: a line for them under the name (user, 2026-10-17)
     readonly property int fxLineHeight: 16
-    function fxUnder(fx) { return !!fx && (!!fx[0] || !!fx[1] || !!fx[2] || !!fx[4] || !!fx[5] || !!fx[6] || !!fx[7]) }
+    function fxUnder(fx) { return !!fx && (!!fx[0] || !!fx[1] || !!fx[2] || !!fx[4] || !!fx[5] || !!fx[6] || !!fx[7] || !!fx[8]) }
     // the row numbers' column: as wide as the list's biggest number
     TextMetrics {
         id: numberMetrics
@@ -243,6 +243,7 @@ Section {
     readonly property var fxOrder: [
         { kind: "sidecar", flag: 3, name: "fxSidecar", label: "Sidecar saved" },
         { kind: "edited", flag: 4, name: "fxDepthEdited", label: "Depth map edited in the Depth Map Editor" },
+        { kind: "vda", flag: 8, name: "fxVda", label: "Depth map from Video Depth Anything" },     // user, 2026-10-25
         { kind: "text", flag: 5, name: "fxTextMask", label: "Detect Text mask saved" },
         { kind: "keyframe", flag: 0, name: "fxKeyframe", label: "Keyframes" },
         { kind: "break", flag: 1, name: "fxFrameBreak", label: "Frame Break" },
@@ -255,11 +256,11 @@ Section {
     readonly property var legendItems: fxOrder.filter(f => legendKinds.indexOf(f.kind) >= 0)
     readonly property var legendText: ({ sidecar: "Sidecar", edited: "Depth edited", text: "Detect Text",
                                          keyframe: "Keyframes", "break": "Frame Break", pop: "Pop Out Boost",
-                                         particles: "Rain", erased: "Object removed" })
+                                         particles: "Rain", erased: "Object removed", vda: "VDA map" })
 
     component FxIcon: Item {
         property string kind: ""
-        width: kind === "text" || kind === "break" ? 14 : kind === "sidecar" ? 11 : 12
+        width: kind === "vda" ? vdaPill.width : kind === "text" || kind === "break" ? 14 : kind === "sidecar" ? 11 : 12
         height: 12
         // a sidecar: a page with its corner folded down
         Item {
@@ -283,6 +284,28 @@ Section {
             glyph: Theme.icon.edit
             size: 11
             color: Theme.accentInk
+        }
+        // a Video Depth Anything map (user, 2026-10-25): "VDA" in a pill, in the accent ink -- the pill as
+        // wide as the letters' ink plus an even margin, and the ink centred in it (centring the text box left
+        // the glyphs' own side bearings as a gap on the right; user: "too much of a gap")
+        TextMetrics { id: vdaInk; text: "VDA"; font.family: Theme.buttonFont; font.pixelSize: 7; font.weight: Font.Bold }
+        Rectangle {
+            id: vdaPill
+            visible: parent.kind === "vda"
+            anchors.centerIn: parent
+            width: Math.round(vdaInk.tightBoundingRect.width) + 6; height: 11; radius: 5.5
+            color: "transparent"
+            border.width: 1.2
+            border.color: Theme.accentInk
+            Text {
+                // + 1: drawn, the 7 px letters sit a pixel left of where their metrics put them (measured)
+                x: (parent.width - vdaInk.tightBoundingRect.width) / 2 - vdaInk.tightBoundingRect.x + 1
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 0.5
+                text: "VDA"
+                color: Theme.accentInk
+                font: vdaInk.font
+            }
         }
         // Detect Text saved a mask: a caption box with a T in it
         Rectangle {

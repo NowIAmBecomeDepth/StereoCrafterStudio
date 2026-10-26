@@ -2017,6 +2017,7 @@ class SplattingPreviewEngine:
         "boost_knee": "boost_knee_var",
         "boost_prefilter_radius": "boost_prefilter_radius_var",
         "boost_prefilter_eps": "boost_prefilter_eps_var",
+        "pop_amount": "pop_amount_var",
         "frame_break_thresh": "frame_break_thresh_var",
         "frame_break_erode_left": "fb_erode_left_var",
         "frame_break_erode_right": "fb_erode_right_var",
@@ -3936,6 +3937,7 @@ class SplattingPreviewEngine:
         global_depth_max: float,
         depth_dilate_left: float = 0.0,
         depth_blur_left: float = 0.0,
+        depth_blur_left_mix: Optional[float] = None,
         debug_batch_index: int = 0,
         debug_frame_index: int = 0,
         debug_task_name: str = "PreProcess",
@@ -3954,7 +3956,8 @@ class SplattingPreviewEngine:
             skip_preprocessing = True
 
         try:
-            mix_f = float(self.depth_blur_left_mix_var.get())
+            mix_f = float(depth_blur_left_mix if depth_blur_left_mix is not None
+                          else self.depth_blur_left_mix_var.get())
         except Exception:
             mix_f = 0.5
 
@@ -4249,7 +4252,11 @@ class SplattingPreviewEngine:
         depth_peak_warp = 1.0
         _peak_src = "flat 1.0"
         _boost_on = (self._safe_float(self.boost_amount_var, 0.0) > 0.0
-                     or self._safe_float(self.pop_amount_var, 0.0) > 0.0)
+                     or self._safe_float(self.pop_amount_var, 0.0) > 0.0
+                     or any(float((_v or {}).get(_n, 0.0) or 0.0) > 0.0
+                            for _f, _k, _v in (self.keyframe_track.items_sorted()
+                                               if getattr(self, 'keyframe_track', None) is not None else ())
+                            for _n in ('boost_amount_var', 'pop_amount_var')))
         if (_boost_on or preview_source == "Boost Zone"):
             if enable_global_norm and not sidecar_exists:
                 _peak_src = "GN domain (1.0 by construction)"
@@ -4355,6 +4362,7 @@ class SplattingPreviewEngine:
             depth_blur_size_y=params["depth_blur_size_y"],
             depth_dilate_left=params.get("depth_dilate_left", 0.0),
             depth_blur_left=params.get("depth_blur_left", 0.0),
+            depth_blur_left_mix=params.get("depth_blur_left_mix"),
             is_low_res_task=is_low_res_preview,
             max_raw_value=final_scaling_factor,
             global_depth_min=0.0,

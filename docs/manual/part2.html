@@ -450,12 +450,14 @@
   </table>
   <p><b>Replacing a DepthCrafter map.</b> When the output folder already holds a DepthCrafter map of the
      clip, it moves into a <code>DepthCrafter</code> folder inside the output folder, and the new map takes its
-     place, so Splatting shows the new depth straight away. Nothing is lost: with Splatting's
+     place, so Splatting shows the new depth straight away, with a <b>VDA</b> badge on the clip in its list. Nothing is lost: with Splatting's
      <span class="set">Multi-Map</span> on, that folder is one of the maps it offers. A later Video Depth
      Anything run of the same clip simply replaces its own earlier map.</p>
   <p>In Splatting, right-click a clip in Upcoming Jobs and choose <b>Rerun with Video Depth Anything</b>:
      this tab opens with that clip as its input and the clip's depth-map folder as its output. Press
      <span class="btn">Start</span>.</p>
+  <p>While it runs, the console's <b>Depth Map</b> tab shows each clip's progress as a bar: the depth pass,
+     then the encode, with frames done, speed and time left.</p>
   <div class="note"><b>Good to know</b><span>Large at 518 needs about 12 GB of graphics memory on a
      1920&times;800 clip. Short on memory? Pick a smaller Model or a lower Input Size.</span></div>
 </section>
@@ -526,7 +528,8 @@
       converts only the ticked clips; <span class="btn">Move to Finished</span> moves them into
       <code>finished</code> without converting them, for clips you've decided not to use.</li>
     <li><b>Little badges</b> on a clip show what's set for it: a sidecar, Pop Out Boost, Keyframes,
-      Frame Break, Rain (three blue streaks), a depth map edited in the Depth Map Editor (a pencil), or
+      Frame Break, Rain (three blue streaks), a depth map edited in the Depth Map Editor (a pencil), a depth
+      map made by <a href="#vda">Video Depth Anything</a> (<b>VDA</b>), or
       a saved Detect Text mask (a <b>T</b>), or an object taken out with Erase from Clip (a violet circle
       struck through -- Merging's list shows it too, where Put Back lays it back). The sidecar's badge sits
       beside the progress bars; the others on a line under the clip's name, so a row with any of them is a little

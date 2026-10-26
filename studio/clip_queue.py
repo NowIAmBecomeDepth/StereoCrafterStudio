@@ -190,7 +190,8 @@ def splat_fx(values: dict, depths: List[str], cache: Dict, paths: Optional[List[
     on the row); the fifth whether its depth map is an edit from the Depth Map
     Editor (2026-09-30); the sixth, given the source clips, whether Detect Text
     saved a mask for it (2026-10-03) -- False without them; the seventh whether its
-    sidecar has Particles on (2026-10-08)."""
+    sidecar has Particles on (2026-10-08); the eighth an object erased from it (2026-10-16); the ninth
+    whether its depth map came from Video Depth Anything (2026-10-25)."""
     folder = _sidecar_folder(values)
     # One listing of the folder, not two stats per clip (Studio audit
     # 2026-09-28, PERF: 14 ms for 300 clips, on the UI thread, after most
@@ -241,6 +242,27 @@ def splat_fx(values: dict, depths: List[str], cache: Dict, paths: Optional[List[
         row.append(text)
         row.append(part)
         row.append(gone)            # the eighth: an object erased from it (2026-10-16)
+    for row, vda in zip(out, _vda_flags(depths, cache)):
+        row.append(vda)             # the ninth: a Video Depth Anything map (user, 2026-10-25)
+    return out
+
+
+def _vda_flags(depths: List[str], cache: Dict) -> List[bool]:
+    """Per depth map: Video Depth Anything made it (its tag, core.vda.output.tagged) -- read again only when
+    the file changes (size, time)."""
+    from core.vda.output import tagged
+    out = []
+    for depth in depths:
+        try:
+            st = os.stat(depth)
+        except OSError:
+            out.append(False)
+            continue
+        key = ("vda", depth, st.st_mtime, st.st_size)
+        hit = cache.get(key)
+        if hit is None:
+            hit = cache[key] = tagged(depth)
+        out.append(hit)
     return out
 
 

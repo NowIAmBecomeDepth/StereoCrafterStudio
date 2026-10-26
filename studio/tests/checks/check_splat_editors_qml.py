@@ -425,7 +425,7 @@ pv.jumpTo(2); settle(); pv.jumpTo(1); settle()
 keep_tall(2000)
 _lg = find(sq, lambda c: c.objectName() == "jobQueueLegend")
 _li = [c for c in find_all(sq, lambda c: c.objectName() == "jobQueueLegendItem")]
-check("...a legend of the eight badges under the list (user, 2026-10-03; Particles 2026-10-08; Object removed 2026-10-16)", _lg is not None and _lg.isVisible() and len(_li) == 8
+check("...a legend of the nine badges under the list (user, 2026-10-03; Particles 2026-10-08; Object removed 2026-10-16; VDA 2026-10-25)", _lg is not None and _lg.isVisible() and len(_li) == 9
       and _lg.mapToItem(sq, QPointF(0, 0)).y() >= find(sq, lambda c: c.objectName() == "jobQueueList").mapToItem(sq, QPointF(0, 0)).y()
       + find(sq, lambda c: c.objectName() == "jobQueueList").height() - 0.5
       and _lg.mapToItem(sq, QPointF(0, _lg.height())).y() <= sq.height() + 0.5,

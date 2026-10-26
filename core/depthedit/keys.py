@@ -80,11 +80,20 @@ def settings_at(settings: LayerSettings, track: Optional[KeyframeTrack], frame: 
 
 
 def update_key_value(track: KeyframeTrack, frame: int, path: Tuple[str, ...], value) -> bool:
-    """A setting changed while on a key: that key takes the new value. False
-    when there is no key on `frame` or the setting isn't keyed."""
-    entry = track.frame_at(frame)
-    if entry is None or not is_keyed_path(path):
+    """A keyed setting changed: on a key, that key takes the new value. Off a key on a layer that has
+    keys, a DYNAMIC key is added there, holding the frame's values with the change in it (user,
+    2026-10-25: "make sure any controls that keyframes can attach to stay live" -- as Splatting's dials:
+    the change went only to the layer's own value, which its keys hide on every frame). False when
+    the setting isn't keyed or the layer has no keys (its own value is the one shown).
+    """
+    if not is_keyed_path(path) or track is None or track.is_empty():
         return False
+    entry = track.frame_at(frame)
+    if entry is None:
+        values = dict(track.values_at(int(frame)) or {})
+        values[key_name(path)] = float(value)
+        track.set_keyframe(frame, "dynamic", values)
+        return True
     values = dict(entry["values"])
     values[key_name(path)] = float(value)
     track.set_keyframe(frame, entry["type"], values)

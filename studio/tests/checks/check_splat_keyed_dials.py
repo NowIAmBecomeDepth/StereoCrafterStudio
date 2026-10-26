@@ -204,6 +204,59 @@ for _key, _val in (("max_disp", 20.0), ("zero_disparity_anchor", 0.3), ("depth_g
           _p0 is not None and _pic() != _p0 and abs(pv.property("keyed")[_key] - _val) < 1e-6)
 sp._set("preview_source", "Splat Result"); settle()
 
+# EVERY keyframed setting stays live on a keyframe (user, 2026-10-25: "make sure any controls that keyframes
+# can attach to stay live after keyframes exist on a clip" -- Pop-Out stayed frozen): turned on a key, the
+# next redraw draws with it -- the settings handed to the picture, and the depth pre-processing's own --
+# and that keyframe saves it.
+eng = pv._engine
+_seen = {"params": None, "depth": None, "draws": 0}
+_cb = eng.previewer.processing_callback
+def _spy_cb(frames, params, _cb=_cb):
+    _seen["params"], _seen["draws"] = dict(params), _seen["draws"] + 1
+    return _cb(frames, params)
+eng.previewer.processing_callback = _spy_cb
+_pdb = eng._process_depth_batch
+def _spy_depth(**kw):
+    _seen["depth"] = {k: v for k, v in kw.items() if k != "batch_depth_numpy_raw"}
+    return _pdb(**kw)
+eng._process_depth_batch = _spy_depth
+_TRY = {"boost_amount": 0.3, "boost_thresh": 0.7, "boost_curve": 3.0, "boost_knee": 0.2, "boost_prefilter_radius": 4.0,
+        "boost_prefilter_eps": 0.02, "depth_dilate_size_x": 3.0, "depth_dilate_size_y": 2.0, "depth_blur_size_x": 7.0,
+        "depth_blur_size_y": 3.0, "depth_dilate_left": 2.0, "depth_blur_left": 3.0, "depth_blur_left_mix": 0.8,
+        "depth_gamma": 1.3, "max_disp": 25.0, "pop_amount": 6.0, "zero_disparity_anchor": 0.55, "border_width": 2.0,
+        "border_bias": 0.3, "frame_break_thresh": 0.6, "fb_erode_left": 2.0, "fb_erode_right": 3.0,
+        "fb_erode_global": 1.0, "fb_edge_blur": 4.0}
+_keyed = [v for vs in eng.KEYFRAME_VAR_GROUPS.values() for v in vs]
+_into = {var: k for k, var in eng.KEYFRAME_SETTINGS_VAR_MAP.items()}
+check("every keyframed setting has a value to try", sorted(v[:-4] for v in _keyed) == sorted(_TRY), str(_keyed))
+pv.seek(20); settle()
+_stale = []
+for _var in _keyed:
+    _key, _val = _var[:-4], _TRY.get(_var[:-4], 1.0)
+    _n = _seen["draws"]
+    QMetaObject.invokeMethod(page, "keyEdit", Q_ARG("QVariant", _key), Q_ARG("QVariant", _val)); settle()
+    _par, _dep = _seen["params"] or {}, _seen["depth"] or {}
+    if _key in ("border_width", "border_bias"):        # Manual: they become the two borders' widths
+        w = _val if _key == "border_width" else _TRY["border_width"]
+        b = _val if _key == "border_bias" else None
+        ok = _seen["draws"] > _n and ("left_border_pct" in _par)
+        if b is not None:
+            want = (w * (1.0 - b), w) if b > 0 else (w, w * (1.0 + b))
+            ok = ok and abs(_par["left_border_pct"] - want[0]) < 1e-6 and abs(_par["right_border_pct"] - want[1]) < 1e-6
+    else:
+        _sk = _into.get(_var, _key)
+        ok = _seen["draws"] > _n and abs(float(_par.get(_sk, -999)) - _val) < 1e-6
+        if _key in ("depth_blur_left_mix",):         # the pre-processing reads it too
+            ok = ok and abs(float(_dep.get("depth_blur_left_mix", -999)) - _val) < 1e-6
+    if not ok:
+        _stale.append(f"{_key}: drew {_par.get(_into.get(_var, _key))} / depth {_dep.get(_key)}, wanted {_val}")
+check("on a keyframe, every keyframed dial turned redraws the preview with it", not _stale, "; ".join(_stale))
+_vals = dict((pv._kf_track.frame_at(20) or {}).get("values") or {})
+check("...and the keyframe holds every one of them", all(abs(float(_vals.get(v, -999)) - _TRY[v[:-4]]) < 1e-6 for v in _keyed),
+      str({v: _vals.get(v) for v in _keyed if abs(float(_vals.get(v, -999)) - _TRY[v[:-4]]) >= 1e-6}))
+eng.previewer.processing_callback = _cb
+del eng._process_depth_batch
+
 # Full Preview's floating dials (user, 2026-10-14): Convergence, Disparity and Gamma under the
 # frame slider -- the page's own dials, keyframes and all
 from PySide6.QtGui import QWindow

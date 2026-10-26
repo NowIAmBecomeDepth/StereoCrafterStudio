@@ -31,6 +31,11 @@ Item {
     property bool centerClickable: false
     signal centerClicked()
     readonly property alias centerButton: centre
+    // Main (user, 2026-10-25): the app's name in the top-left corner opens the manual at its contents.
+    // Client area too, when clickable (Main hands nameButton to WinFrame).
+    property bool nameClickable: false
+    signal nameClicked()
+    readonly property alias nameButton: nameBtn
 
     implicitHeight: 32
 
@@ -40,6 +45,25 @@ Item {
         else window.showMaximized()
     }
 
+    // the name as a button, behind it (as the project name's): its hover, press and tip
+    Item {
+        id: nameBtn
+        objectName: "titleName"
+        x: leftRow.x - 6
+        width: leftRow.width + 10
+        height: bar.height - 6
+        anchors.verticalCenter: parent.verticalCenter
+        Rectangle {
+            anchors.fill: parent
+            radius: 7
+            visible: bar.nameClickable
+            color: nameTap.pressed ? Theme.alpha(Theme.fg, 0.12) : nameHover.hovered ? Theme.hover : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.dur(120) } }
+        }
+        HoverHandler { id: nameHover; enabled: bar.nameClickable; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: nameTap; enabled: bar.nameClickable; onTapped: bar.nameClicked() }
+        HoverTip { tip: bar.nameClickable ? "Open the manual" : "" }
+    }
     Row {
         id: leftRow
         x: 12

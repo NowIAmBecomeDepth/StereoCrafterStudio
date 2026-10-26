@@ -1901,7 +1901,7 @@ No button lit means custom "
                 countText: String(page.sp.clipCount || "—")
                 countHelp: "Which clip of the batch is being splatted, and how many there are in total."
                 // what the badges mean, under the list (user, 2026-10-03)
-                legendKinds: ["sidecar", "edited", "text", "keyframe", "break", "pop", "particles", "erased"]
+                legendKinds: ["sidecar", "edited", "vda", "text", "keyframe", "break", "pop", "particles", "erased"]
             }
         }
     }

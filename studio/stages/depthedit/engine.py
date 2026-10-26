@@ -1618,7 +1618,8 @@ class DepthEditEngine:
         m = layer.masks.get(self.frame_idx, layer.settings.steady) if layer.masks is not None else None  # v2: Steady
         if m is None:
             return None
-        return edit_ops.mask_bbox(edit_ops.effective_mask(m, layer.settings, self._unit(self.frame_idx)))
+        here = keys.settings_at(layer.settings, layer.keys, self.frame_idx)  # v2: the frame's keyed values
+        return edit_ops.mask_bbox(edit_ops.effective_mask(m, here, self._unit(self.frame_idx)))
 
     # -- v1 DepthEditorGUI._set_gradient_line (depth_editor_gui.py:1647)
     def _set_gradient_line(self, a: Tuple[float, float], b: Tuple[float, float]) -> None:
@@ -1651,9 +1652,12 @@ class DepthEditEngine:
             self._status("The layer has no mask on this frame to sample.")
             return
         unit = self._unit(self.frame_idx)
-        stats = edit_ops.object_stats(unit, edit_ops.effective_mask(m, layer.settings, unit))
+        here = keys.settings_at(layer.settings, layer.keys, self.frame_idx)  # v2: the frame's keyed values
+        stats = edit_ops.object_stats(unit, edit_ops.effective_mask(m, here, unit))
         g = layer.settings.gradient
         g.near, g.far = round(stats["p95"], 3), round(stats["p5"], 3)
+        keys.update_key_value(layer.keys, self.frame_idx, ("gradient", "near"), g.near)  # v2: into the key
+        keys.update_key_value(layer.keys, self.frame_idx, ("gradient", "far"), g.far)
         self._refresh_layer_panel(keep_list=True)
         self._schedule_preview()
 

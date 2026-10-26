@@ -1511,7 +1511,9 @@ class DepthEditController(QObject):
         if g.enabled and (eng.tool_var.get() == "Gradient" or eng.page_var.get() == "Gradient"):
             E = self._module.edit_ops
             m = layer.masks.get(idx, layer.settings.steady) if layer.masks is not None else None
-            bbox = E.mask_bbox(E.effective_mask(m, layer.settings, eng._unit(idx))) if m is not None else None
+            # the object's box as this frame draws it: its keyed Grow / edges (user, 2026-10-25)
+            here = self._module.keys.settings_at(layer.settings, layer.keys, idx)
+            bbox = E.mask_bbox(E.effective_mask(m, here, eng._unit(idx))) if m is not None else None
             (ax, ay), (bx, by) = E.gradient_endpoints(g, eng.info.width, eng.info.height, bbox)
             out["gradient"] = [ax / eng.info.width, ay / eng.info.height, bx / eng.info.width, by / eng.info.height]
         return out

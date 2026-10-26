@@ -45,6 +45,24 @@ def is_vda_map(path: str) -> bool:
         return False
 
 
+#: How much of a map's end tagged() reads: ffmpeg's MP4 muxer puts the tags last (measured: the tag ends 43 bytes
+#: from the end of a 24- and a 3000-frame map alike).
+TAIL = 4096
+
+
+def tagged(path: str) -> bool:
+    """Whether the map at `path` is VDA's, by its tag in the file's last bytes -- no ffprobe, so the clip list's
+    badges (studio.clip_queue) can ask for every clip on the UI thread."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - TAIL))
+            return TAG.encode("utf-8") in f.read()
+    except OSError:
+        return False
+
+
 def _free_name(folder: str, name: str) -> str:
     dest = os.path.join(folder, name)
     if not os.path.exists(dest):

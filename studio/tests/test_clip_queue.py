@@ -150,19 +150,19 @@ class SplatFxTests(unittest.TestCase):
             side.write_text(json.dumps({"keyframe_track": True}))
             cache = {}
             vals = {"input_depth_maps": str(d)}
-            self.assertEqual(Q.splat_fx(vals, depths, cache), [[True, False, False, True, False, False, False, False], [False] * 8])
+            self.assertEqual(Q.splat_fx(vals, depths, cache), [[True, False, False, True, False, False, False, False, False], [False] * 9])
             side.write_text(json.dumps({"boost_amount": 0.5}))
             os.utime(side, (1, 2_000_000_000))
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, True, True, False, False, False, False])
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, True, True, False, False, False, False, False])
             # Particles on (user, 2026-10-08): the seventh flag
             side.write_text(json.dumps({"rain_mode": "moving"}))
             os.utime(side, (1, 2_000_000_100))
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, False, True, False, False, True, False])
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, False, True, False, False, True, False, False])
             side.write_text(json.dumps({"rain_mode": "off"}))
             os.utime(side, (1, 2_000_000_200))
             self.assertFalse(Q.splat_fx(vals, depths, cache)[0][6])
             side.unlink()
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False] * 8)
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False] * 9)
 
     def test_rain_badge_only_from_a_saved_sidecar(self):
         """user, 2026-10-10: Rain turned on in the page lit the badge on every clip (bug sweep
@@ -222,6 +222,22 @@ class ErasedBadgeTests(unittest.TestCase):
         os.utime(self.erased, (1, 2_000_000_000))       # replaced: the record no longer fits it
         rows = Q.splat_fx({"input_depth_maps": str(self.d)}, [str(self.d / "x_depth.mp4")], {}, [str(self.erased)])
         self.assertFalse(rows[0][7])
+
+    def test_a_vda_map(self):
+        # user, 2026-10-25: a badge on the clips whose depth map Video Depth Anything made (its tag)
+        import subprocess
+        from core.vda.output import TAG
+        maps = [self.d / "shotA_depth.mp4", self.d / "shotB_depth.mp4"]
+        for p, tag in zip(maps, (["-metadata", f"comment={TAG}"], [])):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=64x32:d=0.2",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", *tag, str(p)], check=True)
+        cache = {}
+        rows = Q.splat_fx({"input_depth_maps": str(self.d)}, [str(m) for m in maps], cache)
+        self.assertEqual([r[8] for r in rows], [True, False])
+        self.assertEqual(Q.splat_fx({"input_depth_maps": str(self.d)}, [str(maps[0])], cache)[0][8], True)  # cached
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=64x32:d=0.3",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(maps[0])], check=True)   # DepthCrafter's again
+        self.assertFalse(Q.splat_fx({"input_depth_maps": str(self.d)}, [str(maps[0])], cache)[0][8])
 
     def test_merging(self):
         inp = self.d / "inpainted"

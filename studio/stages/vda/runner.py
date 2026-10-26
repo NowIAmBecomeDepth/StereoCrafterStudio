@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -157,7 +158,7 @@ class VdaRunner:
             raw = np.lib.format.open_memmap(raw_path, mode="w+", dtype=np.float16, shape=(n, oh, ow))
             lows: List[float] = []
             highs: List[float] = []
-            tick = _Ticker(self.hooks, n, "depth")
+            tick = _Ticker(self.hooks, n, "depth", os.path.basename(path))
 
             def keep(d):
                 d = d.reshape(1, 1, *d.shape[-2:]).float()
@@ -201,7 +202,7 @@ class VdaRunner:
             writer = DepthWriter(part, ClipInfo(path=final, width=ow, height=oh, num_frames=got, fps=info.fps,
                                                 pix_fmt="yuv420p10le", full_range=False),
                                  metadata={"comment": OUT.TAG})
-            tick = _Ticker(self.hooks, got, "encode")
+            tick = _Ticker(self.hooks, got, "encode", os.path.basename(path))
             for a in range(0, got, ENCODE_BATCH):
                 if self.stop_now.is_set():
                     raise Stopped()
@@ -271,18 +272,50 @@ class VdaRunner:
 
 
 class _Ticker:
-    """Frame progress to the hooks, at most twice a second (nothing redraws continuously during a job)."""
+    """Frame progress, at most twice a second (nothing redraws continuously during a job): to the hooks (the
+    page's bar), and as a progress row in the console's Depth Map tab (user, 2026-10-25: "add vda job progress
+    to the depth map tab in the console") -- a '\r' bar on stderr, which the console shows live in the running
+    job's tab (log_model.StreamTee) and keeps as a line when the pass ends."""
 
-    def __init__(self, hooks: Hooks, total: int, phase: str):
-        self.hooks, self.total, self.phase = hooks, total, phase
+    LABELS = {"depth": "VDA depth", "encode": "VDA encode"}
+
+    def __init__(self, hooks: Hooks, total: int, phase: str, name: str = ""):
+        self.hooks, self.total, self.phase, self.name = hooks, total, phase, name
         self.last = 0.0
+        self.t0 = time.monotonic()
         hooks.frames(0, total, phase)
+        self._bar(0)
 
     def __call__(self, done: int) -> None:
         now = time.monotonic()
         if done >= self.total or now - self.last >= 0.5:
             self.last = now
             self.hooks.frames(done, self.total, self.phase)
+            self._bar(done)
+
+    def bar_text(self, done: int) -> str:
+        took = time.monotonic() - self.t0
+        fps = done / took if took > 0 and done else 0.0
+        pct = 100 * done // self.total if self.total else 0
+        left = f", {_clock((self.total - done) / fps)} left" if fps > 0 and done < self.total else ""
+        speed = f", {fps:.1f} fps" if fps > 0 else ""
+        clip = f" {self.name}" if self.name else ""
+        # cli_utils.draw_progress_bar's form, which the console draws as a bar (log_model.parse_bar)
+        fill = 20 * done // self.total if self.total else 0
+        bar = "█" * fill + "-" * (20 - fill)
+        return f"{self.LABELS.get(self.phase, self.phase)}{clip} |{bar}| {pct}% {done}/{self.total} frames{speed}{left}"
+
+    def _bar(self, done: int) -> None:
+        try:
+            sys.stderr.write("\r" + self.bar_text(done) + ("\n" if done >= self.total else ""))
+            sys.stderr.flush()
+        except Exception:
+            pass                # no console (a bare pythonw): the page's bar has it
+
+
+def _clock(seconds: float) -> str:
+    s = int(round(max(0.0, seconds)))
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
 def _reader(path: str, info, n: int, width: int, height: int):

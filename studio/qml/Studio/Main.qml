@@ -325,7 +325,7 @@ ApplicationWindow {
         fitting = true
         try {
             WinFrame.attach(win, titleBar, titleBar.maxButton,
-                            [titleBar.minButton, titleBar.closeButton, titleBar.centerButton])
+                            [titleBar.minButton, titleBar.closeButton, titleBar.centerButton, titleBar.nameButton])
         } catch (e) {
             console.warn("Custom title bar did not attach:", e)
         } finally {
@@ -578,6 +578,10 @@ ApplicationWindow {
             centerText: Shell.projectName
             centerClickable: true
             onCenterClicked: projectPicker.opened ? projectPicker.close() : projectPicker.open()
+            // the name opens the manual at its contents (user, 2026-10-25)
+            nameClickable: true
+            onNameClicked: if (!Shell.openManual(""))
+                               Theme.toast("warning", "Manual not found", "The manual isn't in this Studio folder (docs/manual).")
         }
 
         StageTabBar {
