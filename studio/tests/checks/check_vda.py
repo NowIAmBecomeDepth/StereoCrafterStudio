@@ -117,6 +117,7 @@ check("...a size typed that the model can't take snaps up to one it can (500 -> 
 vst.setProperty("input_size", 392); pump(0.3)
 check("...and the weights it has: no download offered for Small", vda.property("weightsInstalled") is True
       and one("vdaWeightsMissing") is None)
+check("...nor the Weights row (it folds away once the weights are found; user, 2026-10-25)", one("vdaWeightsRow") is None)
 
 # ---- Rerun with Video Depth Anything, the preview showing the clip --------------------------
 sp = objs["Splatting"]; pv = sp.preview
@@ -188,6 +189,41 @@ check("the Depth Map console tab shows VDA's progress as bars, depth and encode,
       all(any(r[0].startswith(f"VDA {ph} {c}.mp4") and r[4][1] >= 0.999 for r in dm)
           for ph in ("depth", "encode") for c in ("clipA", "clipB")), str([r[0] for r in dm][-6:]))
 check("...and not in another stage's tab", not _bars("splatting"), str([r[0] for r in _bars("splatting")][:3]))
+
+# ---- weights the user already has, from iw3 (user, 2026-10-25) --------------------------------
+ck = tmp / "iw3" / "nunif" / "iw3" / "pretrained_models" / "hub" / "checkpoints"; ck.mkdir(parents=True)
+shutil.move(str(W / _real.name), str(ck / _real.name))           # out of the models folder
+vda.recheckWeights(); pump(0.3)
+check("Small out of the models folder: not installed", vda.property("weightsInstalled") is False)
+show(0); dcpage.setProperty("engine", 1); pump(0.5)
+check("...the Weights row shows, saying Studio's models folder", until(lambda: one("vdaWeightsDir") is not None, 5)
+      and one("vdaWeightsDir").property("text") == "Studio's models folder")
+toasts.clear()
+(tmp / "nothing").mkdir()
+vda.setWeightsDir(str(tmp / "nothing")); pump(0.3)
+check("a folder without weights is refused, saying so", vda.property("weightsDir") == "" and toasts
+      and toasts[-1][0] == "warning", str(toasts[-1:]))
+vda.setWeightsDir(str(tmp / "iw3")); pump(0.5)
+check("iw3's own folder picked: its checkpoints folder found inside", n(vda.property("weightsDir")) == n(ck)
+      and vda.property("weightsDirSizes") == "Small" and vda.property("weightsInstalled") is True,
+      f"{vda.property('weightsDir')} / {vda.property('weightsDirSizes')}")
+check("...named: iw3 and the sizes there", vda.property("weightsDirLabel") == "iw3 · Small", vda.property("weightsDirLabel"))
+check("...and found, the Weights row folds away", until(lambda: one("vdaWeightsRow") is None, 5))
+from PySide6.QtCore import QObject
+_wm = next(o for o in win.findChildren(QObject) if o.objectName() == "vdaWeightsMenu")
+_wc = next(o for o in win.findChildren(QObject) if o.objectName() == "vdaWeightsMenuClear")
+check("...File > VDA Weights Folder changes it after, its tip naming the folder; Use Studio's Models Folder Only is on",
+      n(ck) in n(str(_wm.property("tip")).replace("Now: ", "").split(" (")[0]) and _wc.property("enabled") is True,
+      str(_wm.property("tip")))
+vda.testClip(str(FIX / "src" / "clipB.mp4"))
+until(lambda: vda.property("busy"), 20); until(lambda: not vda.property("busy"), 600); pump(1.0)
+_tr = glob.glob(str(FIX / "depth" / "Test Renders" / "**" / "clipB_depth.mp4"), recursive=True)
+check("...and a run takes its weights from there", bool(_tr) and OUT.is_vda_map(_tr[0]), str(toasts[-1:]))
+vda.clearWeightsDir(); pump(0.3)
+check("Use Studio's Models Folder Only goes back to it: not found there, so the Weights row shows again",
+      vda.property("weightsDir") == "" and vda.property("weightsInstalled") is False
+      and until(lambda: one("vdaWeightsDir") is not None, 5) and one("vdaWeightsDir").property("text") == "Studio's models folder")
+vst.setProperty("model_size", "Small"); pump(0.2)
 
 # ---- a size not downloaded -----------------------------------------------------------------
 show(0); dcpage.setProperty("engine", 1); pump(0.5)

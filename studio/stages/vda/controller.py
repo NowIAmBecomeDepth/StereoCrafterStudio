@@ -64,6 +64,10 @@ HELP: Dict[str, str] = {
     "ema": "EMA Decay: how slowly the range follows (0.9 is iw3's; closer to 1 is steadier). Buffer: how many "
            "frames ahead each frame's range looks (30 is iw3's).",
     "use_fp16": "Half precision on the card: about twice as fast, the same maps to the eye.",
+    "weights_dir": "Already have Video Depth Anything from iw3? Point Studio at that folder and it uses those "
+                   "checkpoints, with no download -- pick iw3's own folder and Studio finds its checkpoints "
+                   "folder inside (pretrained_models/hub/checkpoints). A size not there comes from Studio's "
+                   "models folder.",
     "process_length": "Only the first this many frames of each clip; -1 for all of them.",
     "output_suffix": "Added to the clip's name: Splatting looks for _depth.",
     "move_to_finished": "On: each clip whose depth map is done moves into a 'finished' folder inside the input "
@@ -210,7 +214,7 @@ class VdaController(QObject):
 
     @Slot()
     def resetDefaults(self) -> None:
-        keep = {k: self._map.value(k) for k in ("input_dir_or_file_var", "output_dir")}
+        keep = {k: self._map.value(k) for k in ("input_dir_or_file_var", "output_dir", "weights_dir")}
         self._replace_all({**S.DEFAULTS, **keep})
         self.toast.emit("info", "Settings reset",
                         "Every Video Depth Anything setting is back to its default. Your folders were kept.")
@@ -242,12 +246,64 @@ class VdaController(QObject):
 
     @Property(bool, notify=weightsChanged)
     def weightsInstalled(self):
-        """The picked size's checkpoint is in the models folder."""
+        """The picked size's checkpoint is in the user's weights folder or the models folder."""
         from core.vda import model as M
         try:
-            return M.checkpoint_path(str(self._map.value("model_size"))).is_file()
+            return M.checkpoint_path(str(self._map.value("model_size")), self._own_dir()).is_file()
         except Exception:
             return False
+
+    def _own_dir(self) -> str:
+        return str(self._map.value("weights_dir") or "")
+
+    @Property(str, notify=weightsChanged)
+    def weightsDir(self):
+        """The user's own checkpoints folder ("" = none: the models folder)."""
+        return self._own_dir()
+
+    @Property(str, notify=weightsChanged)
+    def weightsDirSizes(self):
+        """The sizes found in the user's folder, "Small, Large" ("" for none or no folder)."""
+        from core.vda import model as M
+        return ", ".join(M.sizes_in(self._own_dir())) if self._own_dir() else ""
+
+    @Property(str, notify=weightsChanged)
+    def weightsDirLabel(self):
+        """The row's short name for the folder (its path is too long for it; the tip has it): "iw3" for a folder
+        inside an iw3 install, else the folder's own name -- then the sizes there: "iw3 · Large"."""
+        own = self._own_dir()
+        if not own:
+            return ""
+        parts = [p for p in own.replace("\\", "/").split("/") if p]
+        name = "iw3" if any(p.lower() == "iw3" for p in parts) else (parts[-1] if parts else own)
+        sizes = self.weightsDirSizes
+        return f"{name} · {sizes}" if sizes else name
+
+    @Slot(str)
+    def setWeightsDir(self, folder: str) -> None:
+        """Point VDA at the user's own checkpoints (user, 2026-10-25: "point studio to their vda weights folder
+        since they likely already have them downloaded from iw3"): the folder picked, or iw3's checkpoints
+        folder inside it."""
+        from core.vda import model as M
+        found = M.resolve_weights_dir(folder)
+        if found is None:
+            self.toast.emit("warning", "No Video Depth Anything weights there",
+                            f"{folder}\nhas no video_depth_anything_vits / vitb / vitl .pth, nor does an iw3 "
+                            "checkpoints folder inside it.")
+            return
+        self._map.insert("weights_dir", str(found))
+        self._last_good["weights_dir"] = str(found)
+        self.save()
+        self.weightsChanged.emit()
+        self.toast.emit("success", "VDA weights folder set", f"{found}\nFound: {', '.join(M.sizes_in(found))}")
+
+    @Slot()
+    def clearWeightsDir(self) -> None:
+        """Back to the models folder only."""
+        self._map.insert("weights_dir", "")
+        self._last_good["weights_dir"] = ""
+        self.save()
+        self.weightsChanged.emit()
 
     @Property(str, notify=weightsChanged)
     def weightsKey(self):

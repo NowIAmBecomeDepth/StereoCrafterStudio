@@ -84,6 +84,13 @@ Item {
         currentFolder: page.st.input_dir_or_file_var
         onAccepted: page.st.input_dir_or_file_var = selectedPath
     }
+    // the user's own checkpoints (iw3's): the folder, or iw3's own -- its checkpoints folder is found inside
+    FolderPicker {
+        id: weightsDirDlg
+        title: "Video Depth Anything weights: a folder of .pth files, or your iw3 folder"
+        currentFolder: Shell.pathToUrl(page.vda.weightsDir)
+        onAccepted: page.vda.setWeightsDir(Shell.urlToPath(selectedFolder))
+    }
     FolderPicker {
         id: outputFolderDlg
         title: "Output folder"
@@ -188,6 +195,48 @@ Item {
                         help: page.help("model_size")
                         VDrop { objectName: "vdaModelSize"; key: "model_size"; model: page.vda.choices.model_size }
                     }
+                    // the weights it uses: Studio's models folder, or a folder of the user's own -- iw3's, which
+                    // most users have already (user, 2026-10-25). Shown only until the size picked is found
+                    // ("hide the weights folder selector once they're successfully loaded in"); File > VDA
+                    // Weights Folder changes it after.
+                    FieldRow {
+                        objectName: "vdaWeightsRow"
+                        shown: !page.vda.weightsInstalled
+                        label: "Weights"
+                        help: page.help("weights_dir")
+                        RowLayout {
+                            width: parent.width
+                            spacing: 6
+                            Text {
+                                objectName: "vdaWeightsDir"
+                                Layout.fillWidth: true
+                                text: page.vda.weightsDir !== "" ? page.vda.weightsDirLabel : "Studio's models folder"
+                                elide: Text.ElideRight
+                                color: page.vda.weightsDir !== "" ? Theme.fg : Theme.fgMuted
+                                font.family: Theme.bodyFont
+                                font.pixelSize: Theme.bodySize
+                                HoverTip {
+                                    tip: page.vda.weightsDir !== ""
+                                         ? page.vda.weightsDir.replace(/\//g, "\\") + "\nHas: " + (page.vda.weightsDirSizes || "none now")
+                                           + "\nA size not there comes from Studio's models folder."
+                                         : "Studio's own models folder (Settings > Studio > Models). Browse to use weights you already have, iw3's."
+                                }
+                            }
+                            AccentButton {
+                                objectName: "vdaWeightsBrowse"
+                                kind: "outline"; iconGlyph: Theme.icon.folder; implicitWidth: 34
+                                onClicked: weightsDirDlg.open()
+                                HoverTip { tip: "Pick a folder of Video Depth Anything .pth files, or your iw3 folder: Studio finds its checkpoints folder inside." }
+                            }
+                            AccentButton {
+                                objectName: "vdaWeightsClear"
+                                visible: page.vda.weightsDir !== ""
+                                kind: "ghost"; iconGlyph: Theme.icon.close; implicitWidth: 30
+                                onClicked: page.vda.clearWeightsDir()
+                                HoverTip { tip: "Back to Studio's models folder only." }
+                            }
+                        }
+                    }
                     // the picked size not downloaded yet: its download, here
                     ColumnLayout {
                         objectName: "vdaWeightsMissing"
@@ -198,7 +247,8 @@ Item {
                             text: page.dl.error !== "" ? page.dl.error
                                   : page.dl.running ? page.dl.text
                                   : page.dl.on ? "Waiting for the download running in Settings > Studio > Models."
-                                  : "Video Depth Anything " + page.st.model_size + " isn't in the models folder yet."
+                                  : "Video Depth Anything " + page.st.model_size + " isn't in the models folder yet"
+                                    + (page.vda.weightsDir !== "" ? " or your weights folder." : ". Have it from iw3? Browse to its folder above.")
                         }
                         RowLayout {
                             spacing: 8
@@ -400,6 +450,23 @@ Item {
             enabled: page.idle
             onTriggered: page.confirm("Reset Settings", "Are you sure you want to reset all Video Depth Anything settings to their default values?",
                                       "Reset", () => page.vda.resetDefaults())
+        }
+        MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
+        // the Weights row folds away once the weights are found: changed or cleared here after (user, 2026-10-25)
+        MenuItem {
+            objectName: "vdaWeightsMenu"
+            text: "VDA Weights Folder..."
+            property string tip: page.vda.weightsDir !== ""
+                                 ? "Now: " + page.vda.weightsDir.replace(/\//g, "\\") + " (" + (page.vda.weightsDirSizes || "none") + ")"
+                                 : "Use Video Depth Anything weights you already have -- pick your iw3 folder. Now: Studio's models folder."
+            enabled: page.idle
+            onTriggered: weightsDirDlg.open()
+        }
+        MenuItem {
+            objectName: "vdaWeightsMenuClear"
+            text: "Use Studio's Models Folder Only"
+            enabled: page.idle && page.vda.weightsDir !== ""
+            onTriggered: page.vda.clearWeightsDir()
         }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
         MenuItem {

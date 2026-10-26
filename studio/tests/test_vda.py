@@ -62,6 +62,46 @@ class SizesTest(unittest.TestCase):
             self.assertEqual(h % 2, 0)
 
 
+class OwnWeightsTest(unittest.TestCase):
+    """The user's own checkpoints -- iw3's (user, 2026-10-25: "point studio to their vda weights folder")."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="vda-own-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _iw3(self, *names):
+        ck = self.tmp / "iw3" / "nunif" / "iw3" / "pretrained_models" / "hub" / "checkpoints"
+        ck.mkdir(parents=True)
+        for n in names:
+            (ck / n).write_bytes(b"x")
+        return ck
+
+    def test_the_iw3_folder_itself_finds_its_checkpoints(self):
+        ck = self._iw3("video_depth_anything_vitb.pth", "video_depth_anything_vitl.pth")
+        for picked in (self.tmp / "iw3", self.tmp / "iw3" / "nunif", ck):
+            self.assertEqual(M.resolve_weights_dir(picked), ck, picked)
+        self.assertEqual(M.sizes_in(ck), ["Base", "Large"])
+
+    def test_a_folder_without_any_is_refused(self):
+        (self.tmp / "empty").mkdir()
+        self.assertIsNone(M.resolve_weights_dir(self.tmp / "empty"))
+        self.assertIsNone(M.resolve_weights_dir(""))
+
+    def test_own_folder_first_then_the_models_folder(self):
+        ck = self._iw3("video_depth_anything_vitb.pth")
+        self.assertEqual(M.checkpoint_path("Base", str(ck)), ck / "video_depth_anything_vitb.pth")
+        small = M.checkpoint_path("Small", str(ck))                  # not there: Studio's own
+        self.assertEqual(small.parent.name, M.FOLDER)
+        self.assertEqual(M.checkpoint_path("Small", ""), small)
+
+    def test_kept_by_reset(self):
+        self.assertEqual(S.DEFAULTS["weights_dir"], "")
+        src = (Path(S.__file__).with_name("controller.py")).read_text(encoding="utf-8")
+        self.assertIn('("input_dir_or_file_var", "output_dir", "weights_dir")', src)
+
+
 class RangeTest(unittest.TestCase):
     def test_whole_clip_is_one_range(self):
         self.assertEqual(N.whole_clip([1, 0.5, 2], [3, 4, 2.5]), [(0.5, 4)] * 3)

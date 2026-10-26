@@ -60,10 +60,46 @@ def checkpoint_name(size: str) -> str:
     return f"video_depth_anything_{SIZES[size]}.pth"
 
 
-def checkpoint_path(size: str) -> Path:
-    """Where `size`'s checkpoint is (or would be downloaded to)."""
+def checkpoint_path(size: str, weights_dir: Optional[str] = None) -> Path:
+    """Where `size`'s checkpoint is: in `weights_dir` when the user pointed Studio at a folder of their own
+    (iw3's, say) and it is there, else in the models folder (or where it would be downloaded to)."""
     name = checkpoint_name(size)
+    if weights_dir:
+        own = Path(weights_dir) / name
+        if own.is_file():
+            return own
     return weights_paths.find(FOLDER, marker=name) / name
+
+
+#: Where a checkpoints folder sits inside an iw3 install (torch.hub's cache, iw3's pretrained_models/hub): a
+#: user who picks iw3's own folder (or one above it) is taken to it.
+IW3_CHECKPOINTS = (("nunif", "iw3", "pretrained_models", "hub", "checkpoints"),
+                   ("iw3", "pretrained_models", "hub", "checkpoints"),
+                   ("pretrained_models", "hub", "checkpoints"),
+                   ("hub", "checkpoints"),
+                   ("checkpoints",))
+
+
+def sizes_in(folder) -> list:
+    """The sizes whose checkpoints are in `folder`, in SIZES' order."""
+    try:
+        return [s for s in SIZES if (Path(folder) / checkpoint_name(s)).is_file()]
+    except (OSError, TypeError):
+        return []
+
+
+def resolve_weights_dir(folder) -> Optional[Path]:
+    """The folder holding Video Depth Anything checkpoints for a folder the user picked: the folder itself, or
+    iw3's checkpoints folder inside it (user, 2026-10-25: "point studio to their vda weights folder since they
+    likely already have them downloaded from iw3"). None when neither has any."""
+    if not folder:
+        return None
+    base = Path(folder)
+    for parts in ((),) + IW3_CHECKPOINTS:
+        cand = base.joinpath(*parts)
+        if sizes_in(cand):
+            return cand
+    return None
 
 
 def snap_input(value) -> int:
@@ -103,14 +139,16 @@ def output_size(height: int, width: int) -> Tuple[int, int]:
 
 # ---- loading -----------------------------------------------------------------------------
 
-def load(size: str, mode: str = "online", device=None):
-    """`size`'s model on `device` (CUDA when there is one), eval, with iw3's fixes on."""
+def load(size: str, mode: str = "online", device=None, weights_dir: Optional[str] = None):
+    """`size`'s model on `device` (CUDA when there is one), eval, with iw3's fixes on. `weights_dir`: the
+    user's own checkpoints folder, looked in first."""
     import torch
 
-    path = checkpoint_path(size)
+    path = checkpoint_path(size, weights_dir)
     if not path.is_file():
-        raise ModelsMissing(f"Video Depth Anything {size} isn't in the models folder ({path}). "
-                            "Get it in Settings > Studio > Models.")
+        raise ModelsMissing(f"Video Depth Anything {size} isn't in the models folder ({path})"
+                            + (f" or in {weights_dir}" if weights_dir else "")
+                            + ". Get it in Settings > Studio > Models, or point VDA at the folder that has it.")
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = _CONFIGS[SIZES[size]]

@@ -29,6 +29,8 @@ DEFAULTS: Dict[str, Any] = {
     "process_length": -1,
     "output_suffix": "_depth",
     "move_to_finished": True,
+    # the user's own checkpoints folder -- iw3's, say (user, 2026-10-25); "" = the models folder only
+    "weights_dir": "",
 }
 DEFAULTS = _localize(DEFAULTS)
 

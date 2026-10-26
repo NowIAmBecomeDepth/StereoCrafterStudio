@@ -88,7 +88,8 @@ class VdaRunner:
         o = self.opts
         self.hooks.status(f"Loading Video Depth Anything {o['model_size']}...")
         try:
-            model = M.load(o["model_size"], "offline" if o["run_mode"] == "Offline" else "online")
+            model = M.load(o["model_size"], "offline" if o["run_mode"] == "Offline" else "online",
+                           weights_dir=o.get("weights_dir") or None)
         except M.ModelsMissing as e:
             self.outcome.error = str(e)
             logger.error("%s", e)
