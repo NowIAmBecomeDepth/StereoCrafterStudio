@@ -1411,8 +1411,11 @@
     <li>The fill follows the splat mask row by row, frame by frame -- each row is filled only as far as its
       hole reached, as Inpainting's Hi-Res Blend does -- so the real picture next to a narrower hole is kept.</li>
     <li>Each clip's files are written again in their own format (DNxHR stays DNxHR; H.264 / H.265 with
-      Merging's encoder settings) with only the strip changed; the originals go to the Recycle Bin (on a
-      drive without one, to <code>edge_fill_originals</code>, a second fill's under a numbered name). A clip
+      Merging's encoder settings) with only the strip changed. Each original is kept beside the clips in
+      <code>edge_fill_originals</code>, and filling a clip again starts from it -- not from the filled one, whose
+      fade would blend into the earlier fill and leave a line -- so try other settings freely; the once-filled
+      file goes to the Recycle Bin. Merge a clip again and its new file is the original. The originals take
+      as much room as the clips: delete the folder once you're happy with the fills. A clip
       with a file open in another program -- a player -- isn't touched: close it and fill again. A strip
       narrower than about 12 px (at 1920 wide) is left to Inpainting's own fill.</li>
     <li><span class="btn">Fill</span> runs the ticked clips as a job of its own: the bar shows it,

@@ -23,7 +23,7 @@ pass, on Merging's finished clips:
   4. adds grain like the picture's beside the strip (ROSE's fill is smoother);
   5. rewrites the clip's files -- the SBS and its _L / _R -- in their own
      format (an intermediate as itself; H.264 / H.265 with Merging's encoder
-     settings); the originals go to the Recycle Bin.
+     settings); the originals are kept in ORIGINALS_DIR, and a refill starts from them.
 
 Measured 2026-10-13 on a 1920x1038 clip, masking the same strip in the LEFT
 eye, where the edge is real (.claude/HANDOFF.md): the crop matched the whole
@@ -97,7 +97,7 @@ STRIPS = ".edge_fill_strips.json"
 #: The rows' reach is spread over this many rows and frames (each way) before the blend: a
 #: notch a row or a frame wide in the mask is no reason for a notch in the fill.
 ROW_SPREAD, FRAME_SPREAD = 4, 1
-ORIGINALS_DIR = "edge_fill_originals"   # where an original goes when there is no Recycle Bin
+ORIGINALS_DIR = "edge_fill_originals"   # each clip's unfilled original, a refill's source (2026-10-26)
 
 Progress = Callable[[float, str], None]
 
@@ -749,8 +749,12 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
     if not rose_env.ready():
         raise RuntimeError("ROSE isn't set up: Set Up ROSE in the Depth Map Editor's Erase first.")
     from studio.merge_all import probe as probe_file
-    probes = {p: probe_file(p) for p in group.files.values()}
-    sources = _eye_sources(group, probes)
+    # a refill reads each file's unfilled original (2026-10-26: Blur over an earlier Stretched fill
+    # faded into that fill -- a line where it ended); `read` is the clip as it is read
+    src = {k: kept_original(p) or p for k, p in group.files.items()}
+    read = Group(group.folder, group.stem, group.width, group.kind, dict(src))
+    probes = {p: probe_file(p) for p in src.values()}
+    sources = _eye_sources(read, probes)
     if not sources:
         return {"skipped": "Half SBS isn't supported: fill the _L / _R files, or a Full SBS."}
     progress(0.0, "Measuring the strip from the splat mask")
@@ -982,20 +986,21 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
         # first one filled and the clip's SBS and _R disagreeing (bug sweep 2026-10-14)
         from core.common.partial_output import discard
         parts = []
-        files = list(group.files.values())
+        files = list(group.files.items())
         try:
-            for fi, path in enumerate(files):
-                p = probes[path]
+            for fi, (key, path) in enumerate(files):
+                p = probes[src[key]]
                 places = []
                 for e in edges:
                     _src, _x0, ew, _h = sources[e.eye]
-                    for x in _regions(group, path, p, e.eye, ew):
+                    for x in _regions(read, src[key], p, e.eye, ew):
                         places.append((x if e.edge == "left" else x + ew - e.keep, e.patch))
                 if not places:
                     continue
                 parts.append((path, _write(path, p, places, n, settings or {}, stop,
                                            lambda d, fi=fi: progress(0.8 + 0.2 * (fi + d) / len(files),
-                                                                     f"Writing {os.path.basename(path)}"))))
+                                                                     f"Writing {os.path.basename(path)}"),
+                                           source=src[key])))
         except BaseException:
             for _path, part in parts:
                 discard(part)
@@ -1014,9 +1019,10 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                                    f"it and fill again. Nothing was changed.") from err
             os.rename(probe, path)
         written = []
+        refills = {group.files[key] for key in src if src[key] != group.files[key]}
         for k, (path, part) in enumerate(parts):
             try:
-                _swap(path, part)
+                _swap(path, part, path in refills)
             except Exception as err:
                 for _path, rest in parts[k + 1:]:
                     discard(rest)
@@ -1032,6 +1038,8 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                 "file": _file_id(path), "steps": int(steps), "grain": bool(grain), "mask": os.path.basename(mask_path),
                 "edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges],
                 "date": time.strftime("%Y-%m-%d %H:%M")}
+            if path in written or path in refills:  # its kept original, tied to it (kept_original)
+                rec[os.path.basename(path)]["original"] = _file_id(_kept_path(path))
         _save_json(os.path.join(group.folder, RECORD), rec)
         progress(1.0, "Filled")
         return {"edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges], "files": written}
@@ -1042,19 +1050,21 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
 
 
 def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threading.Event,
-           progress: Callable[[float], None]) -> str:
+           progress: Callable[[float], None], source: Optional[str] = None) -> str:
     """`path` again with each (x, patch) laid over its frames, to <path>.part (returned);
-    _swap() puts it in place."""
+    _swap() puts it in place. `source`: the file whose frames (and audio) are read, if not
+    `path` -- a refill's kept original."""
+    source = source or path
     from core.common.color_tags import with_color_tags
     from core.common.partial_output import discard, ffmpeg_output_args, part_path, publish
-    info = E._probe(path)
+    info = E._probe(source)
     W, H = info["w"], info["h"]
     color = []
     for key, flag in (("color_space", "-colorspace"), ("color_transfer", "-color_trc"),
                       ("color_primaries", "-color_primaries"), ("color_range", "-color_range")):
         if key in info["color"]:
             color += [flag, info["color"][key]]
-    audio = ["-i", path, "-map", "0:v", "-map", "1:a?", "-c:a", "copy"] if info["audio"] else []
+    audio = ["-i", source, "-map", "0:v", "-map", "1:a?", "-c:a", "copy"] if info["audio"] else []
     part = part_path(path)
     movflags = ["-movflags", "write_colr"] if path.lower().endswith(".mov") else []
     cmd = with_color_tags(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb48le",
@@ -1064,7 +1074,7 @@ def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threadi
                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)))
     count = 0
     try:
-        for i, fr in enumerate(E._reader(path, W, H, "rgb48le")):
+        for i, fr in enumerate(E._reader(source, W, H, "rgb48le")):
             if stop.is_set():
                 raise E.Stopped()
             if i < n:
@@ -1103,35 +1113,70 @@ def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threadi
     return part
 
 
-def _swap(path: str, part: str) -> None:
-    """The filled `part` in `path`'s place, the original to the Recycle Bin (or ORIGINALS_DIR)."""
+def _kept_path(path: str) -> str:
+    """Where `path`'s unfilled original is kept: ORIGINALS_DIR beside it, under its own name."""
+    return os.path.join(os.path.dirname(path), ORIGINALS_DIR, os.path.basename(path))
+
+
+def kept_original(path: str) -> Optional[str]:
+    """`path`'s kept unfilled original, while `path` is still the file a fill wrote from it (the
+    record's ids match); None for a clip never filled, or merged again since (it is its own)."""
+    keep = _kept_path(path)
+    try:
+        rec = _record(os.path.dirname(path)).get(os.path.basename(path))
+        if os.path.isfile(keep) and isinstance(rec, dict) and rec.get("file") == _file_id(path)                 and rec.get("original") in (None, _file_id(keep)):
+            return keep
+    except OSError:
+        pass
+    return None
+
+
+def _swap(path: str, part: str, refill: bool = False) -> None:
+    """The filled `part` in `path`'s place. The original is kept in ORIGINALS_DIR, where a refill
+    reads it (user, 2026-10-26: it went to the Recycle Bin, which can't be read back); a `refill`'s
+    once-filled file goes to the Recycle Bin instead (deleted without one: its original is kept)."""
     from core.common.partial_output import discard, publish
     try:
-        where = _retire(path)
+        if refill:
+            gone = "is in the Recycle Bin" if _recycle(path) else "was deleted"
+            if os.path.exists(path):
+                os.remove(path)
+            where, what = ORIGINALS_DIR, f"the once-filled one {gone}"
+        else:
+            where, what = _keep(path), "it was moved"
     except Exception:
         discard(part)                         # the original stays where it was
         raise
     if not publish(part, path):
         raise RuntimeError(f"Couldn't put the filled {os.path.basename(path)} in place: it is kept as "
-                           f"{os.path.basename(part)}, and the original is in {where}.")
+                           f"{os.path.basename(part)}; {what}, and the original is in {where}.")
 
 
-def _retire(path: str) -> str:
-    """The original out of the way: the Recycle Bin, else ORIGINALS_DIR beside it. Returns where."""
+def _recycle(path: str) -> bool:
     from core.common import recycle_bin
     try:
-        if recycle_bin.send_to_recycle_bin(path) and not os.path.exists(path):
-            return "the Recycle Bin"
+        return bool(recycle_bin.send_to_recycle_bin(path)) and not os.path.exists(path)
     except Exception:
         logger.debug("Recycle Bin refused %s", path, exc_info=True)
-    keep = os.path.join(os.path.dirname(path), ORIGINALS_DIR)
-    os.makedirs(keep, exist_ok=True)
-    # a free name: a second fill of the clip overwrote its true original here with the once-filled
-    # one -- the only copy (bug sweep 2026-10-14b)
-    stem, ext = os.path.splitext(os.path.basename(path))
-    dest, k = os.path.join(keep, stem + ext), 2
+        return False
+
+
+def _free(path: str) -> str:
+    """`path`, or `<stem> (k)<ext>` beside it if that is taken."""
+    stem, ext = os.path.splitext(path)
+    dest, k = path, 2
     while os.path.exists(dest):
-        dest, k = os.path.join(keep, f"{stem} ({k}){ext}"), k + 1
+        dest, k = f"{stem} ({k}){ext}", k + 1
+    return dest
+
+
+def _keep(path: str) -> str:
+    """The original into ORIGINALS_DIR under its own name. One already there is an earlier merge's
+    (this file isn't the fill made from it): to the Recycle Bin, or kept under a free name -- a
+    second fill overwrote its true original here with the once-filled one (bug sweep 2026-10-14b)."""
+    dest = _kept_path(path)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest) and not _recycle(dest):
+        os.rename(dest, _free(dest))
     shutil.move(path, dest)
-    logger.info(f"Edge Fill: no Recycle Bin for {path}; the original is {dest}.")
-    return keep
+    return os.path.dirname(dest)

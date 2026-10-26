@@ -83,7 +83,7 @@ def counted_measure(path, stop=None):
     return _measure(path, stop)
 F.measure = counted_measure
 rose_env.ready = lambda: True
-RB.send_to_recycle_bin = lambda p: False         # the originals into edge_fill_originals/
+RB.send_to_recycle_bin = lambda p: False         # no Recycle Bin: nothing of the user's goes there
 
 qapp = QGuiApplication(sys.argv)
 engine, objs = A.build(qapp)

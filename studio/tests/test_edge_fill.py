@@ -420,15 +420,75 @@ class SweepBFixesTest(EdgeFillTest.__base__):
 
     def test_a_second_fill_keeps_the_true_original(self):
         """N2-03: with no Recycle Bin, filling a clip again overwrote its original in
-        edge_fill_originals/ with the once-filled one."""
+        edge_fill_originals/ with the once-filled one. (2026-10-26: a refill starts from that
+        original, so it is the only one kept.)"""
         g = F.find_groups(self.out)[0]
         first = open(g.files["R"], "rb").read()
         self._fill(g)
         self._fill(F.find_groups(self.out)[0])
         kept = sorted(os.listdir(os.path.join(self.out, F.ORIGINALS_DIR)))
-        self.assertIn(f"shot_{W}_merged_full_sbs_R (2).mov", kept, kept)
+        self.assertEqual(kept, sorted(os.path.basename(g.files[k]) for k in ("sbs", "R")), kept)
         with open(os.path.join(self.out, F.ORIGINALS_DIR, f"shot_{W}_merged_full_sbs_R.mov"), "rb") as f:
             self.assertEqual(f.read(), first, "the untouched original is still there")
+
+    def test_a_refill_starts_from_the_unfilled_original(self):
+        """2026-10-26: Stretched, then Blur on the same clip -- the second fill read the first one's
+        output, and its fade blended into the old fill: a line where that fill ended. A refill comes
+        out as one fill of the untouched original would."""
+        pristine = os.path.join(self.tmp, "pristine")
+        shutil.copytree(self.out, pristine)
+        self._fill(F.find_groups(self.out)[0])
+        other = (20, 230, 60)
+        with mock.patch.dict(globals(), FILL=other):
+            self._fill(F.find_groups(self.out)[0])
+            self._fill(F.find_groups(pristine)[0])
+        again = list(E._reader(F.find_groups(self.out)[0].files["R"], W, H, "rgb24"))
+        once = list(E._reader(F.find_groups(pristine)[0].files["R"], W, H, "rgb24"))
+        for i in (0, N // 2, N - 1):
+            diff = np.abs(again[i].astype(int) - once[i].astype(int))[:, :STRIP + 8 + F.FEATHER + 4]
+            self.assertLess(diff.mean(), 2.0, f"frame {i}: the refill is the original's, not the first fill's")
+
+    def test_the_original_is_kept_beside_the_clip_not_recycled(self):
+        """A refill needs it: the Recycle Bin can't be read back. The once-filled file a refill
+        replaces is what goes to the Recycle Bin."""
+        recycled = []
+
+        def recycle(p):
+            trash = os.path.join(self.tmp, "trash")
+            os.makedirs(trash, exist_ok=True)
+            recycled.append(os.path.basename(p))
+            shutil.move(p, os.path.join(trash, f"{len(recycled)}_{os.path.basename(p)}"))
+            return True
+        g = F.find_groups(self.out)[0]
+        first = open(g.files["R"], "rb").read()
+        with mock.patch.object(E, "_run_worker", _fake_worker), mock.patch.object(F.rose_env, "ready", lambda: True), \
+                mock.patch("core.common.recycle_bin.send_to_recycle_bin", recycle):
+            F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=4, grain=False, settings={})
+            self.assertEqual(recycled, [], "the first fill's originals are kept, not recycled")
+            with open(os.path.join(self.out, F.ORIGINALS_DIR, f"shot_{W}_merged_full_sbs_R.mov"), "rb") as f:
+                self.assertEqual(f.read(), first)
+            F.fill(F.find_groups(self.out)[0], F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=4,
+                   grain=False, settings={})
+        self.assertEqual(sorted(recycled), sorted(os.path.basename(g.files[k]) for k in ("sbs", "R")),
+                         "a refill recycles the once-filled files")
+
+    def test_a_clip_merged_again_is_its_own_original(self):
+        """Merging wrote the clip again after a fill: that new file is the original now, and the
+        old kept one goes."""
+        g = F.find_groups(self.out)[0]
+        self._fill(g)
+        new = [np.full((H, W, 3), (90, 120, 150), np.uint8) for _ in range(N)]
+        for f in new:
+            f[:, :STRIP] = (20, 10, 40)
+        os.remove(g.files["R"])
+        _encode(g.files["R"], new, ["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"])
+        merged_again = open(g.files["R"], "rb").read()
+        self._fill(F.find_groups(self.out)[0])
+        with open(os.path.join(self.out, F.ORIGINALS_DIR, f"shot_{W}_merged_full_sbs_R.mov"), "rb") as f:
+            self.assertEqual(f.read(), merged_again, "the newly merged file is the original kept")
+        after = list(E._reader(g.files["R"], W, H, "rgb24"))
+        far = after[0][:, STRIP + F.FEATHER + 8:].reshape(-1, 3).astype(int).mean(axis=0)
+        self.assertLess(np.abs(far - (90, 120, 150)).max(), 12, "filled from the new merge, not the old original")
 
     def test_a_record_save_waits_out_a_reader(self):
         """N2-05: a look reading the record a moment made the replace fail (Windows) after the files

@@ -75,7 +75,9 @@ HELP: Dict[str, str] = {
         "(the band just past the strip) and is only used when the fill really is softer."),
     "fill": (
         "Refills the strip at the edge of each ticked clip with ROSE. Each clip's files are written again in "
-        "their own format with only the strip changed; the originals go to the Recycle Bin."),
+        "their own format with only the strip changed. The originals are kept in edge_fill_originals beside "
+        "them, and filling a clip again starts from its original (the once-filled file goes to the Recycle "
+        "Bin); delete that folder once you're happy with the fills."),
 }
 
 
