@@ -340,9 +340,9 @@ class FFmpegRGBPipeReader:
         vf_fallback = f"scale={self.width}:{self.height}:flags=bicubic,format={self._pix_fmt}"
         vf = vf_fallback if self._force_fallback else vf_strict
         if self._yuv:
-            args += ["-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-vsync", "0", "-"]
+            args += ["-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-fps_mode", "passthrough", "-"]
             return args
-        args += ["-vf", vf, "-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-vsync", "0", "-"]
+        args += ["-vf", vf, "-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-fps_mode", "passthrough", "-"]
         return args
 
     def _frame(self, raw: bytes) -> np.ndarray:
@@ -384,6 +384,22 @@ class FFmpegRGBPipeReader:
     def __del__(self):
         self.close()
 
+    def _why(self) -> str:
+        """What FFmpeg said before it stopped sending frames, for the error: a 12 GB user's Merging
+        failed on every clip with only "reached EOF" in the log, FFmpeg's reason kept but never shown
+        (2026-10-30)."""
+        try:
+            self._proc.wait(timeout=2)
+        except Exception:
+            pass
+        drain = getattr(self, "_stderr", None)
+        if drain is None:
+            return ""
+        if drain._thread is not None:
+            drain._thread.join(timeout=1)
+        said = drain.text().strip()
+        return f" {os.path.basename(self.video_path)}: FFmpeg said: {said[-800:]}" if said else ""
+
     def get_batch(self, indices):
         dtype = np.float16 if self.bit16 else np.uint8
         if not indices:
@@ -407,7 +423,7 @@ class FFmpegRGBPipeReader:
                         self._force_fallback = True
                         self._restart(start_frame=min_idx)
                         return self.get_batch(indices)
-                    raise EOFError("FFmpegRGBPipeReader reached EOF while skipping frames.")
+                    raise EOFError("FFmpegRGBPipeReader reached EOF while skipping frames." + self._why())
                 self._next_frame += 1
 
             # Read frames for requested indices
@@ -427,7 +443,7 @@ class FFmpegRGBPipeReader:
                             self._force_fallback = True
                             self._restart(start_frame=min_idx)
                             return self.get_batch(indices)
-                        raise EOFError("FFmpegRGBPipeReader reached EOF while skipping gap frames.")
+                        raise EOFError("FFmpegRGBPipeReader reached EOF while skipping gap frames." + self._why())
                     self._next_frame += 1
 
                 raw = bytearray(self._frame_size)     # writable: torch takes the 16-bit frame as is
@@ -436,7 +452,7 @@ class FFmpegRGBPipeReader:
                         self._force_fallback = True
                         self._restart(start_frame=min_idx)
                         return self.get_batch(indices)
-                    raise EOFError("FFmpegRGBPipeReader reached EOF while reading a frame.")
+                    raise EOFError("FFmpegRGBPipeReader reached EOF while reading a frame." + self._why())
                 out[j] = self._frame(raw)
                 self._next_frame += 1
 
@@ -1803,7 +1819,7 @@ class FFmpegGrayPipeReader:
             "-i", self.path, "-an", "-sn", "-dn",
             "-vf", "format=gray",
             "-f", "rawvideo", "-pix_fmt", "gray",
-            "-vsync", "0", "-",
+            "-fps_mode", "passthrough", "-",
         ]
         return args
 

@@ -77,6 +77,17 @@ class RGBPipeReaderTests(unittest.TestCase):
         self.assertIsNot(r._proc, old)
         self.assertIsNotNone(old.poll(), "the old ffmpeg was not reaped")
 
+    def test_a_file_ffmpeg_cant_read_says_why(self):
+        """A 12 GB user's Merging failed on every clip with only "reached EOF" in the log (2026-10-30)."""
+        bad = self.dir / "broken_splatted2.mp4"
+        bad.write_bytes(b"not a video at all" * 100)
+        r = V.FFmpegRGBPipeReader(str(bad), 64, 48, 12.0, 12)
+        self.addCleanup(r.close)
+        with self.assertRaises(EOFError) as caught:
+            r.get_batch([0])
+        self.assertIn("broken_splatted2.mp4: FFmpeg said:", str(caught.exception))
+        self.assertIn("Invalid data", str(caught.exception))
+
 
 
 class StreamInfoCacheTests(unittest.TestCase):
