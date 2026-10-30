@@ -68,9 +68,18 @@ def _trt_version() -> str:
 
 @contextlib.contextmanager
 def _quiet():
-    """The ONNX exporter prints emoji the Windows console can't encode (and a page of progress)."""
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        yield
+    """The ONNX exporter prints emoji the Windows console can't encode (and a page of progress), and its
+    optimiser logs every node it touches -- thousands of lines a build, 600 KB of a user's log (2026-10-30)."""
+    loggers = [logging.getLogger(name) for name in ("onnxscript", "onnx_ir", "torch.onnx")]
+    levels = [lg.level for lg in loggers]
+    for lg in loggers:
+        lg.setLevel(logging.WARNING)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        for lg, level in zip(loggers, levels):
+            lg.setLevel(level)
 
 
 _TRT_LOGGER = None
@@ -93,9 +102,16 @@ def _torch_dtype(trt, dt):
     return types[dt]
 
 
+def _workspace_bytes() -> int:
+    """8 GB, or what the card has free less 1 GB (at least 1 GB): a workspace past the card's free memory
+    spills into shared memory on Windows, or fails the build (a 12 GB card, 2026-10-30)."""
+    free, _ = torch.cuda.mem_get_info()
+    return int(min(WORKSPACE_BYTES, max(1 << 30, free - (1 << 30))))
+
+
 def _serialize(onnx_path: Path, profile=None) -> bytes:
     """An ONNX file as a TensorRT FP16 engine: strongly typed where TensorRT has no FP16 flag (11), else
-    the flag; an 8 GB workspace and a timing cache shared by every build on this GPU. profile: {input name:
+    the flag; a workspace of up to 8 GB (_workspace_bytes) and a timing cache shared by every build on this GPU. profile: {input name:
     (min shape, opt shape, max shape)} for the inputs whose size varies (DepthCrafter's window length)."""
     import tensorrt as trt
     tlog = _trt_logger()
@@ -108,7 +124,7 @@ def _serialize(onnx_path: Path, profile=None) -> bytes:
         raise RuntimeError("TensorRT could not read the ONNX file: "
                            + "; ".join(str(parser.get_error(i)) for i in range(parser.num_errors)))
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, WORKSPACE_BYTES)
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, _workspace_bytes())
     if not strongly_typed:
         config.set_flag(trt.BuilderFlag.FP16)
     if profile:
@@ -171,11 +187,19 @@ class Scratch:
         waited for every engine call before it, and only that stream reuses it."""
         if self.buffer is None or self.buffer.numel() < size:
             self.buffer = None
+            # what PyTorch cached meanwhile goes back too: a chunk's odd last frame decodes in PyTorch,
+            # and its 4 GB stayed cached beside the next chunk's engines (0.26 GB left on 10.5)
+            torch.cuda.empty_cache()
             self.buffer = torch.empty(size, dtype=torch.uint8, device="cuda")
         return self.buffer.data_ptr()
 
     def release(self):
-        self.buffer = None
+        """Handed back to the card, not kept in PyTorch's pool: there the next chunk's UNet took part of
+        the decoder's freed block and the decoder then took a second whole one -- 2.8 GB twice over, a
+        12 GB card full and spilling into shared memory (a user's 4070 SUPER, 2026-10-30)."""
+        if self.buffer is not None:
+            self.buffer = None
+            torch.cuda.empty_cache()
 
 
 class Engine:
@@ -405,11 +429,16 @@ class TensorRT:
             return self.pipe.vae.decode(z, return_dict=return_dict)
         return self.pipe.vae.decode(z, num_frames=num_frames, return_dict=return_dict)
 
+    #: The pipeline encodes 5 frames at a time (_encode_vae_frames), a chunk's last call fewer: one engine
+    #: takes 2 to 5. An engine per count built a new one mid-clip whenever a chunk ended short, beside
+    #: the UNet's -- on a 12 GB card that build failed and the card spilled into shared memory (2026-10-30).
+    ENC_FRAMES = 5
+
     def vae_encode(self, x, return_dict=True):
         engine = None
-        if x.dim() == 4 and x.shape[0] >= 2 and x.dtype == torch.float16:
-            n, c, h, w = x.shape
-            engine = self._engine("vaeenc", (n, c, h, w), engine_name("vaeenc", w, h, n, c),
+        if x.dim() == 4 and 2 <= x.shape[0] <= self.ENC_FRAMES and x.dtype == torch.float16:
+            _, c, h, w = x.shape
+            engine = self._engine("vaeenc", (c, h, w), engine_name("vaeenc", w, h, f"2-{self.ENC_FRAMES}", c),
                                   lambda name: self._build_encoder(name, x))
         return self._encode_with(engine, x, return_dict)
 
@@ -486,8 +515,11 @@ class TensorRT:
 
     def _build_encoder(self, name, x):
         back = self._on_gpu(self.pipe.vae)
-        build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p),
-                     release=back)
+        n = torch.export.Dim("n", min=2, max=self.ENC_FRAMES)
+        top = (self.ENC_FRAMES,) + tuple(x.shape[1:])
+        build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p,
+                                             dynamic_shapes=({0: n},)),
+                     release=back, profile={"x": ((2,) + tuple(x.shape[1:]), top, top)})
 
     # ---- the end of a run --------------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ never resume into each other; without TensorRT installed nothing changes."""
 from __future__ import annotations
 
 import inspect
+import logging
 import sys
 import tempfile
 import threading
@@ -97,6 +98,33 @@ class DispatchTest(unittest.TestCase):
             rt.vae_encode(torch.zeros(5, 3, 32, 32))                                     # the fp32 retry
         self.assertEqual((pipe.vae.decodes, pipe.vae.encodes), ([(1, 4, 4, 4)], [(5, 3, 32, 32)]))
 
+    def test_one_encoder_engine_takes_every_count_from_2_to_5(self):
+        """A chunk's last encode is shorter: an engine per count built a new one mid-clip, and on a 12 GB
+        card that build failed (a user's 4070 SUPER, 2026-10-30)."""
+        rt, pipe = trt()
+        asked = []
+
+        def engine(kind, key, name, build):
+            asked.append((key, name))
+            return lambda x: torch.zeros(x.shape[0], 8, 4, 4)
+        with mock.patch.object(rt, "_engine", engine), mock.patch.object(T, "_gpu_tag", lambda: "gpu"), \
+                mock.patch.object(T, "_trt_version", lambda: "11"):
+            for n in (5, 3, 2, 4, 1):
+                rt.vae_encode(torch.zeros(n, 3, 32, 32, dtype=torch.float16))
+        self.assertEqual({a for a in asked}, {((3, 32, 32), "svd_vaeenc_32x32_n2-5_c3_gpu_trt11.engine")})
+        self.assertEqual(len(asked), 4)
+        self.assertEqual(pipe.vae.encodes, [(1, 3, 32, 32)], "one frame: PyTorch")
+
+    def test_the_exporters_node_by_node_lines_stay_out_of_the_log(self):
+        with self.assertLogs(level="INFO") as logs:
+            logging.getLogger("studio.test").info("kept")
+            with T._quiet():
+                logging.getLogger("onnxscript.optimizer._constant_folding").info("Skipping constant folding")
+                logging.getLogger("onnx_ir.passes.common.unused_removal").info("Removed 6 unused nodes")
+                logging.getLogger("onnxscript.rewriter").warning("a real problem")
+        self.assertEqual([r.getMessage() for r in logs.records], ["kept", "a real problem"])
+        self.assertEqual(logging.getLogger("onnxscript").level, logging.NOTSET, "put back after")
+
     def test_a_failure_turns_that_network_off_for_the_run(self):
         rt, pipe = trt()
         made = []
@@ -170,6 +198,25 @@ class ScratchTest(unittest.TestCase):
         self.assertEqual(s.get(2 << 20), s.buffer.data_ptr())
         s.release()
         self.assertIsNone(s.buffer)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs the GPU")
+    def test_what_it_frees_goes_back_to_the_card(self):
+        """Kept in PyTorch's pool, the decoder's freed block was split by the next chunk's UNet and the
+        decoder took a second whole one: 2.8 GB twice, a 12 GB card full (2026-10-30)."""
+        torch.cuda.empty_cache()
+        base = torch.cuda.memory_reserved()
+        s = T.Scratch()
+        s.get(64 << 20)
+        s.get(256 << 20)                     # grown: the smaller one goes back first
+        self.assertLessEqual(torch.cuda.memory_reserved() - base, 256 << 20)
+        s.release()
+        self.assertEqual(torch.cuda.memory_reserved(), base)
+
+    def test_the_build_workspace_fits_what_the_card_has_free(self):
+        G = 1 << 30
+        for free, want in ((15 * G, 8 * G), (6 * G, 5 * G), (G // 2, G)):
+            with mock.patch.object(torch.cuda, "mem_get_info", lambda f=free: (f, 16 * G)):
+                self.assertEqual(T._workspace_bytes(), want)
 
 
 class NotInstalledTest(unittest.TestCase):
