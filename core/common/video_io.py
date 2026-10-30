@@ -511,6 +511,72 @@ def _frame_count(video_path: str) -> int:
     return 0
 
 
+class ReadAhead:
+    """A reader whose next range is read on a thread of its own while the caller works on this one (user,
+    2026-10-30: Merging read its three or four clips a chunk at a time between its GPU work, a third of its
+    time). After a run of consecutive frames it reads the run after it, as long again, so a chunked loop
+    always finds its next chunk ready; anything else -- one frame, a jump -- is read there and then, once
+    the read in flight is done (the reader is read by one thread at a time, in order). Ended by close() or
+    by being dropped, which closes the reader under it too: `del reader` frees the file as before.
+    """
+
+    def __init__(self, reader, name: str = "read-ahead"):
+        from concurrent.futures import ThreadPoolExecutor
+        self._r = reader
+        self._pool = ThreadPoolExecutor(1, thread_name_prefix=name)
+        self._next = None           # (the indices read ahead, their Future)
+
+    def __len__(self) -> int:
+        return len(self._r)
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["_r"], name)
+
+    def _settle(self):
+        """The read in flight, finished (or failed) before the reader is used again; its result."""
+        nxt, self._next = self._next, None
+        if nxt is None:
+            return None, None
+        try:
+            return nxt[0], nxt[1].result()
+        except Exception:
+            return None, None       # read again in the caller's thread, where an error is the caller's
+
+    def get_batch(self, indices):
+        idx = [int(i) for i in indices]
+        ahead, batch = self._settle()
+        if ahead != tuple(idx) or batch is None:
+            batch = self._r.get_batch(idx)
+        n = len(idx)
+        if n > 1 and idx == list(range(idx[0], idx[0] + n)):
+            start, stop = idx[-1] + 1, min(idx[-1] + 1 + n, len(self._r))
+            if start < stop:
+                nxt = tuple(range(start, stop))
+                self._next = (nxt, self._pool.submit(self._r.get_batch, list(nxt)))
+        return batch
+
+    def close(self):
+        if self.__dict__.get("_pool") is None:
+            return
+        self._settle()
+        self._pool.shutdown(wait=True)
+        self._pool = None
+        close = getattr(self._r, "close", None)
+        if close is not None:
+            close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def open_rgb_reader_ahead(video_path: str) -> ReadAhead:
+    """open_rgb_reader's reader, its next chunk read while this one is used (ReadAhead)."""
+    return ReadAhead(open_rgb_reader(video_path), name="merge-read")
+
+
 def open_rgb_reader(video_path: str) -> "FFmpegRGBPipeReader":
     """A Decord-shaped colour reader (len, get_avg_fps, get_batch(...).asnumpy())
     decoded by FFmpeg at the file's own bit depth: above 8 bits it hands back
@@ -701,10 +767,20 @@ def _build_depth_vf(pix_fmt: str, out_w: int, out_h: int) -> str:
 class FFmpegDepthPipeReader:
     """Sequential FFmpeg-backed depth reader preserving 10-bit+ values."""
 
-    def __init__(self, path: str, out_w: int, out_h: int, bit_depth: int, num_frames: int, pix_fmt: str = ""):
+    def __init__(self, path: str, out_w: int, out_h: int, bit_depth: int, num_frames: int, pix_fmt: str = "",
+                 src_size: Optional[Tuple[int, int]] = None):
+        """src_size (the depth's own width, height): given with CUDA there and a different out size, FFmpeg
+        decodes the depth at its own size and get_batch resizes it on the GPU, bilinear (user, 2026-10-30:
+        FFmpeg's scale of 768x320 up to 2580x1080 was a fifth of a Splatting clip's time, on the CPU). It is
+        the preview's own resize (cv2 INTER_LINEAR on floats: 0.0000 apart), so frames come back float32;
+        FFmpeg's fixed-point bilinear was up to ~5 codes of 1023 off it on smooth depth, 16 at hard edges."""
         self.path = path
         self.out_w = int(out_w)
         self.out_h = int(out_h)
+        self._gpu_from = None
+        if src_size and tuple(int(v) for v in src_size) != (self.out_w, self.out_h) and torch.cuda.is_available():
+            self._gpu_from = (int(src_size[0]), int(src_size[1]))
+        self._dec_w, self._dec_h = self._gpu_from or (self.out_w, self.out_h)
         self.bit_depth = int(bit_depth) if bit_depth else 16
         try:
             if isinstance(num_frames, (int, float)) and not isinstance(num_frames, bool):
@@ -718,7 +794,7 @@ class FFmpegDepthPipeReader:
         self._pix_fmt = pix_fmt or ""
         self._proc: Optional[subprocess.Popen] = None
         self._next_index = 0
-        self._frame_bytes = self.out_w * self.out_h * 2
+        self._frame_bytes = self._dec_w * self._dec_h * 2
         self._msb_shift: Optional[int] = None
         self._use_16_to_n_scale: bool = False
         self._start_process()
@@ -728,7 +804,7 @@ class FFmpegDepthPipeReader:
 
     def _start_process(self):
         self.close()
-        vf = _build_depth_vf(self._pix_fmt, self.out_w, self.out_h)
+        vf = _build_depth_vf(self._pix_fmt, self._dec_w, self._dec_h)
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -852,9 +928,14 @@ class FFmpegDepthPipeReader:
         buf = self._read_exact(expected)
         if len(buf) != expected:
             raise EOFError(f"FFmpegDepthPipeReader: expected {expected} bytes, got {len(buf)}")
-        arr = np.frombuffer(buf, dtype=np.uint16).reshape(n, self.out_h, self.out_w, 1)
+        arr = np.frombuffer(buf, dtype=np.uint16).reshape(n, self._dec_h, self._dec_w, 1)
         arr = self._maybe_apply_shift(arr)
         self._next_index = first + n
+        if self._gpu_from is not None:
+            import torch.nn.functional as F
+            t = torch.from_numpy(np.ascontiguousarray(arr[..., 0])).to("cuda", non_blocking=True).float()
+            up = F.interpolate(t[:, None], size=(self.out_h, self.out_w), mode="bilinear", align_corners=False)
+            return _NumpyBatch(up[:, 0, :, :, None].cpu().numpy())
         return _NumpyBatch(arr.copy())
 
 
@@ -964,6 +1045,7 @@ def read_video_frames(
             bit_depth=bit_depth,
             num_frames=total_frames_available,
             pix_fmt=str(video_stream_info.get("pix_fmt", "")),
+            src_size=(original_width, original_height),     # resized on the GPU when it's there
         )
     elif strict_ffmpeg_decode or (high_bit_source and source_bits > 8):
         in_range, in_matrix = "tv", "bt709"

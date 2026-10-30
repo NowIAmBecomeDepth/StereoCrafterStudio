@@ -301,12 +301,13 @@ ChangeFoldersButton {
                                 spacing: 16
                                 IpCheck {
                                     key: "use_compile"; text: "Torch Compile"
-                                    shown: !page.st.use_tensorrt || !!page.st.use_compile
+                                    // hidden with SageAttention 1 (RTX 20): its Triton 3.2 breaks it
+                                    shown: !Theme.sage1 && (!page.st.use_tensorrt || !!page.st.use_compile)
                                     help: "Compiles the model for this GPU when a run starts: each chunk is about 13% faster (with SageAttention), but the first chunk of each run takes about 10 minutes longer while it compiles. Worth it for long unattended runs such as a whole chapter, not for a clip or two. TensorRT is hidden while this is on: the two don't go together."
                                 }
                                 IpCheck {
                                     key: "use_tensorrt"; text: "TensorRT"
-                                    shown: !page.st.use_compile || !!page.st.use_tensorrt
+                                    shown: Theme.sage1 || !page.st.use_compile || !!page.st.use_tensorrt
                                     // not installed: to Settings > Studio > Models to install it (user, 2026-10-29)
                                     guard: () => Theme.needModel("tensorrt", "TensorRT isn't installed yet",
                                                                  "Install NVIDIA TensorRT here, then tick TensorRT again.")
@@ -505,7 +506,7 @@ ChangeFoldersButton {
         MenuItem { text: "Save Settings..."; enabled: page.idle; onTriggered: saveSettingsDlg.open() }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
         MenuItem {
-            text: "Use SageAttention"
+            text: "Use " + Theme.sageName
             checkable: true
             checked: !!page.st.use_sageattention
             onTriggered: page.st.use_sageattention = checked
@@ -529,7 +530,7 @@ ChangeFoldersButton {
         // v1's shell appends V2's own toggle here ("(for V2)": V1's is above).
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
         MenuItem {
-            text: "Use Sage Attention (for V2)"
+            text: "Use " + Theme.sageName + " (for V2)"
             checkable: true
             checked: !!InpaintingV2.settings.use_sageattention
             onTriggered: InpaintingV2.settings.use_sageattention = checked

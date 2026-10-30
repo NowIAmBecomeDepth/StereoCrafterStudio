@@ -255,6 +255,21 @@ pt = pic.mapToScene(QPointF(ox + (xs[i] + 0.5) / W * pw, oy + (ys[i] + 0.5) / H 
 QTest.mouseClick(hs, Qt.LeftButton, Qt.NoModifier, QPoint(int(pt.x()), int(pt.y()))); settle()
 info = find(hs.contentItem(), lambda c: c.objectName() == "hsInfo")
 check("click on a hole selects it", info.property("text").startswith("1 selected"), info.property("text"))
+# the whole clip by default; keyframes only when switched on (user, 2026-10-30)
+kfsw = find(hs.contentItem(), lambda c: c.objectName() == "hsKeyframes")
+addk = find(hs.contentItem(), lambda c: c.property("text") == "Add Key")
+check("Keyframes off by default: the shift is the whole clip's, no Add Key",
+      kfsw is not None and not kfsw.property("checked") and "whole clip" in info.property("text")
+      and addk is not None and not addk.isVisible() and not eng.dilate_regions.keyed, info.property("text"))
+def _click_in_hs(item):
+    q = item.mapToScene(QPointF(12, item.height() / 2))
+    QTest.mouseClick(hs, Qt.LeftButton, Qt.NoModifier, QPoint(int(q.x()), int(q.y()))); settle()
+_click_in_hs(kfsw)
+check("...switched on: keyframes, Add Key shown", eng.dilate_regions.keyed and kfsw.property("checked")
+      and addk.isVisible() and "keyframe" in info.property("text"), info.property("text"))
+_click_in_hs(kfsw)
+check("...off again (one keyframe: no question): the whole clip", not eng.dilate_regions.keyed
+      and not kfsw.property("checked") and len(eng.dilate_regions.keyframes) == 1)
 # the X / Y knobs (in place of v1's D-pad): the arrow keys turn one 0.1 px a notch
 def knob(name):
     k = find(hs.contentItem(), lambda c: c.objectName() == name)

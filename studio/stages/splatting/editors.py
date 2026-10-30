@@ -126,18 +126,23 @@ class HoleShift:
         h, w = live_occ.shape[:2]
         if live_splat.shape[:2] != (h, w):
             live_splat = cv2.resize(live_splat, (w, h), interpolation=cv2.INTER_AREA)
-        rgb = live_splat.astype(np.float32).copy()
-        if rgb.ndim == 2:
-            rgb = np.repeat(rgb[..., None], 3, axis=2)
+        if live_splat.ndim == 2:
+            live_splat = np.repeat(live_splat[..., None], 3, axis=2)
+        # Each hole tinted inside its own box (2026-10-30: a float copy of the frame and a whole-frame
+        # mask pass per hole took ~110 ms at 1080p); the same pixels as before.
+        # contiguous: the cached splat is a permuted view, and handing that to PIL cost ~30 ms a draw
+        out = np.ascontiguousarray(np.clip(live_splat, 0, 255).astype(np.uint8))
         for hole in self.holes:
-            _i, mask, _bb = hole
+            _i, mask, (x, y, bw, bh) = hole
             sel = self._region_for(self._seed_of(hole), create=False)
             if sel is not None and sel.enabled:
                 colour, alpha = np.array([60.0, 235.0, 110.0], np.float32), 0.62
             else:
                 colour, alpha = np.array([235.0, 90.0, 60.0], np.float32), 0.40
-            rgb[mask] = rgb[mask] * (1.0 - alpha) + colour * alpha
-        return Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))
+            m = mask[y:y + bh, x:x + bw]
+            src = live_splat[y:y + bh, x:x + bw][m].astype(np.float32)
+            out[y:y + bh, x:x + bw][m] = np.clip(src * (1.0 - alpha) + colour * alpha, 0, 255).astype(np.uint8)
+        return Image.fromarray(out)
 
     def state(self) -> Dict[str, Any]:
         regs = self._selected(create=False)
@@ -158,7 +163,10 @@ class HoleShift:
             "x": common("offset_x", 1.0, "{:+.1f}"),
             "y": common("offset_y", HS_Y_SIGN, "{:+.1f}"),
             "feather": common("feather", 1.0, "{:.1f}"),
-            "info": f"{len(regs)} selected · {len(self.eng.dilate_regions.keyframes)} keyframe(s)",
+            "info": (f"{len(regs)} selected · {len(self.eng.dilate_regions.keyframes)} keyframe(s)"
+                     if self.eng.dilate_regions.keyed else f"{len(regs)} selected · the whole clip"),
+            "keyed": bool(self.eng.dilate_regions.keyed),
+            "keys": len(self.eng.dilate_regions.keyframes),
             "enabled": bool(self.eng.dilreg_enabled_var.get()),
         }
 
@@ -222,7 +230,15 @@ class HoleShift:
         """v1 _commit_sliders, after the knobs' or Feather's debounce."""
         _apply(self.eng)
 
+    def set_keyed(self, on: bool) -> None:
+        """Keyframes on, or off: the shifts on the frame showing become the whole clip's (user, 2026-10-30)."""
+        self.eng.dilate_regions.set_keyed(bool(on), int(getattr(self.eng.previewer, "last_loaded_frame_index",
+                                                                self.frame) or 0))
+        _apply(self.eng)
+
     def add_key(self) -> None:
+        if not self.eng.dilate_regions.keyed:
+            return
         self.eng.dilate_regions.ensure_keyframe(int(getattr(self.eng.previewer, "last_loaded_frame_index", 0) or 0))
         try:
             if self.eng.auto_save_sidecar_var.get():

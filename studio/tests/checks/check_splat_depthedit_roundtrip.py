@@ -126,6 +126,20 @@ check("...and the preview draws with them", eng_sp is not None and abs(float(eng
       and abs(float(eng_sp.frame_break_bars_var.get()) - 0.08) < 1e-6,
       None if eng_sp is None else (eng_sp.boost_amount_var.get(), eng_sp.frame_break_bars_var.get()))
 
+# ---- a sidecar saved with OLDER values, the dials moved on since: back from the editor every control stays as
+# it was -- neither the sidecar's nor a reset (user, 2026-10-30: "i dont want any controls reset when an edited
+# map is sent back to splatting")
+pv.updateSidecar()
+until(lambda: bool(list((FIX / "depth").rglob("clipB*.fssidecar"))), 30); pump(0.8)
+STEREO = {"max_disp": 55.0, "zero_disparity_anchor": 0.31, "depth_gamma": 1.4, "depth_dilate_size_x": 3.5,
+          "depth_dilate_left": -2.0, "boost_amount": 0.7, "pop_amount": 0.6, "frame_break_bars": 0.05}
+for k, v in STEREO.items():
+    sp._set(k, v)
+pump(1.5)
+check("a sidecar saved, then the dials moved on without saving",
+      bool(list((FIX / "depth").rglob("clipB*.fssidecar"))) and all(abs(float(setting(k)) - v) < 1e-6 for k, v in STEREO.items()),
+      {k: setting(k) for k in STEREO})
+
 # ---- Edit Depth again: the editor reads the kept original, not the edited map
 click(btn)
 until(lambda: norm(de.property("state").get("depth_path")) == norm(backup) and de.property("state").get("hasClip"), 90)
@@ -149,6 +163,12 @@ check("a second trip: the first edit kept as edit_history/clipB_depth.edit-01.mp
       str(sorted(os.listdir(hist))))
 check("...and no folder but edit_history beside the maps", [d for d in subdirs if d != "sidecars"] == ["edit_history"],
       str(subdirs))
+pump(1.0)
+check("...back with every control as it was -- not the older sidecar's, none reset",
+      all(abs(float(setting(k)) - v) < 1e-6 for k, v in STEREO.items()), {k: setting(k) for k in STEREO})
+check("...and the preview draws with them", abs(float(pv._engine.max_disp_var.get()) - 55.0) < 1e-6
+      and abs(float(pv._engine.pop_amount_var.get()) - 0.6) < 1e-6,
+      (pv._engine.max_disp_var.get(), pv._engine.pop_amount_var.get()))
 
 pv.shutdown()
 studio_warns = [w for w in warns if "Studio" in w or "qml" in w.lower()]

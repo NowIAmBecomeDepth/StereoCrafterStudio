@@ -102,14 +102,33 @@ def _quiet():
 
 
 _TRT_LOGGER = None
+#: The stage logger TensorRT's own messages go to (enable_tensorrt sets it): DepthCrafter's or Inpainting's,
+#: so they show on that stage's console page
+_TRT_OUT = [log]
 
 
 def _trt_logger():
-    """One for the process: TensorRT keeps the first it is given and warns about every other."""
+    """One for the process: TensorRT keeps the first it is given and warns about every other.
+
+    Its errors and warnings go to the stage's log, so its console page shows why a build or a run
+    failed. trt.Logger printed them to the raw console only: a 5090 user's "could not build the
+    engine (see the lines above)" had no lines above it (2026-10-30)."""
     global _TRT_LOGGER
     if _TRT_LOGGER is None:
         import tensorrt as trt
-        _TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+
+        class _ToLog(trt.ILogger):
+            def __init__(self):
+                trt.ILogger.__init__(self)
+
+            def log(self, severity, msg):
+                sev = trt.ILogger.Severity
+                if severity in (sev.INTERNAL_ERROR, sev.ERROR):
+                    _TRT_OUT[0].error(f"TensorRT error: {msg}")
+                elif severity == sev.WARNING:
+                    _TRT_OUT[0].warning(f"TensorRT warning: {msg}")
+
+        _TRT_LOGGER = _ToLog()
     return _TRT_LOGGER
 
 
@@ -121,17 +140,18 @@ def _torch_dtype(trt, dt):
     return types[dt]
 
 
-def _workspace_bytes() -> int:
-    """8 GB, or what the card has free less 1 GB (at least 1 GB): a workspace past the card's free memory
-    spills into shared memory on Windows, or fails the build (a 12 GB card, 2026-10-30)."""
+def _workspace_bytes(cap: int = WORKSPACE_BYTES) -> int:
+    """`cap` (8 GB), or what the card has free less 1 GB (at least 1 GB): a workspace past the card's free
+    memory spills into shared memory on Windows, or fails the build (a 12 GB card, 2026-10-30)."""
     free, _ = torch.cuda.mem_get_info()
-    return int(min(WORKSPACE_BYTES, max(1 << 30, free - (1 << 30))))
+    return int(min(cap, max(1 << 30, free - (1 << 30))))
 
 
-def _serialize(onnx_path: Path, profile=None) -> bytes:
+def _serialize(onnx_path: Path, profile=None, workspace: int = 0) -> bytes:
     """An ONNX file as a TensorRT FP16 engine: strongly typed where TensorRT has no FP16 flag (11), else
-    the flag; a workspace of up to 8 GB (_workspace_bytes) and a timing cache shared by every build on this GPU. profile: {input name:
-    (min shape, opt shape, max shape)} for the inputs whose size varies (DepthCrafter's window length)."""
+    the flag; a workspace of `workspace` bytes (0: _workspace_bytes(), up to 8 GB) and a timing cache
+    shared by every build on this GPU. profile: {input name: (min shape, opt shape, max shape)} for the
+    inputs whose size varies (DepthCrafter's window length)."""
     import tensorrt as trt
     tlog = _trt_logger()
     builder = trt.Builder(tlog)
@@ -143,7 +163,7 @@ def _serialize(onnx_path: Path, profile=None) -> bytes:
         raise RuntimeError("TensorRT could not read the ONNX file: "
                            + "; ".join(str(parser.get_error(i)) for i in range(parser.num_errors)))
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, _workspace_bytes())
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace or _workspace_bytes())
     if not strongly_typed:
         config.set_flag(trt.BuilderFlag.FP16)
     if profile:
@@ -183,7 +203,18 @@ def build_engine(name: str, export, release=None, profile=None) -> Path:
                 if release is not None:
                     release()
             torch.cuda.empty_cache()
-            blob = _serialize(onnx_path, profile)
+            try:
+                blob = _serialize(onnx_path, profile)
+            except RuntimeError as e:
+                # A big size can need more than 8 GB for one part of the network (a 5090's DepthCrafter
+                # UNet at 1024x576, Window 110: 10.75 GB, 2026-10-30). Kept at 8 GB first: a bigger
+                # workspace can pick ways that need more memory when the engine runs.
+                more = _workspace_bytes(cap=1 << 62)
+                if "could not build" not in str(e) or more <= WORKSPACE_BYTES:
+                    raise
+                _TRT_OUT[0].info(f"TensorRT: building {name} again with a {more / 2**30:.1f} GB workspace "
+                                 "(8 GB wasn't enough at this size)...")
+                blob = _serialize(onnx_path, profile, workspace=more)
             part = path.with_name(path.name + ".part")
             part.write_bytes(blob)
             os.replace(part, path)
@@ -736,6 +767,7 @@ def enable_tensorrt(pipe, frames_chunk: int, use_sageattention: bool, offload_ty
     """Turns TensorRT on for this pipeline (pipe.tensorrt); None, said in the log, when it can't be.
     kind: TensorRT (Inpainting) or DepthCrafterTensorRT; logger: the stage's, so the lines reach its log."""
     out = logger or log
+    _TRT_OUT[0] = out                # TensorRT's own errors to this stage's console page
     reason = unavailable_reason()
     if not reason and offload_type == "sequential":
         reason = "not with Sequential CPU offload"

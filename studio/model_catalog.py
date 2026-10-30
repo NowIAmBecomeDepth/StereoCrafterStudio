@@ -42,6 +42,9 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from core import weights_paths
 
+from . import sage1
+from .sage1 import SAGE1_PINS
+
 on_change = weights_paths.on_change
 
 
@@ -79,6 +82,7 @@ class Model:
     extra: str = ""                         # kind "package": the pyproject extra it installs
     modules: Tuple[str, ...] = ()           # ...and the modules that must import for it to count as here
     installed_size: str = ""                # ...as the page says it
+    gpus: Tuple[str, ...] = ()              # listed only on a PC with one of these compute capabilities
 
 
 # ---- the parts ------------------------------------------------------------------------------
@@ -215,6 +219,15 @@ MODELS: Tuple[Model, ...] = (
           note="Python packages, installed into Studio's own environment.",
           tip="Makes DepthCrafter and Inpainting about twice as fast when their TensorRT box is on. Each "
               "builds its engines the first time it meets a new size (kept in trt_engines)."),
+    # An RTX 20 user (2026-10-30): SageAttention 2 doesn't run there, Sage 1 with Triton 3.2 does. Sage 2
+    # sends a 20 series card to the same Triton kernels anyway; Triton 3.6 is what fails on it.
+    Model("sage1", "SageAttention 1 (RTX 20 Series)", "DepthCrafter, Inpainting (their SageAttention switch)",
+          kind="package", extra="sage1", modules=("sageattention", "triton"), installed_size="0.3 GB",
+          page="https://github.com/thu-ml/SageAttention", gpus=("7.5",),
+          note="Replaces SageAttention 2 and Triton 3.6 with SageAttention 1 and Triton 3.2. Torch Compile "
+               "is off while it's installed.",
+          tip="For RTX 20 series cards, where SageAttention 2 doesn't run: the SageAttention switch speeds "
+              "up DepthCrafter and Inpainting again. Updates keep it."),
 )
 MODELS_BY_KEY: Dict[str, Model] = {m.key: m for m in MODELS}
 
@@ -524,9 +537,36 @@ def _eta(seconds: float) -> str:
 _REPO = Path(__file__).resolve().parents[1]
 
 
+_GPU_CAPS: Optional[Tuple[str, ...]] = None
+
+
+def gpu_caps() -> Tuple[str, ...]:
+    """This PC's NVIDIA compute capabilities ("7.5", "12.0"), from nvidia-smi once (no torch here)."""
+    global _GPU_CAPS
+    if _GPU_CAPS is None:
+        try:
+            out = subprocess.run(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                                 capture_output=True, text=True, timeout=10,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+            _GPU_CAPS = tuple(s.strip() for s in out.splitlines() if s.strip())
+        except (OSError, subprocess.SubprocessError):
+            _GPU_CAPS = ()
+    return _GPU_CAPS
+
+
+def listed(model: Model) -> bool:
+    """In the Models window on this PC: a row for some cards only (Sage 1: RTX 20) shows on those, and
+    wherever it is installed already."""
+    if not model.gpus:
+        return True
+    return any(c in model.gpus for c in gpu_caps()) or (model.kind == "package" and packages_ready(model))
+
+
 def packages_ready(model: Model) -> bool:
     """Every module of `model` importable in Studio's environment (found, not imported)."""
     importlib.invalidate_caches()      # a folder listed before the install would hide what it put there
+    if model.extra == "sage1":
+        return sage1.installed()
     try:
         return all(importlib.util.find_spec(m) is not None for m in model.modules)
     except (ImportError, ValueError):
@@ -554,6 +594,8 @@ def pins(extra: str, lock: Optional[Path] = None) -> List[str]:
             return [f"{n}=={versions[n]}" if versions.get(n) else n for n in names]
     if extra == "tensorrt":
         return ["tensorrt-cu13", "onnx", "onnxscript"]
+    if extra == "sage1":
+        return list(SAGE1_PINS)
     raise RuntimeError(f"No packages known for '{extra}'.")
 
 

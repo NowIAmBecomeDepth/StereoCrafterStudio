@@ -18,7 +18,7 @@ import studio.settings_store as ss; ss.CONFIG_DIR = tmp / "config"
 import core.ui.job_handoff as jh; jh._RECORD_PATH = str(tmp / "last_jobs.json")
 from studio import model_catalog as C
 _installed = [True]                         # TensorRT here or not, as the test says
-C.packages_ready = lambda m: _installed[0]
+C.packages_ready = lambda m: _installed[0] and m.key != "sage1"    # Sage 2 here: Torch Compile shown
 from PySide6.QtCore import QCoreApplication, QObject, QEventLoop, QMetaObject, QPoint, QPointF, Q_ARG, Qt, qInstallMessageHandler
 warns = []
 qInstallMessageHandler(lambda t, ctx, m: warns.append(m) if (".qml" in m or "qml" in m.lower()) else None)

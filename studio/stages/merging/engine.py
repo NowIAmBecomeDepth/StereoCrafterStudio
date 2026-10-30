@@ -37,6 +37,7 @@ import cv2
 from PIL import Image
 from decord import VideoReader, cpu
 from core.common.video_io import open_rgb_reader  # v2: colour at its own bit depth (see gen PATCHES)
+from core.common.video_io import open_rgb_reader_ahead  # v2: reads the next chunk ahead
 import logging
 import time
 import queue
@@ -1824,8 +1825,8 @@ class MergingEngine:
                         self.after(0, self.progress_var.set, i + 1)
                         continue
 
-                inpainted_reader = open_rgb_reader(inpainted_video_path)  # v2: its own bit depth
-                splatted_reader = None if is_dual_eye_sbs else open_rgb_reader(splatted_file_path)
+                inpainted_reader = open_rgb_reader_ahead(inpainted_video_path)  # v2: its own bit depth, read ahead
+                splatted_reader = None if is_dual_eye_sbs else open_rgb_reader_ahead(splatted_file_path)
                 mask_reader = VideoReader(mask_file_path, ctx=cpu(0)) if is_split_input else None
 
                 # Dual-eye composite source: supplies BOTH the occlusion masks and
@@ -1833,7 +1834,7 @@ class MergingEngine:
                 dual_splat_reader = None
                 if dual_splat_path:
                     try:
-                        _gr = open_rgb_reader(dual_splat_path)  # v2: its own bit depth
+                        _gr = open_rgb_reader_ahead(dual_splat_path)  # v2: its own bit depth, read ahead
                         if len(_gr) != len(inpainted_reader):
                             logger.warning(
                                 f"[merge] dual-eye: frame-count mismatch for '{core_name}' — "
@@ -1881,7 +1882,7 @@ class MergingEngine:
                         housekeeping_log.info(
                             f"Found matching original video for dual-input: {os.path.basename(original_video_path)}"
                         )
-                        original_reader = open_rgb_reader(original_video_path)  # v2: its own bit depth
+                        original_reader = open_rgb_reader_ahead(original_video_path)  # v2: its own bit depth, read ahead
                     else:
                         if core_name not in (getattr(self, "accept_missing_originals", None) or ()):
                             raise FileNotFoundError(  # v2: fail, never a black left eye
@@ -2296,9 +2297,15 @@ class MergingEngine:
                         0, self.update_status_label, f"Processing frames {frame_start + 1}-{frame_end}/{num_frames}..."
                     )
 
+                    # v2: the last chunk's GPU frames let go first (see gen PATCHES)
+                    final_chunk = original_left = blended_right_eye = inpainted = mask = warped_original = None
+                    processed_mask = inpainted_tensor_full = splatted_tensor = mask_raw = None
                     # Load current chunk
                     inpainted_np = inpainted_reader.get_batch(frame_indices).asnumpy()
-                    inpainted_tensor_full = torch.from_numpy(inpainted_np).permute(0, 3, 1, 2).float() / 255.0
+                    _dev = "cuda" if settings["use_gpu"] and torch.cuda.is_available() else "cpu"  # v2: on the GPU first
+                    _255 = torch.tensor(255.0, device=_dev)  # v2: a tensor divides exactly (see gen PATCHES)
+                    _f = lambda t: t.float() / _255  # noqa: E731  -- v2: a part of a frame, to float as it's taken
+                    inpainted_tensor_full = torch.from_numpy(inpainted_np).to(_dev).permute(0, 3, 1, 2).float() / _255
 
                     if is_dual_eye_sbs:
                         use_gpu = settings["use_gpu"] and torch.cuda.is_available()
@@ -2326,7 +2333,7 @@ class MergingEngine:
                             # outside the fills — exactly what the single-eye path
                             # has always done, now done once per eye.
                             gsp_np = dual_splat_reader.get_batch(frame_indices).asnumpy()
-                            gsp = torch.from_numpy(gsp_np).permute(0, 3, 1, 2).float().to(device) / 255.0
+                            gsp = torch.from_numpy(gsp_np).to(device).permute(0, 3, 1, 2).float() / 255.0  # v2: uploaded as read
                             _, _, gH, gW = gsp.shape
                             m_cols = slice(0, gW // 2) if dual_mask_side == "left" else slice(gW // 2, None)
                             w_cols = slice(gW // 2, None) if dual_mask_side == "left" else slice(0, gW // 2)
@@ -2408,7 +2415,7 @@ class MergingEngine:
                         splatted_np = splatted_reader.get_batch(frame_indices).asnumpy()
 
                         # Convert to tensors and extract parts (same logic as preview)
-                        splatted_tensor = torch.from_numpy(splatted_np).permute(0, 3, 1, 2).float() / 255.0
+                        splatted_tensor = torch.from_numpy(splatted_np).to(_dev).permute(0, 3, 1, 2)  # v2: as read, parts to float below
                         inpainted = (
                             inpainted_tensor_full[:, :, :, inpainted_tensor_full.shape[3] // 2 :]
                             if is_sbs_input
@@ -2423,21 +2430,21 @@ class MergingEngine:
                                 original_left = torch.zeros_like(inpainted)  # Match inpainted shape
                             else:
                                 original_np = original_reader.get_batch(frame_indices).asnumpy()
-                                original_left = torch.from_numpy(original_np).permute(0, 3, 1, 2).float() / 255.0
+                                original_left = torch.from_numpy(original_np).to(_dev).permute(0, 3, 1, 2).float() / _255  # v2
                             # --- END NEW ---
                             if is_split_input:
                                 # Split mode: mask comes from its own file; the splat
                                 # file IS the warped eye at full frame size.
                                 mask_np_raw = mask_reader.get_batch(frame_indices).asnumpy()
-                                mask_raw = torch.from_numpy(mask_np_raw).permute(0, 3, 1, 2).float() / 255.0
-                                warped_original = splatted_tensor
+                                mask_raw = torch.from_numpy(mask_np_raw).to(_dev).permute(0, 3, 1, 2)  # v2: as read, to grey below
+                                warped_original = _f(splatted_tensor)  # v2
                             else:
-                                mask_raw = splatted_tensor[:, :, :, : W // 2]
-                                warped_original = splatted_tensor[:, :, :, W // 2 :]
+                                mask_raw = splatted_tensor[:, :, :, : W // 2]  # v2: as read, to grey below
+                                warped_original = _f(splatted_tensor[:, :, :, W // 2 :])  # v2
                         else:
-                            original_left = splatted_tensor[:, :, : H // 2, : W // 2]
-                            mask_raw = splatted_tensor[:, :, H // 2 :, : W // 2]
-                            warped_original = splatted_tensor[:, :, H // 2 :, W // 2 :]
+                            original_left = _f(splatted_tensor[:, :, : H // 2, : W // 2])  # v2
+                            mask_raw = splatted_tensor[:, :, H // 2 :, : W // 2]  # v2: as read, to grey below
+                            warped_original = _f(splatted_tensor[:, :, H // 2 :, W // 2 :])  # v2
 
                         if flip_horizontal and is_dual_input:
                             # In Dual mode, original_left is the raw video (not flipped).
@@ -2447,9 +2454,10 @@ class MergingEngine:
                         # (In Quad mode, original_left comes from the splatted file and is already flipped)
 
                     if not _dual_eye_sbs_passthrough:
-                        mask_np = mask_raw.permute(0, 2, 3, 1).cpu().numpy()
-                        mask_gray_np = np.mean(mask_np, axis=3)
-                        mask = torch.from_numpy(mask_gray_np).float().unsqueeze(1)
+                        # v2: np.mean(axis=3)'s grey, where the frames are (see gen PATCHES)
+                        mask = (_f(mask_raw[:, 0:1]) + _f(mask_raw[:, 1:2]) + _f(mask_raw[:, 2:3])) / torch.tensor(
+                            3.0, device=mask_raw.device)
+                        splatted_tensor = mask_raw = None  # v2: the splat as read, let go once its parts are taken
 
                         # Process chunk
                         use_gpu = settings["use_gpu"] and torch.cuda.is_available()

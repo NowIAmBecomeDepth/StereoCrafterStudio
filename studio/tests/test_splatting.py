@@ -215,6 +215,41 @@ class DepthOnGpuTests(unittest.TestCase):
                 dp.process_depth_batch(**kw)
         self.assertEqual(calls, ["gpu", "cpu"])
 
+    def test_dilate_left_below_zero_erodes_the_left_edge_only(self):
+        """User, 2026-10-30: Dilate Left runs -10..20, below 0 eroding the left edges (to take back a
+        Dilate X there). A near block on a far ground: +4 moves its left edge left, -4 right, the right
+        edge stays; the GPU agrees with the CPU (within a 16-bit unit); a render accepts -4, not -11."""
+        import dataclasses
+        import numpy as np
+        import torch
+        from core.splatting import depth_processing as dp
+        from core.splatting.batch_processing import BatchProcessor, ProcessingSettings
+        d = np.full((1, 1, 16, 64), 0.2, np.float32)
+        d[..., 20:44] = 1.0
+        t = torch.from_numpy(d)
+
+        def span(out):
+            row = out[0, 0, 8].cpu().numpy() > 0.6
+            xs = np.nonzero(row)[0]
+            return int(xs[0]), int(xs[-1])
+        self.assertEqual(span(dp.custom_dilate_left(t, 0.0, False, 1.0)), (20, 43))
+        grown, eroded = span(dp.custom_dilate_left(t, 4.0, False, 1.0)), span(dp.custom_dilate_left(t, -4.0, False, 1.0))
+        self.assertLess(grown[0], 20)
+        self.assertGreater(eroded[0], 20)
+        self.assertEqual((grown[1], eroded[1]), (43, 43), "the right edge stays where it is")
+        if torch.cuda.is_available():
+            from core.splatting.depth_gpu import gpu_dilate_left
+            for k in (-4.0, -2.5, 4.0):
+                cpu = dp.custom_dilate_left(t, k, False, 1.0)
+                gpu = gpu_dilate_left(t.cuda(), k, 1.0).cpu()
+                self.assertLessEqual(float((cpu - gpu).abs().max()), 1.01 / 65535, k)
+        bp = BatchProcessor.__new__(BatchProcessor)
+        base = ProcessingSettings(input_source_clips="", input_depth_maps="", output_splatted="")
+        self.assertTrue(bp.validate_settings(dataclasses.replace(base, depth_dilate_left=-4.0))[0])
+        ok, why = bp.validate_settings(dataclasses.replace(base, depth_dilate_left=-11.0))
+        self.assertFalse(ok)
+        self.assertIn("-10 and 20", why)
+
     @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
     def test_a_batch_with_an_active_dilate_region_stays_on_the_gpu(self):
         """2026-10-27 (user): a batch with a Dilate Region fell back to the CPU for all of its
@@ -228,7 +263,7 @@ class DepthOnGpuTests(unittest.TestCase):
         d = 300 + 0.5 * xx + 0.0 * yy
         d[(xx - 80) ** 2 / 30 ** 2 + (yy - 48) ** 2 / 25 ** 2 < 1] = 850
         raw = np.stack([d, d, d]).astype(np.float32)
-        regs = DR.DilateRegions(keyframes=[DR.Keyframe(frame=1, regions=[
+        regs = DR.DilateRegions(keyed=True, keyframes=[DR.Keyframe(frame=1, regions=[
             DR.Region(polys=[[(0.35, 0.2), (0.65, 0.2), (0.65, 0.8), (0.35, 0.8)]], offset_x=4.0)])])
         kw = dict(batch_depth_numpy_raw=raw, depth_gamma=1.0, depth_dilate_size_x=2.5, depth_dilate_size_y=0.5,
                   depth_blur_size_x=3.0, depth_blur_size_y=5.0, max_raw_value=1023.0, dilate_regions=regs,
@@ -378,7 +413,16 @@ class ControllerTests(unittest.TestCase):
         from unittest import mock
         with mock.patch.object(DR, "hole_mask_to_source_polys", return_value=[[(0, 0), (1, 0), (1, 1)]]):
             hs.click(37 / 80, 30 / 60)                          # select the hole: an edit
-        self.assertEqual([k.frame for k in eng.dilate_regions.keyframes], [50], "the edit landed elsewhere")
+        # the whole clip's by default (user, 2026-10-30): one set, from frame 0
+        self.assertEqual([k.frame for k in eng.dilate_regions.keyframes], [0], "not the whole clip's")
+        self.assertTrue(eng.dilate_regions.keyframe_at(10).regions, "frames before the one showing have it too")
+        # Keyframes on: an edit lands on the frame showing (bug sweep A6)
+        eng.dilate_regions.set_keyed(True)
+        eng.previewer.last_loaded_frame_index = 70
+        hs.render()
+        with mock.patch.object(DR, "hole_mask_to_source_polys", return_value=[[(0, 0), (1, 0), (1, 1)]]):
+            hs.click(37 / 80, 30 / 60)
+        self.assertEqual([k.frame for k in eng.dilate_regions.keyframes], [0, 70], "the edit landed elsewhere")
 
     # bug sweep 2026-10-09 (A6): Reset to Defaults left Particles, Detect Text,
     # Pop-Out and Boost as they were, so the next batch kept raining / boosting
@@ -443,6 +487,45 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.ctl.info["frames"], "48")
         record = self.jh.get_source_record("inpainting") or {}
         self.assertTrue(record.get("lowres", "").endswith("/out/lowres"), record)
+
+    def test_high_vram_mode_hands_the_batch_to_the_parallel_processor(self):
+        """High VRAM Mode (user, 2026-10-30): the batch's clips side by side, Jobs at Once of them."""
+        from unittest import mock
+        from core.splatting import parallel as P
+        made = []
+
+        class Parallel(_FakeProcessor):
+            def __init__(self, q, stop, jobs, sidecar_manager=None):
+                super().__init__(q, stop)
+                made.append(jobs)
+        for on, jobs, want in ((True, 3, [3]), (False, 3, [])):
+            made.clear()
+            self.ctl._processor = _FakeProcessor(self.ctl._queue, self.ctl._stop)
+            self.ctl._set("high_vram_mode", on)
+            self.ctl._set("high_vram_jobs", jobs)
+            with mock.patch.object(P, "ParallelBatchProcessor", Parallel):
+                self.ctl.start()
+                self.wait_idle()
+            self.assertEqual(made, want, f"High VRAM Mode {on}")
+            self.assertEqual(self.ctl.status, "Processing finished")
+        # every job's clip reaches Upcoming Jobs, and the ones finished; the running ones go as the job ends
+        c = self.ctl
+        c._busy = True
+        gate = threading.Event()                 # a run in flight (a dead one is ended by the safety net)
+        c._thread = threading.Thread(target=gate.wait, daemon=True)
+        c._thread.start()
+        self.addCleanup(gate.set)
+        c._queue.put(("jobs", [{"name": "a.mp4", "frames": [3, 0], "done": [False, False]},
+                               {"name": "b.mp4", "frames": [9, 2], "done": [True, False]}]))
+        c._queue.put(("job_done", "z"))
+        c._drain()
+        self.assertEqual([j["name"] for j in c.property("parallelJobs")], ["a.mp4", "b.mp4"])
+        self.assertEqual(list(c.property("parallelDone")), ["z"])
+        c._finish()
+        self.assertEqual(list(c.property("parallelJobs")), [])
+        self.assertEqual(list(c.property("parallelDone")), ["z"], "kept until the next run")
+        self.assertEqual(S.normalise({"high_vram_jobs": 9})["high_vram_jobs"], 4, "Jobs at Once: 2 to 4")
+        self.assertEqual(S.normalise({"high_vram_jobs": 1})["high_vram_jobs"], 2)
 
     # audit 2026-09-28 #20: the renderer's "processed" is FRAMES in the pass;
     # it used to overwrite the task count, so the bar and "Processed tasks:
@@ -784,6 +867,161 @@ class OutOfMemoryHintTest(unittest.TestCase):
 
 
 
+@unittest.skipUnless(__import__("torch").cuda.is_available(), "the warp runs on the GPU")
+class HighVramModeTest(unittest.TestCase):
+    """High VRAM Mode's worker processes (user, 2026-10-30), for real on the small fixture: every clip done
+    with both its outputs and the page's messages in order; Stop ends every job; Stop After Clip hands
+    out no more clips."""
+
+    def batch(self, n_clips=3):
+        import queue as _q
+        sys.path.insert(0, str(REPO / "studio" / "tests" / "checks"))
+        import _fixtures
+        from core.splatting import ProcessingSettings
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        fx = _fixtures.copy("small", tmp / "fx")
+        src = sorted((fx / "src").glob("*.mp4"))
+        for i in range(len(src), n_clips):             # more clips: copies of the first, maps too
+            __import__("shutil").copy(src[0], fx / "src" / f"clipZ{i}.mp4")
+            __import__("shutil").copy(fx / "depth" / f"{src[0].stem}_depth.mp4", fx / "depth" / f"clipZ{i}_depth.mp4")
+        values = S.normalise({**S.DEFAULTS, "input_source_clips": str(fx / "src"), "input_depth_maps": str(fx / "depth"),
+                              "output_splatted": str(tmp / "out"), "enable_full_res": True, "enable_low_res": True,
+                              "multi_map": False, "move_to_finished": False, "auto_convergence_mode": "Off",
+                              "encoder": "Force CPU", "codec": "H.264", "dnxhr_fullres_split": False})
+        settings = ProcessingSettings.from_config(S.config_for_run(values), **S.processing_overrides(values))
+        return settings, tmp / "out", _q.Queue()
+
+    def drained(self, q):
+        out = []
+        while not q.empty():
+            out.append(q.get())
+        return out
+
+    def test_every_clip_done_by_two_jobs(self):
+        from core.splatting.parallel import ParallelBatchProcessor
+        settings, out, q = self.batch(3)
+        p = ParallelBatchProcessor(q, threading.Event(), jobs=2)
+        p.run_batch_process(settings=settings)
+        self.assertEqual((p.result["done"], p.result["failed"]), (3, 0), p.result)
+        self.assertEqual(len(list((out / "hires").glob("*"))), 3)
+        self.assertEqual(len(list((out / "lowres").glob("*"))), 3)
+        msgs = self.drained(q)
+        self.assertEqual(msgs[0], ("total", 6))
+        self.assertEqual([m[1] for m in msgs if isinstance(m, tuple) and m[0] == "clip"], [(1, 3), (2, 3), (3, 3)])
+        self.assertEqual([m for m in msgs if isinstance(m, tuple) and m[0] == "tasks_done"][-1], ("tasks_done", 6))
+        self.assertEqual(msgs[-1], "finished")
+        # Upcoming Jobs: each job's clip with its passes, and the clips finished
+        jobs = [m[1] for m in msgs if isinstance(m, tuple) and m[0] == "jobs"]
+        self.assertTrue(any(j and j[0]["done"][0] and j[0]["frames"][1] > 0 for j in jobs),
+                        "a clip's Full Res pass done and its Low Res frames counted")
+        self.assertEqual(jobs[-1], [], "no job running at the end")
+        self.assertEqual(sorted(m[1] for m in msgs if isinstance(m, tuple) and m[0] == "job_done"),
+                         ["clipA", "clipB", "clipZ2"])
+
+    def test_stop_ends_every_job_and_stop_after_clip_takes_no_more(self):
+        from core.splatting.parallel import ParallelBatchProcessor
+        for which in ("stop", "after"):
+            settings, out, q = self.batch(4)
+            stop, after = threading.Event(), threading.Event()
+            p = ParallelBatchProcessor(q, stop, jobs=2)
+            p.stop_after_clip = after
+
+            def press():
+                while True:            # once the first clip is under way
+                    try:
+                        m = q.get(timeout=60)
+                    except Exception:
+                        return
+                    if isinstance(m, tuple) and m[0] == "processed":
+                        (stop if which == "stop" else after).set()
+                        return
+            threading.Thread(target=press, daemon=True).start()
+            t0 = time.monotonic()
+            p.run_batch_process(settings=settings)
+            self.assertLess(time.monotonic() - t0, 120)
+            if which == "stop":
+                self.assertLess(p.result["done"], 4, p.result)
+            else:
+                self.assertTrue(p.result.get("halted"), p.result)
+                self.assertGreaterEqual(p.result["done"], 1)
+                self.assertLess(p.result["done"], 4, p.result)
+            alive = [t.name for t in threading.enumerate() if t.name.startswith("splat-job")]
+            self.assertEqual(alive, [], f"{which}: a job's thread outlived the batch")
+
+
+@unittest.skipUnless(__import__("torch").cuda.is_available(), "the warp runs on the GPU")
+class ReadAheadTest(unittest.TestCase):
+    """The next batch read while this one warps (user, 2026-10-30: the GPU sat idle ~2/3 of each clip waiting
+    on reads; 21% faster per clip at 2580x1080). The warp gets the same frames and depth as reading in order
+    does, the reads run on the read-ahead threads, and they are over when the clip is."""
+
+    def run_batch(self, executor=None):
+        import hashlib
+        import queue
+        from unittest import mock
+        sys.path.insert(0, str(REPO / "studio" / "tests" / "checks"))
+        import _fixtures
+        from core.common.sidecar_manager import SidecarConfigManager
+        from core.splatting import BatchProcessor, ProcessingSettings
+        from core.splatting import render_processor as RP
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        fx = _fixtures.copy("small", tmp / "fx")
+        values = S.normalise({**S.DEFAULTS, "input_source_clips": str(fx / "src"), "input_depth_maps": str(fx / "depth"),
+                              "output_splatted": str(tmp / "out"), "enable_full_res": True, "enable_low_res": False,
+                              "multi_map": False, "move_to_finished": False, "auto_convergence_mode": "Off",
+                              "batch_size": 8})
+        settings = ProcessingSettings.from_config(S.config_for_run(values), **S.processing_overrides(values))
+        seen, threads = [], set()
+        real_warp, real_prep = RP.RenderProcessor._process_gpu_splatting, RP.normalize_and_gamma_depth_gpu
+
+        def warp(self, **kw):
+            seen.append(hashlib.md5(np.ascontiguousarray(kw["batch_video_numpy"]).tobytes()
+                                    + np.ascontiguousarray(kw["batch_depth_numpy_float"]).tobytes()).hexdigest())
+            return real_warp(self, **kw)
+
+        def prep(*a, **k):        # every batch's depth goes through it, whichever reader read it
+            threads.add(threading.current_thread().name.split("_")[0])
+            return real_prep(*a, **k)
+        patches = [mock.patch.object(RP.RenderProcessor, "_process_gpu_splatting", warp),
+                   mock.patch.object(RP, "normalize_and_gamma_depth_gpu", prep)]
+        if executor is not None:
+            patches.append(mock.patch.object(RP, "ThreadPoolExecutor", executor))
+        bar = mock.patch.object(RP, "draw_progress_bar", lambda *a, **k: None)   # this console can't print it
+        with patches[0], patches[1], bar, (patches[2] if executor else mock.patch.object(RP, "logger", RP.logger)):
+            bp = BatchProcessor(queue.Queue(), threading.Event(), SidecarConfigManager())
+            bp.run_batch_process(settings=settings, from_index=0, to_index=None, video_list=None)
+        self.assertEqual(bp.result["done"], 2, bp.result)
+        return seen, threads
+
+    def test_the_warp_gets_what_reading_in_order_gives(self):
+        class InOrder:
+            """An executor that runs each read at once, on the calling thread: reading in order."""
+            def __init__(self, *a, **k):
+                pass
+
+            def submit(self, fn, *a, **k):
+                from concurrent.futures import Future
+                f = Future()
+                try:
+                    f.set_result(fn(*a, **k))
+                except Exception as e:
+                    f.set_exception(e)
+                return f
+
+            def shutdown(self, **k):
+                pass
+        ahead, ahead_threads = self.run_batch()
+        in_order, order_threads = self.run_batch(InOrder)
+        self.assertEqual(ahead, in_order)
+        self.assertEqual(len(ahead), 12, "2 clips x 6 batches")
+        self.assertEqual(ahead_threads, {"splat-read-depth"}, "the depth read and prepared on the read-ahead thread")
+        self.assertNotIn("splat-read-depth", order_threads)
+        alive = [t.name for t in threading.enumerate() if t.name.startswith("splat-read")]
+        self.assertEqual(alive, [], "the read-ahead threads end with the clip")
+
+
 class SourceBitDepthTest(unittest.TestCase):
     """user, 2026-10-27: the warped eye lost the source's 10 bits -- the render read the source through
     Decord, 8-bit RGB. A 10-bit grey ramp rising 1 code every 8 px reaches the warp in 1-code steps
@@ -835,6 +1073,136 @@ class SourceBitDepthTest(unittest.TestCase):
             src = self._source(clip)
             self.assertEqual(src.get_batch([0]).asnumpy().dtype, np.uint8)
 
+
+
+class KeyframesBeforeTheFirstTest(unittest.TestCase):
+    """User, 2026-10-30: Pop-Out on for the clip, S partway through and Pop-Out turned off on that key -- the
+    first half lost its Pop-Out too, in the preview and the render, a key holding its snapshot before itself
+    as well. In Splatting, before the first key the clip's own settings show; the Depth Map Editor's keys
+    still hold their first snapshot."""
+
+    def track(self):
+        from core.common import keyframes
+        t = keyframes.KeyframeTrack()
+        t.set_keyframe(24, "static", {"pop_amount_var": 0.0, "max_disp_var": 30.0})
+        return t
+
+    def test_nothing_keyed_before_the_first_key_in_splatting(self):
+        t = self.track()
+        self.assertIsNone(t.values_at(10, hold_first=False))
+        self.assertEqual(t.values_at(24, hold_first=False)["pop_amount_var"], 0.0)
+        self.assertEqual(t.values_at(40, hold_first=False)["pop_amount_var"], 0.0)
+        self.assertEqual(t.values_at(10)["pop_amount_var"], 0.0, "the default (the Depth Map Editor) still holds")
+
+    def test_the_render_keeps_the_clips_pop_out_before_the_key(self):
+        from core.splatting import render_processor as RP
+        t = self.track()
+        base = {"pop_amount": 10.0, "max_disp": 20.0}
+        self.assertEqual(RP.effective_settings(base, t, 10)["pop_amount"], 10.0)
+        self.assertEqual(RP.effective_settings(base, t, 24)["pop_amount"], 0.0)
+        self.assertEqual(RP.effective_settings(base, t, 40)["pop_amount"], 0.0)
+
+    def test_the_preview_engine_keys_nothing_before_the_first_key(self):
+        import types
+        import studio.stages.splatting.preview_engine as PE
+        eng = types.SimpleNamespace(keyframe_track=self.track())
+        self.assertIsNone(PE.SplattingPreviewEngine._kf_interpolated_values_for_frame(eng, 10))
+        self.assertEqual(PE.SplattingPreviewEngine._kf_interpolated_values_for_frame(eng, 30)["pop_amount_var"], 0.0)
+
+
+class HoleShiftWholeClipTest(unittest.TestCase):
+    """User, 2026-10-30: Hole Shift's shifts apply to the whole clip by default -- every edit made a keyframe
+    at the frame showing, so a shift held only from there and each frame needed its own -- and keyframes
+    only when switched on. Sidecars written before stay keyed. The shift runs on the GPU there."""
+
+    def region(self, ox=2.0):
+        from core.common import dilate_regions as DR
+        return DR.Region(polys=[[(0.3, 0.2), (0.6, 0.2), (0.6, 0.8), (0.3, 0.8)]], offset_x=ox)
+
+    def test_an_edit_on_any_frame_is_the_whole_clips(self):
+        from core.common import dilate_regions as DR
+        d = DR.DilateRegions()
+        self.assertFalse(d.keyed)
+        d.ensure_keyframe(50).regions.append(self.region())
+        self.assertEqual([k.frame for k in d.keyframes], [0])
+        d.ensure_keyframe(120).regions[0].offset_x = 3.0          # another frame: the same set
+        self.assertEqual(len(d.keyframes), 1)
+        for f in (0, 49, 50, 500):
+            self.assertTrue(d.active_at(f), f)
+            self.assertEqual(d.keyframe_at(f).regions[0].offset_x, 3.0)
+        self.assertEqual(DR.DilateRegions.from_dict(d.to_dict()).keyed, False, "saved as the whole clip's")
+
+    def test_an_older_sidecar_stays_keyed(self):
+        from core.common import dilate_regions as DR
+        old = {"version": 1, "enabled": True,
+               "keyframes": [{"frame": 40, "enabled": True, "regions": [self.region().to_dict()]}]}
+        d = DR.DilateRegions.from_dict(old)
+        self.assertTrue(d.keyed)
+        self.assertFalse(d.active_at(10), "before its first keyframe, as it rendered")
+        self.assertTrue(d.active_at(40))
+
+    def test_keyframes_on_then_off_keeps_the_frame_showings_shifts(self):
+        from core.common import dilate_regions as DR
+        d = DR.DilateRegions()
+        d.ensure_keyframe(0).regions.append(self.region(1.0))
+        self.assertEqual(d.set_keyed(True), 0)
+        d.ensure_keyframe(30).regions[0].offset_x = 5.0
+        d.ensure_keyframe(60).regions[0].offset_x = 9.0
+        self.assertEqual([k.frame for k in d.keyframes], [0, 30, 60])
+        self.assertEqual(d.keyframe_at(45).regions[0].offset_x, 5.0)
+        self.assertEqual(d.set_keyed(False, 45), 2, "two keyframes removed")
+        self.assertFalse(d.keyed)
+        self.assertEqual([k.frame for k in d.keyframes], [0])
+        self.assertEqual(d.keyframe_at(0).regions[0].offset_x, 5.0, "the set in force at frame 45")
+
+    @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
+    def test_the_shift_on_the_gpu_matches_the_cpus(self):
+        import numpy as np
+        import torch
+        from core.common import dilate_regions as DR
+        yy, xx = np.mgrid[0:120, 0:200]
+        d = (300 + 0.7 * xx).astype(np.float32)
+        d[(xx - 100) ** 2 / 40 ** 2 + (yy - 60) ** 2 / 30 ** 2 < 1] = 900
+        batch = np.stack([d, d])[:, None]
+        for ox, oy in ((2.3, -1.7), (-4.1, 0.4), (0.25, 3.0)):
+            regs = DR.DilateRegions()
+            r = self.region(ox)
+            r.offset_y = oy
+            regs.ensure_keyframe(0).regions.append(r)
+            ident = lambda t, kx, ky: t.clone() if hasattr(t, "clone") else t.copy()
+            cpu = DR.apply_regional_shift(batch.copy(), 0, 0, regs, [0, 1], ident)
+            gpu = DR.apply_regional_shift(torch.from_numpy(batch.copy()).cuda(), 0, 0, regs, [0, 1], ident)
+            self.assertLessEqual(float(np.abs(cpu - gpu.cpu().numpy()).max()), 1023.0 / 65535, (ox, oy))
+            self.assertGreater(float(np.abs(cpu - batch).max()), 1.0, "it moved something")
+
+    def test_the_windows_picture_is_the_old_ones(self):
+        """The holes tinted inside their boxes, from a permuted view: the same pixels as the whole-frame way."""
+        import types
+        import numpy as np
+        from core.common import dilate_regions as DR
+        from studio.stages.splatting.editors import HoleShift
+        rng = np.random.default_rng(3)
+        occ = np.zeros((90, 160), np.float32)
+        occ[20:50, 30:38] = 1.0
+        occ[60:80, 100:130] = 1.0
+        splat = np.ascontiguousarray(rng.integers(0, 256, (3, 90, 160), dtype=np.uint8)).transpose(1, 2, 0)
+        eng = types.SimpleNamespace(_dilreg_last_occ=occ, _dilreg_last_splat=splat, _warp_last_disp=None,
+                                    previewer=types.SimpleNamespace(last_loaded_frame_index=0),
+                                    dilate_regions=DR.DilateRegions(),
+                                    dilreg_enabled_var=types.SimpleNamespace(get=lambda: True))
+        ed = HoleShift(eng)
+        holes = DR.find_holes(occ)
+        ed.occ = occ
+        sel_seed = ed._seed_of(holes[0])
+        eng.dilate_regions.ensure_keyframe(0).regions.append(DR.Region(polys=[[(0, 0), (1, 0), (1, 1)]], seed=sel_seed))
+        got = np.asarray(ed.render())
+        rgb = splat.astype(np.float32).copy()
+        for hole in holes:
+            sel = ed._region_for(ed._seed_of(hole), create=False)
+            colour, alpha = ((np.array([60.0, 235.0, 110.0], np.float32), 0.62) if sel is not None
+                             else (np.array([235.0, 90.0, 60.0], np.float32), 0.40))
+            rgb[hole[1]] = rgb[hole[1]] * (1.0 - alpha) + colour * alpha
+        self.assertTrue(np.array_equal(got, np.clip(rgb, 0, 255).astype(np.uint8)))
 
 
 class PickDepthTest(unittest.TestCase):

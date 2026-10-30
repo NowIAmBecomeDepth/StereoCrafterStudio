@@ -104,6 +104,15 @@ Section {
     property var passOn: []
     property var passFrames: []
     property var passDone: []
+    // Splatting's High VRAM Mode (user, 2026-10-30): every clip a job is on, [{name, frames, done}] (frames
+    // and done per pass, as passFrames / passDone), and the clips its jobs finished this run
+    property var jobs: []
+    property var jobsDone: []
+    function jobOf(k) {
+        for (let i = 0; i < jobs.length; ++i)
+            if (keyOf(jobs[i].name) === k) return jobs[i]
+        return null
+    }
     // the running clip is finished: every pass it runs done
     readonly property bool runningFinished: passes.length
         ? passes.every((_p, i) => !passOn[i] || !!passDone[i]) : progress >= 1
@@ -197,7 +206,8 @@ Section {
         // on to ANOTHER clip: the one before is done. The name clearing as the
         // job ends is not that -- the end is judged by its passes below (audit
         // 2026-09-28: a Stop between the passes marked the clip done here)
-        if (running !== "" && lastRunning !== "" && lastRunning !== k && worked[lastRunning]) {
+        // (with jobs side by side the name moves to the clip started last: the one before may still run)
+        if (running !== "" && lastRunning !== "" && lastRunning !== k && worked[lastRunning] && !jobOf(lastRunning)) {
             const d = Object.assign({}, done); d[lastRunning] = true; done = d
         }
         if (running !== "") lastRunning = k
@@ -224,6 +234,9 @@ Section {
     function passProgressOf(name, i, frames) {
         if (!passOn[i]) return 0
         const k = keyOf(name)
+        const job = jobOf(k)            // High VRAM Mode: each job's clip shows its own passes
+        if (job) return job.done[i] ? 1 : frames > 0 ? Math.max(0, Math.min(1, (job.frames[i] || 0) / frames)) : 0
+        if (jobsDone.indexOf(k) >= 0) return 1
         // the clip the job is on -- or, once a job was stopped part-way, the
         // one it stopped on: it keeps its bars (the passes stay until the next
         // run starts) rather than showing empty
@@ -580,10 +593,12 @@ Section {
             readonly property string path: queue.paths.length > index ? queue.paths[index] : ""
             // the clip the preview shows
             readonly property bool selected: !queue.busy && path !== "" && queue.shownPath === path
-            readonly property bool current: queue.running !== "" && queue.keyOf(modelData) === queue.keyOf(queue.running)
+            readonly property bool current: (queue.running !== "" && queue.keyOf(modelData) === queue.keyOf(queue.running))
+                                            || (queue.busy && !!queue.jobOf(queue.keyOf(modelData)))
             // finished this run: a light green of its own (user, 2026-10-05), until
             // the next run starts (queue.done is cleared then)
-            readonly property bool finished: !current && !!queue.done[queue.keyOf(modelData)]
+            readonly property bool finished: !current && (!!queue.done[queue.keyOf(modelData)]
+                                                          || queue.jobsDone.indexOf(queue.keyOf(modelData)) >= 0)
             color: current ? Theme.alpha(Theme.accent, 0.16)
                  : finished ? Theme.alpha(Theme.success, 0.16)
                  : selected ? Theme.alpha(Theme.accent, 0.12)

@@ -25,6 +25,7 @@ import glob
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import threading
@@ -296,6 +297,278 @@ def finish_streamed_encode(encoder, stop_event):
     return encoder.finish(stop_event)
 
 
+#: Thomas's Patch 1 (2026-10-30): the pre-finalize resume file being written in the background, one at a time;
+#: fails_above: the smallest size whose save failed with torch.save's "unexpected pos" this session
+_PREFINALIZE_WRITE = {"thread": None, "fails_above": None}
+
+
+def _wait_prefinalize_write():
+    """Until the pre-finalize resume file being written (if any) is on disk."""
+    t = _PREFINALIZE_WRITE["thread"]
+    if t is not None:
+        t.join()
+        _PREFINALIZE_WRITE["thread"] = None
+
+
+def _write_prefinalize_in_background(engine, payload, checkpoint_path, base_video_name):
+    """Thomas's Patch 1 (2026-10-30): the clip's resume file (15-18 GB on a long clip) held the clip ~46 s
+    while the GPU waited. Skipped when the drive can't hold it, or when a file this big already failed this
+    session ("unexpected pos"); otherwise written as before -- tmp, then replace -- on a thread of its own,
+    which then removes the per-chunk checkpoints. Skipped, those stay: a resume uses them. Not a daemon: a
+    normal exit finishes the write. The thread, or None when skipped."""
+    _wait_checkpoint_writes()
+    _wait_prefinalize_write()
+    need = sum(int(t.numel()) * int(t.element_size()) for t in payload.values() if isinstance(t, torch.Tensor))
+    fails_above = _PREFINALIZE_WRITE["fails_above"]
+    if fails_above is not None and need >= fails_above:
+        housekeeping_log.info(f"Resume checkpoint skipped ({need / 2**30:.1f} GB): one this big failed to save "
+                              "earlier this session. The per-chunk checkpoints are kept.")
+        return None
+    try:
+        free = shutil.disk_usage(os.path.dirname(checkpoint_path) or ".").free
+    except OSError:
+        free = None
+    if free is not None and need * 1.02 + 2**30 > free:
+        housekeeping_log.info(f"Resume checkpoint skipped ({need / 2**30:.1f} GB): the drive has "
+                              f"{free / 2**30:.1f} GB free. The per-chunk checkpoints are kept.")
+        return None
+
+    def write():
+        tmp_path = f"{checkpoint_path}.tmp"
+        try:
+            t0 = time.perf_counter()
+            torch.save(payload, tmp_path)
+            os.replace(tmp_path, checkpoint_path)
+            housekeeping_log.info(f"Saved resume checkpoint: {checkpoint_path} ({need / 2**30:.1f} GB, "
+                                  f"{time.perf_counter() - t0:.1f} s in the background)")
+            engine._cleanup_chunk_checkpoints(base_video_name, checkpoint_path=checkpoint_path)
+        except Exception as e:
+            if "unexpected pos" in str(e):
+                prev = _PREFINALIZE_WRITE["fails_above"]
+                _PREFINALIZE_WRITE["fails_above"] = need if prev is None else min(prev, need)
+            housekeeping_log.warning(f"Failed to save resume checkpoint {checkpoint_path}: {e}")
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+
+    t = threading.Thread(target=write, name="inpaint-prefinalize-checkpoint", daemon=False)
+    _PREFINALIZE_WRITE["thread"] = t
+    t.start()
+    return t
+
+
+class _ClipPrefetch:
+    """Thomas's Patch 2 (2026-10-30): the next clip's splat read on a thread while this clip is on the GPU
+    (decord: tens of seconds on a long clip, the GPU idle). The same reader, file and uint8 frames, only
+    earlier; skipped when the decoded clip and 16 GB more wouldn't fit in free RAM."""
+
+    def __init__(self):
+        self._path = None
+        self._thread = None
+        self._result = None
+        self._error = None
+
+    def start(self, path):
+        self.clear()
+        if psutil is None:
+            return
+        try:
+            vr = VideoReader(path, ctx=cpu(0))
+            n = len(vr)
+            h, w = vr[0].shape[:2]
+            del vr
+            need = int(n) * int(h) * int(w) * 3
+            free = psutil.virtual_memory().available
+            if need + 16 * 2**30 > free:
+                housekeeping_log.info(f"Read-ahead skipped for {os.path.basename(path)}: {need / 2**30:.1f} GB "
+                                      f"decoded, {free / 2**30:.1f} GB of RAM free.")
+                return
+        except Exception:
+            housekeeping_log.debug("Read-ahead: could not size the next clip", exc_info=True)
+            return
+
+        def read():
+            t0 = time.perf_counter()
+            try:
+                self._result = _read_video_frames_uint8(path)
+                housekeeping_log.info(f"Prefetched {os.path.basename(path)} in {time.perf_counter() - t0:.1f} s")
+            except Exception as e:
+                self._error = e
+
+        self._path = path
+        self._thread = threading.Thread(target=read, name="inpaint-clip-prefetch", daemon=True)
+        self._thread.start()
+
+    def take(self, path):
+        """The clip's frames: the read-ahead's when it was this clip and worked, else read now."""
+        t, mine = self._thread, self._path
+        if t is not None and mine is not None and os.path.normcase(os.path.abspath(mine)) == os.path.normcase(
+                os.path.abspath(path)):
+            t.join()
+            result, error = self._result, self._error
+            self._reset()
+            if result is not None:
+                return result
+            housekeeping_log.debug(f"Read-ahead of {os.path.basename(path)} failed ({error}); reading it now.")
+        else:
+            self.clear()
+        return _read_video_frames_uint8(path)
+
+    def clear(self):
+        """Nothing read ahead any more (the thread finished first: none outlives the batch)."""
+        t = self._thread
+        if t is not None:
+            t.join()
+        self._reset()
+
+    def _reset(self):
+        self._path, self._thread, self._result, self._error = None, None, None, None
+
+
+_clip_prefetch = _ClipPrefetch()
+
+
+class _HiresChunkReader:
+    """Thomas's Patch 3 (2026-10-30): the Hi-Res source read one chunk ahead on a thread of its own (with its
+    own VideoReader: decord's aren't shared between threads) while the GPU works on the chunk before."""
+
+    def __init__(self, path, chunk_ranges, stop_event):
+        self._q = queue.Queue(maxsize=2)
+        self._stop = threading.Event()
+        self._outer_stop = stop_event
+        self._thread = threading.Thread(target=self._run, args=(path, list(chunk_ranges)),
+                                        name="inpaint-hires-reader", daemon=True)
+        self._thread.start()
+
+    def _stopped(self):
+        return self._stop.is_set() or (self._outer_stop is not None and self._outer_stop.is_set())
+
+    def _put(self, item):
+        while not self._stopped():
+            try:
+                self._q.put(item, timeout=0.2)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _run(self, path, ranges):
+        try:
+            vr = VideoReader(path, ctx=cpu(0))
+            for start, end in ranges:
+                if self._stopped():
+                    return
+                if not self._put((start, vr.get_batch(list(range(start, end))).asnumpy(), None)):
+                    return
+        except Exception as e:
+            self._put((None, None, e))
+
+    def next(self, start_idx):
+        """The chunk starting at start_idx (they come in order) and how long it was waited for."""
+        t0 = time.perf_counter()
+        while True:
+            try:
+                start, arr, err = self._q.get(timeout=0.2)
+                break
+            except queue.Empty:
+                if not self._thread.is_alive() and self._q.empty():
+                    raise RuntimeError("The Hi-Res reader stopped before the clip's end.")
+        if err is not None:
+            raise err
+        if start != start_idx:
+            raise RuntimeError(f"Hi-Res reader out of order: chunk {start}, expected {start_idx}.")
+        return arr, time.perf_counter() - t0
+
+    def close(self):
+        self._stop.set()
+        try:
+            while True:
+                self._q.get_nowait()
+        except queue.Empty:
+            pass
+        self._thread.join(timeout=10)
+
+
+class _FrameWriter:
+    """Thomas's Patch 3 (2026-10-30): a chunk's 16-bit frames written to the encoder on a thread of its own
+    while the GPU goes on to the next chunk; they reach the encoder in the same order. finish() re-raises a
+    write's error; abort() drops what's queued (Stop, a failure)."""
+
+    def __init__(self, encoder, stop_event, total):
+        self._q = queue.Queue(maxsize=2)
+        self._encoder = encoder
+        self._outer_stop = stop_event
+        self._total = total
+        self._abort = threading.Event()
+        self.written = 0
+        self.error = None
+        self.busy_s = 0.0
+        self._thread = threading.Thread(target=self._run, name="inpaint-hires-writer", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while True:
+            frames = self._q.get()
+            if frames is None:
+                return
+            if self._abort.is_set() or self.error is not None:
+                continue
+            t0 = time.perf_counter()
+            for frame in frames:
+                if self._abort.is_set() or (self._outer_stop is not None and self._outer_stop.is_set()):
+                    break
+                try:
+                    self._encoder.write(frame)
+                except Exception as e:
+                    self.error = e
+                    break
+                self.written += 1
+                try:
+                    draw_progress_bar(self.written, self._total)
+                except Exception:
+                    pass        # a console that can't print the bar doesn't stop the writing
+            self.busy_s += time.perf_counter() - t0
+
+    def put(self, frames):
+        while True:
+            if self.error is not None:
+                raise self.error
+            try:
+                self._q.put(frames, timeout=0.2)
+                return
+            except queue.Full:
+                if not self._thread.is_alive():
+                    raise RuntimeError("The Hi-Res writer stopped.")
+
+    def finish(self):
+        t0 = time.perf_counter()
+        while self._thread.is_alive():     # never blocks on a writer that has died
+            try:
+                self._q.put(None, timeout=0.2)
+                break
+            except queue.Full:
+                continue
+        self._thread.join()
+        if self.error is not None:
+            raise self.error
+        return time.perf_counter() - t0
+
+    def abort(self):
+        self._abort.set()
+        try:
+            while True:
+                self._q.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self._q.put_nowait(None)
+        except queue.Full:
+            pass
+        self._thread.join(timeout=10)
+
+
 class _Counter:
     """Stands in for v1's tk.IntVar progress counters."""
 
@@ -379,6 +652,8 @@ class InpaintingEngine:
         # the last chunk's resume file on disk before the job counts as over (2026-10-29: it is written
         # in the background, and a Stop after this chunk returns while it is still being written)
         _wait_checkpoint_writes()
+        _wait_prefinalize_write()  # Thomas's Patch 1: the resume file written in the background
+        _clip_prefetch.clear()  # Thomas's Patch 2: no read-ahead outlives the batch
         if self.pipeline:
             release_tensorrt(self.pipeline)  # its counts in the log, its engines freed (2026-10-29)
             try:
@@ -1232,6 +1507,7 @@ class InpaintingEngine:
     # -- v1 InpaintingGUI._load_prefinalize_checkpoint (inpainting_gui.py:1329)
     def _load_prefinalize_checkpoint(self, checkpoint_path: str, expected_signature: dict) -> Optional[dict]:
         """Attempts to load a pre-finalize checkpoint. Returns None if unavailable or stale."""
+        _wait_prefinalize_write()  # v2: Thomas's Patch 1 -- not a file still being written
         if not os.path.exists(checkpoint_path):
             return None
         checkpoint = None
@@ -1281,6 +1557,8 @@ class InpaintingEngine:
         frames_left_original: Optional[torch.Tensor],
         fps: float,
         video_stream_info: Optional[dict],
+        base_video_name: str = "",
+        frames_edited_in_place_later: bool = False,
     ):
         """Saves tensors needed to resume from pre-finalize stage."""
         _wait_checkpoint_writes()  # v2: the last chunk's checkpoint on disk first
@@ -1294,20 +1572,10 @@ class InpaintingEngine:
             "video_stream_info": video_stream_info,
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        tmp_path = f"{checkpoint_path}.tmp"
-        try:
-            _t0 = time.perf_counter()
-            torch.save(payload, tmp_path)
-            os.replace(tmp_path, checkpoint_path)
-            housekeeping_log.info(f"Saved resume checkpoint: {checkpoint_path} "
-                                  f"({time.perf_counter() - _t0:.1f} s)")  # v2: how long (2026-10-29)
-        except Exception as e:
-            housekeeping_log.warning(f"Failed to save resume checkpoint {checkpoint_path}: {e}")
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except OSError:
-                pass
+        # v2: Thomas's Patch 1 (2026-10-30): written in the background, or skipped when it can't be
+        thread = _write_prefinalize_in_background(self, payload, checkpoint_path, base_video_name)
+        if thread is not None and frames_edited_in_place_later and self._setting("enable_color_transfer"):
+            _wait_prefinalize_write()  # the low-res finalize's colour transfer edits these frames in place
 
     # -- v1 InpaintingGUI._get_chunk_checkpoint_path (inpainting_gui.py:1404)
     def _get_chunk_checkpoint_path(self, base_video_name: str, chunk_start_idx: int, suffix: str = "") -> str:
@@ -1406,6 +1674,7 @@ class InpaintingEngine:
         self, base_video_name: str, checkpoint_path: Optional[str] = None, keep_prefinalize: bool = False
     ):
         """Removes all resume checkpoints for a video after successful completion."""
+        _wait_prefinalize_write()  # v2: Thomas's Patch 1 -- not a file still being written
         prefinalize_path = checkpoint_path or self._get_prefinalize_checkpoint_path(base_video_name)
         self._cleanup_chunk_checkpoints(base_video_name, checkpoint_path=prefinalize_path)
 
@@ -1945,10 +2214,19 @@ class InpaintingEngine:
             chunk_size = max(1, int(self._setting("frames_chunk_var")))
             total_chunks = (num_frames_original + chunk_size - 1) // chunk_size
 
+            # v2: Thomas's Patch 3 (2026-10-30): the next chunk read and this one's frames written while the
+            # GPU works (each on a thread of its own), not one after another
+            chunk_reader = _HiresChunkReader(
+                hires_video_path,
+                [(s, min(s + chunk_size, num_frames_original)) for s in range(0, num_frames_original, chunk_size)],
+                stop_event,
+            )
+            writer = None
             for chunk_index, i in enumerate(range(0, num_frames_original, chunk_size), start=1):
                 if stop_event is not None and stop_event.is_set():
                     logger.info(f"Stop requested during Hi-Res streaming finalize for {base_video_name}.")
                     return None
+                _t_chunk = time.perf_counter()
                 start_idx, end_idx = i, min(i + chunk_size, num_frames_original)
                 frame_indices = list(range(start_idx, end_idx))
                 if not frame_indices:
@@ -1981,7 +2259,7 @@ class InpaintingEngine:
                 )
 
                 # --- 2. Read hi-res source chunk and split panels ---
-                hires_frames_np = hires_reader.get_batch(frame_indices).asnumpy()
+                hires_frames_np, _t_read = chunk_reader.next(start_idx)  # v2: read ahead (Thomas's Patch 3)
                 hires_frames_torch = torch.from_numpy(hires_frames_np).to(_dev).permute(0, 3, 1, 2).float()
                 hires_mask_chunk_processed = None
                 hires_left_chunk = None
@@ -2122,15 +2400,14 @@ class InpaintingEngine:
                     out_chunk = right_final.to(_dev)
                 frames_u16 = _frames_to_uint16(out_chunk)
                 del out_chunk
-                encoder = self._stream_encoder_for(frames_u16.shape[2], frames_u16.shape[1])
-                for local_idx in range(frames_u16.shape[0]):
-                    if stop_event is not None and stop_event.is_set():
-                        logger.info(f"Stop requested during Hi-Res streaming encode for {base_video_name}.")
-                        return None
-                    encoder.write(frames_u16[local_idx])
-                    frames_written += 1
-                    draw_progress_bar(frames_written, num_frames_original)
+                if writer is None:  # v2: written on its own thread (Thomas's Patch 3)
+                    encoder = self._stream_encoder_for(frames_u16.shape[2], frames_u16.shape[1])
+                    writer = _FrameWriter(encoder, stop_event, num_frames_original)
+                writer.put(frames_u16)
                 del frames_u16
+                logger.debug(f"[timing] hires chunk {chunk_index}: read {_t_read:.2f}s (prefetched) | "
+                             f"gpu {time.perf_counter() - _t_chunk - _t_read:.2f}s | wall {time.perf_counter() - _t_chunk:.2f}s | "
+                             f"writer so far {writer.busy_s:.1f}s")
 
                 del inpainted_chunk, lowres_mask_chunk_hires, mask_chunk, hires_warped_chunk
                 if hires_left_chunk is not None:
@@ -2149,6 +2426,14 @@ class InpaintingEngine:
                         level=logging.DEBUG,
                     )
 
+            if writer is not None:  # v2: the last chunks written (Thomas's Patch 3)
+                _drain = writer.finish()
+                frames_written = writer.written
+                logger.debug(f"[timing] hires writer drained in {_drain:.2f}s")
+                writer = None
+            if stop_event is not None and stop_event.is_set():
+                logger.info(f"Stop requested during Hi-Res streaming encode for {base_video_name}.")
+                return None
             release_cuda_memory()
             gc.collect()
             self._log_resource_snapshot(
@@ -2189,6 +2474,11 @@ class InpaintingEngine:
         finally:
             if hires_reader is not None:
                 del hires_reader
+            # v2: Thomas's Patch 3 -- the threads end with the finalize, whatever way it ends
+            if locals().get("writer") is not None:
+                writer.abort()
+            if locals().get("chunk_reader") is not None:
+                chunk_reader.close()
 
     # -- v1 InpaintingGUI._find_high_res_match (inpainting_gui.py:2277)
     def _find_high_res_match(self, low_res_video_path: str) -> Optional[str]:
@@ -2385,7 +2675,7 @@ class InpaintingEngine:
                   num_frames_original, padded_H, padded_W, video_stream_info)
                  or None if an error occurs.
         """
-        frames, fps, video_stream_info = _read_video_frames_uint8(input_video_path)  # v2: bug sweep A11
+        frames, fps, video_stream_info = _clip_prefetch.take(input_video_path)  # v2: read ahead (Thomas's Patch 2)
 
         # --- Process Length Logic ---
         # --- FIX: Ensure frames are integers (0-255) before splitting. ---
@@ -3291,8 +3581,9 @@ class InpaintingEngine:
                 frames_left_original=frames_left_original_cropped,
                 fps=fps,
                 video_stream_info=video_stream_info,
+                base_video_name=base_video_name,  # v2: the write removes the chunk checkpoints once it's on disk
+                frames_edited_in_place_later=not hires_data["is_hires_blend_enabled"],  # v2: Thomas's Patch 1
             )
-            self._cleanup_chunk_checkpoints(base_video_name, checkpoint_path=checkpoint_path)
 
         # --- Handle Inpaint Direction: Reverse post-inpaint ---
         # If Reverse mode, reverse the output back to original orientation after inpainting
@@ -3748,6 +4039,8 @@ class InpaintingEngine:
                 print_job_header(idx + 1, self.total_videos.get(), video_path)
 
                 housekeeping_log.info(f"Starting processing of {video_path}")
+                if idx + 1 < len(input_videos) and not self.stop_event.is_set():
+                    _clip_prefetch.start(input_videos[idx + 1])  # v2: Thomas's Patch 2 -- read on the GPU's time
                 completed, hi_res_input_path = self.process_single_video(
                     pipeline=self.pipeline,
                     input_video_path=video_path,

@@ -171,20 +171,27 @@ class Keyframe:
 
 @dataclass
 class DilateRegions:
-    """Per-clip localized dilation. Serializes into the .fssidecar."""
+    """Per-clip localized dilation. Serializes into the .fssidecar.
+
+    `keyed` False (user, 2026-10-30: the default): one set of regions for the whole clip -- the
+    first keyframe, whatever its frame. True: keyframes as before, each from its frame to the next.
+    A sidecar written before this has no "keyed" and stays keyed, so it renders as it did."""
     version: int = SCHEMA_VERSION
     enabled: bool = True
     keyframes: List[Keyframe] = field(default_factory=list)
+    keyed: bool = False
 
     # ---- keyframe access -------------------------------------------------
 
     def keyframe_at(self, frame: int) -> Optional[Keyframe]:
-        """Most recent keyframe at or before `frame` (step interpolation).
+        """Most recent keyframe at or before `frame` (step interpolation); not keyed, the one set.
 
         Step rather than linear: region topology can differ between keyframes,
         and there is nothing coherent to interpolate between a 2-region set and
         a 5-region one.
         """
+        if not self.keyed:
+            return min(self.keyframes, key=lambda k: k.frame) if self.keyframes else None
         best = None
         for kf in self.keyframes:
             if kf.frame <= frame and (best is None or kf.frame > best.frame):
@@ -192,7 +199,14 @@ class DilateRegions:
         return best
 
     def ensure_keyframe(self, frame: int) -> Keyframe:
-        """Keyframe exactly at `frame`, created as a copy of the active one."""
+        """Keyframe exactly at `frame`, created as a copy of the active one; not keyed, the one set
+        (made at frame 0 when there is none)."""
+        if not self.keyed:
+            kf = self.keyframe_at(0)
+            if kf is None:
+                kf = Keyframe(frame=0, enabled=True, regions=[])
+                self.keyframes.append(kf)
+            return kf
         for kf in self.keyframes:
             if kf.frame == frame:
                 return kf
@@ -205,6 +219,26 @@ class DilateRegions:
         self.keyframes.append(new)
         self.keyframes.sort(key=lambda k: k.frame)
         return new
+
+    def set_keyed(self, on: bool, frame: int = 0) -> int:
+        """Keyframes on or off. Off: the set in force at `frame` becomes the whole clip's, from frame 0,
+        and the other keyframes go. Returns how many were removed."""
+        on = bool(on)
+        if on == self.keyed:
+            return 0
+        if on:
+            self.keyed = True
+            return 0
+        if not self.keyframes:
+            self.keyed = False
+            return 0
+        self.keyed = True                       # read the set in force here as keyframes saw it
+        keep = self.keyframe_at(frame) or min(self.keyframes, key=lambda k: k.frame)
+        removed = len(self.keyframes) - 1
+        keep.frame = 0
+        self.keyframes = [keep]
+        self.keyed = False
+        return removed
 
     def delete_keyframe(self, frame: int) -> bool:
         before = len(self.keyframes)
@@ -232,6 +266,7 @@ class DilateRegions:
         return {
             "version": self.version,
             "enabled": bool(self.enabled),
+            "keyed": bool(self.keyed),
             "keyframes": [k.to_dict() for k in self.keyframes],
         }
 
@@ -247,6 +282,8 @@ class DilateRegions:
                 # 2026-10-09 A11: one bad entry emptied the set, and the next save
                 # deleted it from the sidecar)
                 keyframes=load_each(d.get("keyframes", []), Keyframe.from_dict, "Dilate keyframe"),
+                # written before "keyed" (2026-10-30): keyframes, as it was made
+                keyed=bool(d.get("keyed", True)),
             )
         except Exception as e:
             logger.warning(f"DilateRegions: malformed data ignored ({e}).")
@@ -277,6 +314,22 @@ def rasterize_region(region: Region, h: int, w: int) -> np.ndarray:
     return out
 
 
+_RASTERS: Dict[Tuple[str, float, int, int], np.ndarray] = {}
+
+
+def _raster_cached(region: Region, h: int, w: int) -> np.ndarray:
+    """rasterize_region, kept by the region's outline and feather (2026-10-30: re-drawn ~30 ms at 1080p on
+    every knob step, though a shift doesn't change it). Read-only: callers make new arrays from it."""
+    key = (json.dumps(region.polys), round(float(region.feather), 3), int(h), int(w))
+    m = _RASTERS.get(key)
+    if m is None:
+        m = rasterize_region(region, h, w)
+        if len(_RASTERS) >= 32:
+            _RASTERS.pop(next(iter(_RASTERS)))
+        _RASTERS[key] = m
+    return m
+
+
 def build_offset_groups(kf: Keyframe, h: int, w: int
                         ) -> List[Tuple[np.ndarray, float, float]]:
     """Composite regions into (mask, offset_x, offset_y) groups.
@@ -296,7 +349,7 @@ def build_offset_groups(kf: Keyframe, h: int, w: int
     for region in reversed(kf.regions):
         if not region.is_active():
             continue
-        m = rasterize_region(region, h, w)
+        m = _raster_cached(region, h, w)
         if m.max() <= 0.0:
             continue
         m = np.clip(m - claimed, 0.0, 1.0)
@@ -316,6 +369,58 @@ def build_offset_groups(kf: Keyframe, h: int, w: int
 # ----------------------------------------------------------------------------
 # Apply
 # ----------------------------------------------------------------------------
+
+#: build_offset_groups' masks, kept across renders (2026-10-30: re-drawn on every preview frame, ~30 ms at
+#: 1080p): keyed by the keyframe's content and the size, so any edit makes a new entry
+_GROUPS: Dict[Tuple[str, int, int], List[Tuple[np.ndarray, float, float]]] = {}
+_GROUPS_T: Dict[Tuple[str, int, int, str], list] = {}
+_GROUPS_MAX = 8
+
+
+def _groups_cached(kf: Keyframe, h: int, w: int, device: Optional[str] = None) -> list:
+    """build_offset_groups for `kf`, from the cache when its regions are unchanged; with `device`, the
+    masks as tensors there (moved once)."""
+    key = (json.dumps(kf.to_dict(), sort_keys=True), int(h), int(w))
+    groups = _GROUPS.get(key)
+    if groups is None:
+        groups = build_offset_groups(kf, h, w)
+        if len(_GROUPS) >= _GROUPS_MAX:
+            _GROUPS.pop(next(iter(_GROUPS)))
+        _GROUPS[key] = groups
+    if device is None:
+        return groups
+    tkey = key + (str(device),)
+    out = _GROUPS_T.get(tkey)
+    if out is None:
+        import torch
+        out = [(torch.from_numpy(m).to(device), ox, oy) for m, ox, oy in groups]
+        if len(_GROUPS_T) >= _GROUPS_MAX:
+            _GROUPS_T.pop(next(iter(_GROUPS_T)))
+        _GROUPS_T[tkey] = out
+    return out
+
+
+def _translate_t(plane: Any, dx: float, dy: float) -> Any:
+    """_translate on the GPU (2026-10-30: the region shift was per-frame OpenCV, the plane copied off the
+    GPU and back): dst(x, y) = src(x - dx, y - dy), bilinear, the edge repeated -- as warpAffine does,
+    the offsets rounded to its 1/32 px, so the two agree to float rounding."""
+    import math
+    import torch
+    h, w = int(plane.shape[-2]), int(plane.shape[-1])
+    dx, dy = round(float(dx) * 32.0) / 32.0, round(float(dy) * 32.0) / 32.0
+    ix, iy = math.floor(dx), math.floor(dy)
+    fx, fy = dx - ix, dy - iy
+    xs = torch.arange(w, device=plane.device)
+    ys = torch.arange(h, device=plane.device)
+
+    def shifted(sx: int, sy: int):
+        return plane.index_select(-1, (xs - sx).clamp_(0, w - 1)).index_select(-2, (ys - sy).clamp_(0, h - 1))
+    top = shifted(ix, iy) if fx <= 0 else shifted(ix, iy) * (1.0 - fx) + shifted(ix + 1, iy) * fx
+    if fy <= 0:
+        return top
+    bot = shifted(ix, iy + 1) if fx <= 0 else shifted(ix, iy + 1) * (1.0 - fx) + shifted(ix + 1, iy + 1) * fx
+    return top * (1.0 - fy) + bot * fy
+
 
 def _translate(plane: np.ndarray, dx: float, dy: float) -> np.ndarray:
     """Shift a 2D depth plane by (dx, dy) pixels, sub-pixel accurate.
@@ -361,9 +466,14 @@ def apply_regional_shift(tensor_4d: Any,
         base = dilate_fn(tensor_4d, global_x, global_y)
         h, w = int(tensor_4d.shape[-2]), int(tensor_4d.shape[-1])
 
-        # Cache per keyframe: the rasterization depends only on the keyframe,
-        # and a batch usually spans one.
-        group_cache: Dict[int, List[Tuple[np.ndarray, float, float]]] = {}
+        # The masks depend only on the keyframe and the size: kept across renders (_groups_cached).
+        # A batch on the GPU shifts there, without the plane leaving it (2026-10-30).
+        on_gpu = False
+        try:
+            import torch
+            on_gpu = isinstance(base, torch.Tensor) and base.is_cuda
+        except Exception:
+            pass
 
         for bi, f in enumerate(idxs):
             if not correction.active_at(f):
@@ -371,9 +481,20 @@ def apply_regional_shift(tensor_4d: Any,
             kf = correction.keyframe_at(f)
             if kf is None:
                 continue
-            if kf.frame not in group_cache:
-                group_cache[kf.frame] = build_offset_groups(kf, h, w)
-            groups = group_cache[kf.frame]
+            if on_gpu:
+                groups_t = _groups_cached(kf, h, w, str(base.device))
+                if not groups_t:
+                    continue
+                plane_t = base[bi, 0].float()
+                for mask_t, ox, oy in groups_t:
+                    dx, dy = ox * res_scale, oy * res_scale
+                    m_t = mask_t
+                    if abs(dx) > 0.5 or abs(dy) > 0.5:
+                        m_t = torch.maximum(mask_t, _translate_t(mask_t, dx, dy))
+                    plane_t = plane_t * (1.0 - m_t) + _translate_t(plane_t, dx, dy) * m_t
+                base[bi, 0] = plane_t.to(base.dtype)
+                continue
+            groups = _groups_cached(kf, h, w)
             if not groups:
                 continue
 
@@ -455,7 +576,10 @@ def find_holes(occlusion_mask: np.ndarray,
             x, y, w, h, area = stats[i]
             if area < min_area_px:
                 continue
-            out.append((i, labels == i, (int(x), int(y), int(w), int(h)), int(area)))
+            # compared inside its box only (2026-10-30: a whole-frame compare per hole)
+            m = np.zeros(labels.shape, bool)
+            m[y:y + h, x:x + w] = labels[y:y + h, x:x + w] == i
+            out.append((i, m, (int(x), int(y), int(w), int(h)), int(area)))
         out.sort(key=lambda r: r[3], reverse=True)
         return [(i, m, bb) for (i, m, bb, _a) in out]
     except Exception as e:

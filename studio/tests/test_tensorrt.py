@@ -192,6 +192,31 @@ class DispatchTest(unittest.TestCase):
             self.assertEqual(released, [1], "the GPU copy freed even so")
             self.assertEqual([p.name for p in Path(d).iterdir()], [], "no engine, no .part, no ONNX left")
 
+    def test_a_build_short_of_workspace_is_tried_again_with_the_cards_free_memory(self):
+        """A 5090's DepthCrafter UNet at 1024x576, Window 110 needed 10.75 GB for one part: the 8 GB
+        workspace couldn't build it (2026-10-30)."""
+        G = 1 << 30
+        for free, want in ((25 * G, [0, 24 * G]), (7 * G, [0])):
+            asked = []
+
+            def serialize(path, profile=None, workspace=0, a=asked):
+                a.append(workspace)
+                if len(a) == 1:
+                    raise RuntimeError("TensorRT could not build the engine (see the lines above)")
+                return b"engine"
+            with tempfile.TemporaryDirectory() as d, mock.patch.object(T, "ENGINE_DIR", Path(d)), \
+                    mock.patch.object(T, "_serialize", serialize), mock.patch.object(T, "_TRT_OUT", [T.log]), \
+                    mock.patch.object(torch.cuda, "mem_get_info", lambda f=free: (f, 32 * G)):
+                if len(want) == 2:
+                    with self.assertLogs(T.log, "INFO") as logs:
+                        T.build_engine("u.engine", lambda p: p.write_bytes(b"onnx"))
+                    self.assertEqual((Path(d) / "u.engine").read_bytes(), b"engine")
+                    self.assertIn("24.0 GB workspace", logs.output[0])
+                else:
+                    with self.assertRaises(RuntimeError):
+                        T.build_engine("u.engine", lambda p: p.write_bytes(b"onnx"))
+            self.assertEqual(asked, want, f"{free // G} GB free")
+
     def test_with_no_offload_the_pytorch_unet_waits_in_ram(self):
         rt, pipe = trt("none")
         moves = []
@@ -249,6 +274,28 @@ class SmallCardTest(unittest.TestCase):
                     mock.patch.object(torch.cuda, "empty_cache", lambda: emptied.append(1)):
                 T._hand_back_cache()
             self.assertEqual(len(emptied), want, (free >> 30, cached >> 30))
+
+    def test_tensorrts_own_errors_reach_the_stages_console_page(self):
+        """A 5090 user's "could not build the engine (see the lines above)" had no lines above it:
+        TensorRT printed them to the raw console only (2026-10-30)."""
+        try:
+            import tensorrt as trt
+        except ImportError:
+            self.skipTest("TensorRT isn't installed")
+        stage = logging.getLogger("studio.stages.depthcrafter.runner")
+        pipe = types.SimpleNamespace(tensorrt=None)
+        with mock.patch.object(T, "unavailable_reason", lambda: ""), self.assertLogs(stage, "INFO"):
+            T.enable_tensorrt(pipe, 25, True, "model", logger=stage, stage="DepthCrafter")
+        sev = trt.ILogger.Severity
+        with self.assertLogs(stage, "INFO") as logs:
+            T._trt_logger().log(sev.ERROR, "out of memory allocating 13 GB")
+            T._trt_logger().log(sev.WARNING, "a tactic was skipped")
+            T._trt_logger().log(sev.INFO, "building layer 42")
+        self.assertEqual([(r.levelname, r.getMessage()) for r in logs.records],
+                         [("ERROR", "TensorRT error: out of memory allocating 13 GB"),
+                          ("WARNING", "TensorRT warning: a tactic was skipped")])
+        from studio import log_model
+        self.assertEqual(log_model.tab_for_logger(stage.name), "depthcrafter")
 
     def test_with_room_it_stays_loaded(self):
         rt, _ = trt()

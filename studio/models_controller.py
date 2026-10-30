@@ -121,6 +121,8 @@ class ModelsController(QObject):
     def refresh(self) -> None:
         rows = []
         for m in C.MODELS:
+            if not C.listed(m):      # a row for some cards only (Sage 1: RTX 20)
+                continue
             try:
                 row = C.status(m)
             except Exception:
@@ -177,6 +179,12 @@ class ModelsController(QObject):
             if C.packages_ready(m):
                 self.refresh()
                 return ""
+            loaded = [n for n in ("sageattention", "triton") if n in sys.modules]
+            if key == "sage1" and loaded:
+                # Windows won't replace a loaded .pyd: a DepthCrafter or Inpainting run loads both
+                return ("SageAttention is loaded in this session (a DepthCrafter or Inpainting run loads it), "
+                        "and Windows won't let it be replaced while it is. Restart Studio and install this "
+                        "before running anything.")
             try:
                 free = shutil.disk_usage(sys.prefix).free
             except OSError:

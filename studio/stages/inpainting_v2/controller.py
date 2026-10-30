@@ -29,7 +29,7 @@ from typing import Any, Dict
 from PySide6.QtCore import Property, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlPropertyMap
 
-from ... import settings_store
+from ... import sage1, settings_store
 from ...legacy import REPO
 from . import settings as S
 
@@ -513,6 +513,8 @@ class InpaintingV2Controller(QObject):
     def _start_now(self) -> None:
         runner = self._ensure_runner()
         self._runner_values.update(S.normalise(self._values()))
+        if sage1.installed():   # Triton 3.2 (SageAttention 1, RTX 20) breaks Torch Compile: off, whatever was saved
+            self._runner_values["use_compile"] = False
         if getattr(self, "_test", False):
             from studio import test_renders
             self._runner_values["output_folder"] = test_renders.folder(self._runner_values["output_folder"])

@@ -2488,7 +2488,7 @@ class SplattingPreviewEngine:
         track = getattr(self, "keyframe_track", None)
         if track is None:
             return None
-        return track.values_at(frame_idx)
+        return track.values_at(frame_idx, hold_first=False)  # v2: before the first key, the clip's own
 
     # -- v1 SplatterGUI._kf_apply_interpolation_to_settings (splatting_gui.py:1540)
     def _kf_apply_interpolation_to_settings(self, settings: dict, frame_idx: int, border_mode: str) -> None:
@@ -5908,6 +5908,8 @@ class SplattingPreviewEngine:
                     "keyframes": self.keyframe_track, "dilate": self.dilate_regions}
         except Exception:
             _kept = None
+        if getattr(self, "_keep_settings_on_load", False):  # v2: back from the Depth Map Editor (preview.reloadClip)
+            return
         # Pop Out Boost is scene-specific, not a persistent setting -- leaving it
         # dialed in would silently boost the brightest/nearest thing in whatever
         # clip loads next. Every clip load starts from Amount = 0 unconditionally

@@ -45,6 +45,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from . import settings_store
 from .legacy import REPO
+from .sage1 import SAGE1_PINS
 
 logger = logging.getLogger("studio.updater")
 
@@ -322,9 +323,21 @@ def helper_script(repo: Path, pid: int, sha: str, launch: str, result_path: Path
         "    $uvArgs = @('sync')",
         "    if (Test-Path -LiteralPath (Join-Path $repo '.venv\\Lib\\site-packages\\tensorrt')) "
         "{ $uvArgs += @('--extra', 'tensorrt') }",
+        # SageAttention 1 for RTX 20 series (2026-10-30): the sync puts the pinned Sage 2 and Triton 3.6
+        # back, so it is installed again after
+        "    $sage1 = @(Get-ChildItem -LiteralPath (Join-Path $repo '.venv\\Lib\\site-packages') "
+        "-Filter 'sageattention-1.*.dist-info' -Directory -ErrorAction SilentlyContinue).Count -gt 0",
         "    Log ('uv ' + ($uvArgs -join ' '))",
         "    & $uv @uvArgs 2>&1 | ForEach-Object { Log $_ }",
         "    if ($LASTEXITCODE -ne 0) { $uvNote = ' Updating the Python packages failed: run uv sync in the Studio folder.' }",
+        "    elseif ($sage1) {",
+        "      $sageArgs = @('pip', 'install', '--python', (Join-Path $repo '.venv\\Scripts\\python.exe'), "
+        + ", ".join(f"'{p}'" for p in SAGE1_PINS) + ")",
+        "      Log ('uv ' + ($sageArgs -join ' '))",
+        "      & $uv @sageArgs 2>&1 | ForEach-Object { Log $_ }",
+        "      if ($LASTEXITCODE -ne 0) { $uvNote = ' Putting SageAttention 1 back failed: install it again in "
+        "Settings > Studio > Models.' }",
+        "    }",
         "  } else { $uvNote = ' New Python packages are needed: run uv sync in the Studio folder (uv was not found).' }",
         "}",
         "Done ($uvNote -eq '') ('Studio was updated.' + $uvNote)",

@@ -661,7 +661,7 @@ ChangeFoldersButton {
             onTriggered: page.st.use_local_models_only_var = checked
         }
         MenuItem {
-            text: "Use SageAttention (Faster)"
+            text: "Use " + Theme.sageName
             checkable: true
             checked: !!page.st.use_sageattention_var
             onTriggered: page.st.use_sageattention_var = checked

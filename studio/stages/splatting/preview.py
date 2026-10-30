@@ -357,7 +357,7 @@ class SplattingPreview(QObject):
         if self._kf_cache is not None and self._kf_cache[0] == key:
             return self._kf_cache[1]
         out = {(name[:-4] if name.endswith("_var") else name): float(v)
-               for name, v in (track.values_at(self._frame) or {}).items()}
+               for name, v in (track.values_at(self._frame, hold_first=False) or {}).items()}
         self._kf_cache = (key, out)
         return out
 
@@ -415,8 +415,10 @@ class SplattingPreview(QObject):
         Editor's Use in Splatting put an edited map in place). One clear and
         one load AT that clip, queued in that order: a clear then showClip()
         decided "jump" before the clear landed, jumped in an emptied list, and
-        the batch's first clip came up instead (user, 2026-09-28)."""
+        the batch's first clip came up instead (user, 2026-09-28). Every control stays as it was (user,
+        2026-10-30): the load reads no sidecar and resets nothing ("keep_settings")."""
         self._submit("clear")
+        self._submit("keep_settings")
         self._submit("load", str(path))
 
     @Slot()
@@ -486,7 +488,7 @@ class SplattingPreview(QObject):
         var = key + "_var"
         entry = track.frame_at(self._frame)
         if entry is None:
-            values = dict(track.values_at(self._frame) or {})
+            values = dict(track.values_at(self._frame, hold_first=False) or {})
             if var not in values:
                 return False
             values[var] = float(value)
@@ -552,7 +554,7 @@ class SplattingPreview(QObject):
     # ---- Hole Shift (editors.py), Detect Text (submask.py) ----------------------------
 
     #: Ops that change the clip's regions/zones: frames kept for looping are stale.
-    EDITOR_EDITS = {"click", "commit", "del_key", "clear_all", "set_enabled"}
+    EDITOR_EDITS = {"click", "commit", "del_key", "clear_all", "set_enabled", "set_keyed"}
 
     @Slot(str)
     def openEditor(self, name: str) -> None:
@@ -1067,6 +1069,8 @@ class SplattingPreview(QObject):
         finally:
             PE.FAST["on"] = False
             pv._frame_buffer = saved_buffer
+            if kind == "load":
+                eng._keep_settings_on_load = False      # keep_settings holds for one load only
         self._flush_editors()
         return result
 
@@ -1097,6 +1101,9 @@ class SplattingPreview(QObject):
                 pv.last_loaded_video_path = arg
             pv.load_video_list(lambda: found)
             eng._fb_refresh_presets()
+        elif kind == "keep_settings":
+            # the next load leaves every control as it is (reloadClip): its sidecar sync is skipped
+            eng._keep_settings_on_load = True
         elif kind in ("clear", "release"):
             pv._clear_preview_resources()
             pv.video_list = []
@@ -1321,11 +1328,14 @@ class SplattingPreview(QObject):
     # once the job is done, as is an open editor's after any preview render
     # (v1 re-drew it from every render through _dilreg_refresh).
     EDITOR_OPS = {
-        "holeshift": {"click", "nudge", "set_offset", "commit", "add_key", "del_key", "clear_all", "set_enabled"},
+        "holeshift": {"click", "nudge", "set_offset", "commit", "add_key", "del_key", "clear_all", "set_enabled",
+                      "set_keyed"},
         "submask": {"seek", "step", "set", "set_rect", "zoom_rect", "fit_view", "clear_rect", "redraw",
                     "add_segment", "remove_segment", "select_segment", "set_range", "mark_in", "mark_out",
                     "freeze_here", "unfreeze", "reset_all"},
     }
+    #: Hole Shift ops that change numbers, not its picture (the commit that follows re-renders it)
+    HOLESHIFT_NUMBERS_ONLY = {"nudge", "set_offset", "add_key"}
     #: Called from inside every preview render while that editor is open.
     EDITOR_HOOKS = {"holeshift": "_dilreg_refresh"}
 
@@ -1402,6 +1412,13 @@ class SplattingPreview(QObject):
             message = getattr(ed, op)(*args)
             if message:
                 self._sig_status.emit(str(message))   # v1: the main status label
+            if name == "holeshift" and op in self.HOLESHIFT_NUMBERS_ONLY:
+                # its picture shows which holes are picked, not their offsets: the numbers only
+                # (2026-10-30: a knob's every step redrew the 1080p picture on the CPU)
+                state = dict(ed.state())
+                state["open"] = True
+                self._sig_editor.emit(name, state)
+                return
         self._editors_stale.add(name)
 
     def _flush_editors(self) -> None:

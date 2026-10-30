@@ -11,6 +11,7 @@ import logging
 import queue
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -32,6 +33,7 @@ from core.common.partial_output import discard, part_path, publish, reap
 from core.common.cli_utils import draw_progress_bar
 from .forward_warp import ForwardWarpStereo
 from .depth_processing import process_depth_batch, normalize_and_gamma_depth
+from .depth_gpu import normalize_and_gamma_depth_gpu
 from core.common import frame_break
 from core.common import dilate_regions as _dilreg
 from core.common.keyframes import KeyframeTrack
@@ -112,7 +114,7 @@ def plan_batches(total_frames, batch_size, track=None, test_target_frame_idx=Non
     last_kf = max(track.sorted_frames())
     plan, run, run_values = [], [], None
     for f in range(0, min(last_kf + 1, total_frames)):
-        values = track.values_at(f)
+        values = track.values_at(f, hold_first=False)   # before the first key: the clip's own settings
         if run and (values != run_values or len(run) >= batch_size):
             plan.append(run)
             run = []
@@ -135,7 +137,8 @@ def effective_settings(base, track, frame):
     """
     if track is None:
         return base
-    values = track.values_at(frame)
+    # before the first keyframe the clip's own settings (user, 2026-10-30), as the preview shows them
+    values = track.values_at(frame, hold_first=False)
     if not values:
         return base
     eff = dict(base)
@@ -557,6 +560,7 @@ class RenderProcessor:
         frame_count = 0
         encoding_successful = True
 
+        _fetcher = None     # the read-ahead threads (_fetch_ahead), stopped in the finally below
         try:
             # The values a keyframe animates all reach the pipeline as scalars
             # for a whole batch, so the batches themselves have to respect where
@@ -692,6 +696,85 @@ class RenderProcessor:
                             f"{f', grow {_rain_settings.grow:+d} px' if _rain_settings.grow else ''}"
                             f"{f', pop +{_rain_settings.pop:.1f}' if _rain_settings.pop > 0 else ''}"
                             f"{f', convergence {_rain_settings.conv:+.2f}' if _rain_settings.conv else ''}")
+            # The next batch read while this one warps (user, 2026-10-30: the GPU sat idle ~2/3 of each
+            # clip waiting on reads): its frames, its depth at the video's size, normalized -- everything
+            # step 1-2 does, on one thread so the readers still read in order. Not with Rain / Sparks or
+            # Web: they read their own windows from the same reader.
+            def _fetch_video(batch_indices, batch_video_numpy=None):
+                if batch_video_numpy is None:
+                    batch_video_numpy = input_video_reader.get_batch(batch_indices).asnumpy()
+                if flip_horizontal:
+                    batch_video_numpy = np.flip(batch_video_numpy, axis=2).copy()
+                return batch_video_numpy
+
+            def _fetch_depth(batch_indices, eff, video_shape):
+                """The depth read, resized to the video's size and normalized; video_shape() gives the
+                frames' shape (it waits for the video's read when that runs on the other thread)."""
+                batch_depth_numpy_raw = depth_map_reader.get_batch(batch_indices).asnumpy()
+                if flip_horizontal:
+                    batch_depth_numpy_raw = np.flip(batch_depth_numpy_raw, axis=2).copy()
+
+                # --- NEW: Aspect Ratio Parity ---
+                # Immediate resize to ensure all following steps (normalization, dilation, blur)
+                # occur at the correct target aspect ratio, matching the GUI previewer.
+                video_h, video_w = video_shape()[1:3]
+                depth_h, depth_w = batch_depth_numpy_raw.shape[1], batch_depth_numpy_raw.shape[2]
+
+                if depth_h != video_h or depth_w != video_w:
+                    logger.debug(
+                        f"Resizing depth from {depth_w}x{depth_h} to match video {video_w}x{video_h} for aspect-ratio parity."
+                    )
+                    interp = cv2.INTER_AREA if (video_w < depth_w and video_h < depth_h) else cv2.INTER_LINEAR
+                    # Correctly account for potential channel dimension (e.g., RGB depth maps)
+                    output_shape = (batch_depth_numpy_raw.shape[0], video_h, video_w)
+                    if batch_depth_numpy_raw.ndim == 4:
+                        output_shape += (batch_depth_numpy_raw.shape[3],)
+
+                    resized_depth = np.empty(output_shape, dtype=batch_depth_numpy_raw.dtype)
+                    for idx in range(batch_depth_numpy_raw.shape[0]):
+                        res = cv2.resize(batch_depth_numpy_raw[idx], (video_w, video_h), interpolation=interp)
+                        if batch_depth_numpy_raw.ndim == 4 and res.ndim == 2:
+                            res = res[..., np.newaxis]
+                        resized_depth[idx] = res
+                    batch_depth_numpy_raw = resized_depth
+
+                # 2. Normalize and apply gamma (BEFORE dilation/blur), on the GPU when it's there (the same
+                # steps in torch; the CPU's took ~6 s a 3-clip batch at 2580x1080, user 2026-10-30)
+                batch_depth_normalized = normalize_and_gamma_depth_gpu(
+                    batch_depth_numpy_raw=batch_depth_numpy_raw,
+                    assume_raw_input=assume_raw_input,
+                    global_depth_max=global_depth_max,
+                    global_depth_min=global_depth_min,
+                    max_expected_raw_value=max_expected_raw_value,
+                    zero_disparity_anchor_val=eff["zero_disparity_anchor_val"],
+                    depth_gamma=eff["depth_gamma"],
+                    debug_task_name="Render",
+                )
+                return batch_depth_numpy_raw, batch_depth_normalized
+
+            def _fetch_batch(batch_indices, eff, batch_video_numpy=None):
+                """Steps 1-2 here and now (Rain / Sparks, Web, a test frame)."""
+                video = _fetch_video(batch_indices, batch_video_numpy)
+                return (video, *_fetch_depth(batch_indices, eff, lambda: video.shape))
+
+            _read_ahead = not (_rain_settings is not None and _rain_settings.on) and not (
+                is_test_mode and test_target_frame_idx is not None)
+            if _read_ahead:
+                # one thread per reader: each still reads in order, and the source's read and the
+                # depth's read + prep run side by side
+                _fetcher = (ThreadPoolExecutor(1, thread_name_prefix="splat-read-video"),
+                            ThreadPoolExecutor(1, thread_name_prefix="splat-read-depth"))
+            _fetched = {}       # batch_no -> (the video's Future, the depth's Future)
+
+            def _fetch_ahead(batch_no):
+                """Queue batch `batch_no`'s reads (and its depth prep) behind the ones in flight."""
+                if batch_no < len(batch_plan) and batch_no not in _fetched and batch_plan[batch_no]:
+                    idx = batch_plan[batch_no]
+                    video = _fetcher[0].submit(_fetch_video, idx)
+                    depth = _fetcher[1].submit(_fetch_depth, idx, effective_settings(kf_base, keyframe_track, idx[0]),
+                                               lambda: video.result().shape)
+                    _fetched[batch_no] = (video, depth)
+
             for batch_no, batch_indices in enumerate(batch_plan):
                 # Every way out of this loop other than running out of frames
                 # means the output is short. Say so: encoding_successful starts
@@ -741,62 +824,25 @@ class RenderProcessor:
                     )
                 )
 
-                # 1. Fetch frames
+                # 1-2. Fetch frames, then the depth resized, normalized and gamma'd (_fetch_batch)
                 _win_raw = _centres = None
-                if _rain_settings is not None and _rain_settings.on and _web_mod is None:
+                if _fetcher is not None:
+                    _fetch_ahead(batch_no)
+                    _fetch_ahead(batch_no + 1)       # the next batch reads while this one warps
+                    _video, _depth = _fetched.pop(batch_no)
+                    batch_video_numpy = _video.result()
+                    batch_depth_numpy_raw, batch_depth_normalized = _depth.result()
+                elif _rain_settings is not None and _rain_settings.on and _web_mod is None:
                     # the batch sliced out of its Rain / Sparks window: one forward read (#18)
                     if _rain_frames is None:
                         from core.splatting.rain import WindowFrames, radius_of
                         _rain_frames = WindowFrames(input_video_reader, radius_of(_rain_settings))
                     _win_raw, _centres = _rain_frames.read(batch_indices)
                     batch_video_numpy = _win_raw[_centres]
+                    batch_video_numpy, batch_depth_numpy_raw, batch_depth_normalized = _fetch_batch(
+                        batch_indices, eff, batch_video_numpy)
                 else:
-                    batch_video_numpy = input_video_reader.get_batch(batch_indices).asnumpy()
-                batch_depth_numpy_raw = depth_map_reader.get_batch(batch_indices).asnumpy()
-
-                if flip_horizontal:
-                    batch_video_numpy = np.flip(batch_video_numpy, axis=2).copy()
-                    batch_depth_numpy_raw = np.flip(batch_depth_numpy_raw, axis=2).copy()
-
-                # --- NEW: Aspect Ratio Parity ---
-                # Immediate resize to ensure all following steps (normalization, dilation, blur)
-                # occur at the correct target aspect ratio, matching the GUI previewer.
-                video_h, video_w = batch_video_numpy.shape[1], batch_video_numpy.shape[2]
-                depth_h, depth_w = batch_depth_numpy_raw.shape[1], batch_depth_numpy_raw.shape[2]
-
-                if depth_h != video_h or depth_w != video_w:
-                    logger.debug(
-                        f"Resizing depth from {depth_w}x{depth_h} to match video {video_w}x{video_h} for aspect-ratio parity."
-                    )
-                    interp = cv2.INTER_AREA if (video_w < depth_w and video_h < depth_h) else cv2.INTER_LINEAR
-                    # Correctly account for potential channel dimension (e.g., RGB depth maps)
-                    output_shape = (batch_depth_numpy_raw.shape[0], video_h, video_w)
-                    if batch_depth_numpy_raw.ndim == 4:
-                        output_shape += (batch_depth_numpy_raw.shape[3],)
-
-                    resized_depth = np.empty(output_shape, dtype=batch_depth_numpy_raw.dtype)
-                    for idx in range(batch_depth_numpy_raw.shape[0]):
-                        res = cv2.resize(batch_depth_numpy_raw[idx], (video_w, video_h), interpolation=interp)
-                        if batch_depth_numpy_raw.ndim == 4 and res.ndim == 2:
-                            res = res[..., np.newaxis]
-                        resized_depth[idx] = res
-                    batch_depth_numpy_raw = resized_depth
-
-                # 2. Normalize and apply gamma (BEFORE dilation/blur)
-                batch_depth_normalized = normalize_and_gamma_depth(
-                    batch_depth_numpy_raw=batch_depth_numpy_raw,
-                    assume_raw_input=assume_raw_input,
-                    global_depth_max=global_depth_max,
-                    global_depth_min=global_depth_min,
-                    max_expected_raw_value=max_expected_raw_value,
-                    zero_disparity_anchor_val=eff["zero_disparity_anchor_val"],
-                    depth_gamma=eff["depth_gamma"],
-                    debug_task_name="Render",
-                )
-
-                logger.debug(
-                    f"[DEPTH] After normalization and gamma: min={batch_depth_normalized.min():.4f}, max={batch_depth_normalized.max():.4f}"
-                )
+                    batch_video_numpy, batch_depth_numpy_raw, batch_depth_normalized = _fetch_batch(batch_indices, eff)
 
                 # 2.5. The subtitle mask for this batch, read once: Text Clean
                 # uses it here, the pin (3.6) after Dilate / Blur. Text Clean
@@ -1075,6 +1121,9 @@ class RenderProcessor:
             if type(e).__name__ == "OutOfMemoryError" or "out of memory" in str(e).lower():
                 self.out_of_vram = True       # the batch says what to change (release check 2026-10-17)
         finally:
+            # The read-ahead ended before anything closes: its thread reads the clip's readers
+            for _pool in _fetcher or ():
+                _pool.shutdown(wait=True, cancel_futures=True)
             # Guarantee every ffmpeg pipe is either reaped or killed, and that its
             # stdout/stderr are closed. A silent wait() timeout here (e.g. slow DNxHR
             # finalize) previously left ffmpeg.exe orphaned -- each orphan pinned an

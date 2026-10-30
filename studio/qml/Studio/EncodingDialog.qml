@@ -252,21 +252,29 @@ Popup {
                 FieldRow { label: "DNxHR Profile"; labelWidth: 120; enabled: mAll.dnx; help: dlg.help("dnxhr_profile"); EDrop { key: "mergeall_dnxhr_profile"; model: dlg.ctl ? dlg.ctl.choices.dnxhr_profile : [] } }
                 FieldRow { label: "Audio"; labelWidth: 120; help: dlg.help("mergeall_audio_codec"); EDrop { key: "mergeall_audio_codec"; model: dlg.ctl ? dlg.ctl.choices.mergeall_audio_codec || [] : [] } }
             }
-            ColumnLayout {
+            // a plain Item round the two paths: the drop zones over them are declared in it, out of any
+            // layout -- declared in the column, the column managed an item that fills its parent by anchors
+            // (Qt: "undefined behavior"), and the warning failed every check's "no QML warnings"
+            Item {
                 id: mAllPaths
                 Layout.fillWidth: true
-                spacing: Theme.rowGap
-                PathPick { objectName: "encMergeAudio"; label: "Movie (sound)"; key: "mergeall_audio_file"; file: true; help: dlg.help("mergeall_audio_file") }
-                PathPick { objectName: "encMergeOut"; label: "Output Folder"; key: "mergeall_output_folder"; help: dlg.help("mergeall_output_folder") }
-            }
-            // drag and drop (user, 2026-10-25): the movie and the output folder
-            DropZones {
-                over: mAllPaths
-                modal: true
-                store: dlg.st
-                targets: [{ key: "mergeall_audio_file", label: "Movie (sound)",
-                            files: ["mkv", "mp4", "m2ts", "ts", "mov", "avi", "mka", "ac3", "eac3", "dts", "thd", "flac", "wav"] },
-                          { key: "mergeall_output_folder", label: "Output Folder", folder: true }]
+                implicitHeight: mAllPathsCol.implicitHeight
+                ColumnLayout {
+                    id: mAllPathsCol
+                    width: parent.width
+                    spacing: Theme.rowGap
+                    PathPick { objectName: "encMergeAudio"; label: "Movie (sound)"; key: "mergeall_audio_file"; file: true; help: dlg.help("mergeall_audio_file") }
+                    PathPick { objectName: "encMergeOut"; label: "Output Folder"; key: "mergeall_output_folder"; help: dlg.help("mergeall_output_folder") }
+                }
+                // drag and drop (user, 2026-10-25): the movie and the output folder
+                DropZones {
+                    over: mAllPaths
+                    modal: true
+                    store: dlg.st
+                    targets: [{ key: "mergeall_audio_file", label: "Movie (sound)",
+                                files: ["mkv", "mp4", "m2ts", "ts", "mov", "avi", "mka", "ac3", "eac3", "dts", "thd", "flac", "wav"] },
+                              { key: "mergeall_output_folder", label: "Output Folder", folder: true }]
+                }
             }
         }
 

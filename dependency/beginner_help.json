@@ -77,7 +77,7 @@
     "depth_dilate_size_y": "Same as Expand X, but up and down.",
     "depth_blur_size_x": "Softens depth edges sideways, smoothing jagged or flickering 3D outlines. Too much makes edges look soft.",
     "depth_blur_size_y": "Same as Blur X, but up and down.",
-    "depth_dilate_left": "Grows depth edges toward the left only. Good for tidying blocky left-side edges without touching the right side.",
+    "depth_dilate_left": "Grows depth edges toward the left only. Good for tidying blocky left-side edges without touching the right side. Below 0 shrinks the left edges instead, e.g. to undo some of Expand X there.",
     "depth_blur_left": "Softens only strong left-facing edges, smoothing jagged left outlines without blurring the whole depth map.",
     "depth_blur_left_mix": "Which direction Blur Left works in: 0 = sideways only, 1 = up and down only. 0.5 (half and half) is recommended.",
     "pop_amount": "More pop for whatever is in front of the screen, leaving the rest of the scene where it is: the background, and anything at or behind the screen, don't move at all, and subjects just in front of it barely move. The nearest things get the full extra. In the same units as Depth Strength. 0 = off.",

@@ -260,6 +260,14 @@
     <li><span class="set">CPU Offload Mode</span>: saves graphics memory by keeping parts of the AI in
       normal memory until they're needed. <b>model</b> suits most cards. If you run out of memory, try
       <b>sequential</b> (slower); with lots of memory, <b>none</b> is fastest.</li>
+    <li><span class="set">TensorRT VAE</span> (off until you tick it): runs the part that turns frames into the
+      AI's working form and back through NVIDIA TensorRT -- faster, with practically the same depth.
+      <span class="set">UNet Too</span>, under it, runs the main model that way as well: about twice as fast
+      overall, with the depth a touch less exact (about one 10-bit level on average). Both need NVIDIA TensorRT,
+      installed from Settings &gt; Studio &gt; Models (ticking the box without it takes you there). The first
+      run at a new size, Window Size or graphics card builds its engines -- a few minutes, kept in
+      <code>trt_engines</code> and reused from then on, after a restart too. Not with CPU Offload Mode
+      <b>sequential</b>. If a build fails, the run carries on the normal way and the console says why.</li>
   </ul>
   <figure class="shot" style="max-width:560px">
     <div class="frame"><div class="canvas"><img src="shots/11_dc_presets_crop.webp" alt="The Resolution Preset choices"></div></div>
@@ -382,7 +390,9 @@
       <b>Reset to Default</b>.</li>
     <li><b>Restore Finished / Failed Input Files</b> moves clips back out of <code>finished</code> or
       <code>failed</code>, so you can run them again.</li>
-    <li><b>Use SageAttention (Faster)</b> speeds the AI up on cards that support it. <b>Use Local
+    <li><b>Use SageAttention 2 (RTX 30 Series and Up)</b> speeds the AI up; once SageAttention 1 is installed
+      for an RTX 20 card (Settings &gt; Studio &gt; Models) it reads <b>Use SageAttention 1 (RTX 20
+      Series)</b>. <b>Use Local
       Models Only</b> skips the online check for the model files at the start of a run, once you have
       them.</li>
     <li><b>Enable Debug Logging</b> adds detail to the console, for troubleshooting.</li>
@@ -609,7 +619,10 @@
       across the clip.</li>
     <li><span class="set">Convergence</span>: where the screen sits in the scene. <b>1.0</b> puts
       everything behind the screen, like looking through a window; lower values bring things out toward
-      you, and <b>0.0</b> makes everything pop out. <b>0.8</b> is a good start.</li>
+      you, and <b>0.0</b> makes everything pop out. <b>0.8</b> is a good start.
+      <span class="btn">Pick Convergence</span> (or <kbd>C</kbd>) sets it by pointing: click the part of the
+      picture you want on the screen and Convergence moves there. With keyframes, pick it again where the
+      shot changes, for a convergence that follows the action.</li>
     <li><span class="set">Gamma</span>: reshapes the middle distance. Above 1.0 brings it nearer, below
       1.0 pushes it back.</li>
     <li><span class="set">Pop-Out</span>: more pop for whatever is in front of the screen, with the rest of
@@ -633,7 +646,8 @@
     <li><span class="set">Blur X / Y</span> soften depth edges, smoothing jagged or flickering outlines.
       Too much makes edges soft.</li>
     <li><span class="set">Dilate Left</span> (Expand Left), <span class="set">Blur Left</span> and
-      <span class="set">Blur Left Mix</span> do the same for left-facing edges only.</li>
+      <span class="set">Blur Left Mix</span> do the same for left-facing edges only. Dilate Left below 0 shrinks
+      the left edges, so after a Dilate X you can pull the left side back in and keep the right.</li>
   </ul>
 
   <!-- ---------------------------------------------------------------------- -->
@@ -654,9 +668,11 @@
     <li><b>Keyframe</b> lets settings change partway through a clip. Set things up at one frame and press
       <span class="btn">Add Static Keyframe</span> (the values hold from there until the next keyframe) or
       <span class="btn">Add Dynamic Keyframe</span> (the values glide to these from the keyframe before);
-      move on and do it again. Once a clip has keyframes, the dials show the values at the frame you're on,
+      move on and do it again. Before the first keyframe the clip keeps its own settings, so a keyframe partway
+      through only changes things from there on. Once a clip has keyframes, the dials show the values at the frame you're on,
       playing too. Turning a dial on a keyframe changes that keyframe. Turning one on a frame without a
-      keyframe adds a dynamic keyframe there, with your change and the other dials as they were showing;
+      keyframe after the first adds a dynamic keyframe there, with your change and the other dials as they were showing
+      (before the first keyframe, it changes the clip's own setting);
       <span class="btn">Clear Current</span> takes it off again.
       <br>The <b>Shaper</b> under the keyframe buttons sets <i>how</i> the values glide into a dynamic
       keyframe. Put the playhead in the stretch that ends on it, then pick a <span class="set">Shape</span>:
@@ -756,7 +772,9 @@
   <h3 id="splat-fix">8e &nbsp;Fixing problem areas</h3>
   <ul>
     <li><span class="btn">Hole Shift</span> opens a window showing the frame's holes. Click the ones to
-      move and nudge them with the X and Y knobs, without changing their shape.</li>
+      move and nudge them with the X and Y knobs, without changing their shape. The shift holds for the
+      whole clip; for a hole that moves, turn on <span class="set">Keyframes</span> and each keyframe keeps its
+      own shift from its frame to the next.</li>
     <li><span class="btn">Detect Text</span> masks burned-in subtitles and captions so they stay flat
       and readable instead of being warped into the 3D. See below.</li>
     <li><span class="btn">Edit Depth Map</span> opens the clip in the Depth Map Editor, to fix the depth
@@ -858,6 +876,13 @@
     <li><span class="set">Batch</span>: how many frames go to the graphics card at once. Higher can be
       faster but needs more memory. <b>10</b> is a safe full-size batch; on a 16 GB card, keep full-size
       batches to about 20 and smaller ones to about 30.</li>
+    <li><span class="set">High VRAM Mode</span> (off until you tick it), for 24-32 GB cards: a batch splats several
+      clips at once, each in a job of its own, so the card stays busy. <span class="set">Jobs at Once</span> sets
+      how many, 2 to 4. Each job needs the memory one clip takes at your Batch sizes, plus about 1 GB of its own.
+      One job starts, and another joins each time a clip finishes and the card has room for it, so a card that's
+      too full runs fewer and the console says so. The page shows the batch's progress and the clip started
+      last; the console shows every job's lines, each with its clip's name. A single clip and a Test Render run
+      as usual.</li>
   </ul>
   <figure class="shot" style="max-width:560px">
     <div class="frame"><div class="canvas"><img src="shots/35_splat_presets.webp" alt="Low Res's preset menu, open"></div></div>
@@ -1003,6 +1028,13 @@
     <li><span class="set">Torch Compile</span>: prepares a faster version of the model when a run starts. The
       first chunk takes about 10 minutes longer while it does, then the run is roughly 10% faster. Worth it
       for a long unattended chapter, not for a quick test.</li>
+    <li><span class="set">TensorRT</span>, beside Torch Compile (the two don't go together: ticking one hides
+      the other): runs the model through NVIDIA TensorRT, about 1.5 to 2 times faster, every chunk. It needs
+      NVIDIA TensorRT, from Settings &gt; Studio &gt; Models. The first chunk at a new frame, tile or Frames Chunk
+      size waits a few minutes while its engines are built; they're kept and reused. PyTorch with
+      SageAttention is a touch more exact -- TensorRT's fill is under half a level of 255 off inside the holes
+      on average, far below what the eye can see. On 8 and 12 GB cards it unloads and reloads parts of itself
+      as it goes, so it fits.</li>
     <li>The <span class="set">Inpaint … Thresh / Kernel</span> settings shape the outline of the holes the AI
       fills. <span class="set">Dilate Kernel</span> grows it so the fill covers the very edge of each
       hole; <span class="set">Blur Kernel</span> softens it. The defaults suit most clips.</li>
@@ -1054,8 +1086,9 @@
 
   <h3>In Settings</h3>
   <ul>
-    <li><b>Use SageAttention</b>: a faster way to run the AI, on cards that support it.
-      <b>Use Sage Attention (for V2)</b> is the same for Inpainting V2, and <b>Load / Save V2 Settings</b>
+    <li><b>Use SageAttention 2 (RTX 30 Series and Up)</b>: a faster way to run the AI (<b>Use SageAttention 1
+      (RTX 20 Series)</b> once that's installed, Settings &gt; Studio &gt; Models). The one ending
+      <b>(for V2)</b> is the same for Inpainting V2, and <b>Load / Save V2 Settings</b>
       keep V2's settings in a file of their own.</li>
     <li><b>Encoding Settings</b> (how the files are saved, for V1 and V2 alike: <b>10-bit (Main10)</b> writes
       10-bit HEVC; <b>Enable DNxHR</b>, off by default, writes DNxHR .mov files for an all-DNxHR pipeline;
@@ -1120,8 +1153,8 @@
       Kernel</span> a little.</td></tr>
     <tr><td><b>Out of memory</b></td><td>Raise <span class="set">Tile Number</span>, set
       <span class="set">CPU Offload</span> to sequential, or lower <span class="set">Frames Chunk</span>.</td></tr>
-    <tr><td><b>Too slow</b></td><td>Turn on <b>Use SageAttention</b>; for a long run, <b>Torch
-      Compile</b>.</td></tr>
+    <tr><td><b>Too slow</b></td><td>Turn on <b>Use SageAttention</b>; tick <b>TensorRT</b> (or, for a long
+      run, <b>Torch Compile</b>).</td></tr>
     <tr><td><b>"Failed to save chunk checkpoint"</b> (V2: "Could not keep chunk checkpoint")</td><td>The drive is full. Free some space; the run
       carries on, but can't resume from the chunks it couldn't save.</td></tr>
   </table>

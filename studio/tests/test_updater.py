@@ -8,6 +8,7 @@ fast-forwards after Studio exits -- run for real on throwaway repos.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -155,6 +156,41 @@ class UpdaterTests(unittest.TestCase):
         out = self.run_helper(sha)
         self.assertFalse(out["ok"])
         self.assertEqual(git(self.local, "rev-parse", "HEAD"), mine)
+
+    def run_helper_with_uv(self, sha, sage1):
+        """The helper with run_uv on and a stand-in uv on PATH that only writes down its arguments."""
+        site = self.local / ".venv" / "Lib" / "site-packages"
+        site.mkdir(parents=True, exist_ok=True)
+        if sage1:
+            (site / "sageattention-1.0.6.dist-info").mkdir()
+        bin_dir, calls = Path(self.tmp.name) / "bin", Path(self.tmp.name) / "uv_calls.txt"
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / "uv.cmd").write_text(f"@echo %* >> \"{calls}\"\r\n@exit /b 0\r\n", encoding="ascii")
+        done = subprocess.Popen([sys.executable, "-c", "pass"]); done.wait()
+        result, log = Path(self.tmp.name) / "result.json", Path(self.tmp.name) / "update.log"
+        script = Path(self.tmp.name) / "helper.ps1"
+        script.write_text(U.helper_script(self.local, done.pid, sha, "", result, log, True), encoding="utf-8-sig")
+        env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                       capture_output=True, timeout=120, env=env)
+        return json.loads(result.read_text(encoding="utf-8-sig")), calls.read_text(encoding="ascii").splitlines()
+
+    def test_sage1_is_put_back_after_the_package_sync(self):
+        """An RTX 20 user's SageAttention 1 (2026-10-30): the sync puts Sage 2 back, so it goes in again."""
+        sha = commit(self.hub, "app.py", "v2\n", "remote")
+        out, calls = self.run_helper_with_uv(U.check(self.local, self.url, "studio")["sha"], sage1=True)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(calls[0].strip(), "sync")
+        self.assertIn("pip install", calls[1])
+        self.assertIn("sageattention==1.0.6", calls[1])
+        self.assertIn("triton-windows==3.2.0.post21", calls[1])
+        self.assertEqual(git(self.local, "rev-parse", "HEAD"), sha)
+
+    def test_without_sage1_only_the_sync_runs(self):
+        commit(self.hub, "app.py", "v2\n", "remote")
+        out, calls = self.run_helper_with_uv(U.check(self.local, self.url, "studio")["sha"], sage1=False)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual([c.strip() for c in calls], ["sync"])
 
     def test_helper_quotes_paths(self):
         s = U.helper_script(Path("C:/it's here"), 5, "abc", "", Path("r.json"), Path("l.log"), True)

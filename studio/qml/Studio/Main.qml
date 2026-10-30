@@ -925,6 +925,56 @@ ApplicationWindow {
             onAskSignOut: (opts) => prompt.ask(opts)
         }
 
+        // Settings > Studio's last part (user, 2026-10-30): an action for each mouse side button
+        Component {
+            id: mouseButtonsPanel
+            ColumnLayout {
+                objectName: "mouseButtonsPanel"
+                spacing: 10
+                Text {
+                    text: "Mouse Side Buttons"
+                    color: Theme.fg
+                    font.family: Theme.buttonFont
+                    font.pixelSize: Theme.headingSize + 2
+                    font.weight: Font.Bold
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 0.8
+                    Layout.topMargin: 10
+                }
+                Text {
+                    text: "In Splatting, with a clip in the preview, each side button of your mouse runs the action "
+                          + "picked here, as a click on its button would. None: the button does nothing."
+                    color: Theme.fgMuted
+                    font.family: Theme.bodyFont
+                    font.pixelSize: Theme.smallSize + 1
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    model: [{ label: "Back button (the rear one)", key: "mouseBackAction", name: "mouseBackDrop" },
+                            { label: "Forward button (the front one)", key: "mouseForwardAction", name: "mouseForwardDrop" }]
+                    RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 12
+                        Text {
+                            text: parent.modelData.label
+                            color: Theme.fg
+                            font.family: Theme.bodyFont
+                            font.pixelSize: Theme.bodySize
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                        Dropdown {
+                            objectName: parent.modelData.name
+                            store: Shell; key: parent.modelData.key
+                            model: Shell.mouseActions
+                            measure: true; boxWidth: fitWidth
+                        }
+                    }
+                }
+            }
+        }
         SettingsDialog {
             id: settings
             window: win
@@ -936,7 +986,7 @@ ApplicationWindow {
                                                extra: stage.pages[stage.current].settingsExtra || null,
                                                manual: win.manualAt(stage.current),
                                                manualName: win.manualName(stage.current) }] : []).concat(
-                [{ name: "Studio", menus: [studioMenu], manual: "", manualName: "" },
+                [{ name: "Studio", menus: [studioMenu], extra: mouseButtonsPanel, manual: "", manualName: "" },
                  { name: "GPU", menus: [gpuMenu] }])
         }
     }

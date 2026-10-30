@@ -64,6 +64,10 @@ DEFAULTS: Dict[str, Any] = {
     "dual_eye_bias": "0.5",
     "enable_global_norm": False,
     "move_to_finished": True,
+    # High VRAM Mode (user, 2026-10-30): clips splatted side by side, each in a job of its own
+    # (core.splatting.parallel) -- for 24-32 GB cards. Jobs at Once: 2-4.
+    "high_vram_mode": False,
+    "high_vram_jobs": 2,
     "skip_lowres_preproc": False,
     "strict_ffmpeg_decode": True,       # user, 2026-10-18: the ffmpeg box
     "flip_horizontal": False,
@@ -270,6 +274,21 @@ def auto_sizes(config_dir):
     return RP.load_auto_sizes(config_dir, AUTO_SIZES_FILE, default_auto_size, PRESET_STEP)
 
 
+class LowResSizeFor:
+    """For a batch with Lo-Res Auto Size on: clip path -> (w, h) for a clip of another shape than the loaded
+    one (its shape's pick), else None (the page's size). A class, not a closure, so High VRAM Mode can
+    hand it to its worker processes (core.splatting.parallel)."""
+
+    def __init__(self, loaded_shape, picks):
+        self.loaded, self.picks = loaded_shape or None, dict(picks)
+
+    def __call__(self, path: str):
+        shape = RP.ratio_class(RP.video_ratio(path))
+        if not shape or shape == self.loaded:
+            return None
+        return tuple(self.picks[shape])
+
+
 def save_auto_sizes(config_dir, picks) -> None:
     RP.save_auto_sizes(config_dir, AUTO_SIZES_FILE, picks, default_auto_size)
 
@@ -287,11 +306,16 @@ RETIRED: Dict[str, Any] = {
 }
 
 
+#: High VRAM Mode's Jobs at Once
+HIGH_VRAM_JOBS = (2, 3, 4)
+
+
 def normalise(data: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(DEFAULTS)
     for key, value in (data or {}).items():
         if key in DEFAULTS:
             out[key] = coerce(key, value)
+    out["high_vram_jobs"] = min(max(int(out["high_vram_jobs"]), HIGH_VRAM_JOBS[0]), HIGH_VRAM_JOBS[-1])
     out.update(RETIRED)
     return out
 

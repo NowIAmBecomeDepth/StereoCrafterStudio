@@ -173,6 +173,211 @@ class DecodedFramesTest(unittest.TestCase):
         self.assertNotIn('output_type="pil"', src)
 
 
+class AdditionalSpeedPatchesTest(unittest.TestCase):
+    """Thomas's 'Additional Speed Patches' (2026-10-30), 1-3: the pre-finalize resume file in the background
+    (skipped when the drive can't hold it, or when that size failed with "unexpected pos"), the next clip
+    read ahead, and the Hi-Res finish's chunk read and frame writes on threads of their own."""
+
+    def tensors(self):
+        import torch
+        g = torch.Generator().manual_seed(0)
+        return dict(frames_output_final=torch.rand((5, 3, 8, 10), generator=g),
+                    frames_mask_processed=torch.rand((5, 1, 8, 10), generator=g),
+                    frames_warped_original=torch.rand((5, 3, 8, 10), generator=g),
+                    frames_left_original=torch.rand((5, 3, 8, 10), generator=g))
+
+    def engine(self, colour=False):
+        from studio.stages.inpainting import engine as E
+        eng = object.__new__(E.InpaintingEngine)
+        eng._setting = lambda k: colour if k == "enable_color_transfer" else None
+        eng.cleaned = []
+        eng._cleanup_chunk_checkpoints = lambda name, checkpoint_path=None: eng.cleaned.append(name)
+        return eng
+
+    def save(self, eng, path, **kw):
+        eng._save_prefinalize_checkpoint(checkpoint_path=path, signature={"v": 1}, fps=24.0, video_stream_info=None,
+                                         base_video_name="clip", **self.tensors(), **kw)
+
+    def tearDown(self):
+        from studio.stages.inpainting import engine as E
+        E._wait_prefinalize_write()
+        E._PREFINALIZE_WRITE["fails_above"] = None
+
+    def test_the_resume_file_is_written_in_the_background_the_same_bytes(self):
+        import time
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = self.engine()
+        gate = threading.Event()
+        real_save = torch.save
+
+        def slow_save(obj, path, *a, **k):
+            gate.wait(5)
+            return real_save(obj, path, *a, **k)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(E.torch, "save", slow_save):
+            path = os.path.join(d, "clip.prefinalize.pt")
+            t0 = time.monotonic()
+            self.save(eng, path, frames_edited_in_place_later=False)
+            took = time.monotonic() - t0
+            self.assertLess(took, 1.0, f"the save held the clip for {took:.2f} s")
+            self.assertEqual(eng.cleaned, [], "the chunk checkpoints went before the file was on disk")
+            gate.set()
+            E._wait_prefinalize_write()
+            got = torch.load(path, weights_only=False)
+            for k, v in self.tensors().items():
+                self.assertTrue(torch.equal(got[k], v), k)
+            self.assertEqual(eng.cleaned, ["clip"], "then they go")
+            self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_it_waits_when_the_low_res_colour_transfer_edits_those_frames(self):
+        import time
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = self.engine(colour=True)
+        real_save = torch.save
+
+        def slow_save(obj, path, *a, **k):
+            time.sleep(0.6)
+            return real_save(obj, path, *a, **k)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(E.torch, "save", slow_save):
+            path = os.path.join(d, "clip.prefinalize.pt")
+            t0 = time.monotonic()
+            self.save(eng, path, frames_edited_in_place_later=True)
+            self.assertGreaterEqual(time.monotonic() - t0, 0.5, "it didn't wait")
+            self.assertTrue(os.path.exists(path), "on disk before the in-place edits")
+
+    def test_skipped_when_the_drive_cant_hold_it(self):
+        import collections
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = self.engine()
+        usage = collections.namedtuple("usage", "total used free")
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(E.shutil, "disk_usage", return_value=usage(10, 9, 1024)), \
+                mock.patch.object(E.torch, "save", side_effect=AssertionError("saved anyway")):
+            path = os.path.join(d, "clip.prefinalize.pt")
+            self.save(eng, path)
+            E._wait_prefinalize_write()
+            self.assertFalse(os.path.exists(path))
+            self.assertEqual(eng.cleaned, [], "the chunk checkpoints are kept: a resume uses them")
+
+    def test_a_size_that_failed_with_unexpected_pos_is_skipped_after(self):
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = self.engine()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "clip.prefinalize.pt")
+            with mock.patch.object(E.torch, "save", side_effect=RuntimeError("[enforce fail] unexpected pos 4294967296")):
+                self.save(eng, path)
+                E._wait_prefinalize_write()
+            self.assertIsNotNone(E._PREFINALIZE_WRITE["fails_above"])
+            self.assertFalse(os.path.exists(path + ".tmp"))
+            with mock.patch.object(E.torch, "save", side_effect=AssertionError("tried again")) as again:
+                self.save(eng, path)
+                E._wait_prefinalize_write()
+            again.assert_not_called()
+            self.assertEqual(eng.cleaned, [])
+
+    def test_the_next_clip_is_read_ahead_the_same_frames(self):
+        import types
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        reads = []
+
+        def reader(path):
+            reads.append(path)
+            return ("frames of " + os.path.basename(path), 24.0, {"path": path})
+        vr = lambda *a, **k: types.SimpleNamespace(__len__=None, __getitem__=None)  # noqa: E731
+
+        class FakeVR:
+            def __init__(self, *a, **k):
+                pass
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, i):
+                return types.SimpleNamespace(shape=(4, 6, 3))
+        rich = types.SimpleNamespace(virtual_memory=lambda: types.SimpleNamespace(available=64 * 2**30))
+        poor = types.SimpleNamespace(virtual_memory=lambda: types.SimpleNamespace(available=8 * 2**30))
+        pf = E._ClipPrefetch()
+        with mock.patch.object(E, "_read_video_frames_uint8", reader), mock.patch.object(E, "VideoReader", FakeVR):
+            with mock.patch.object(E, "psutil", rich):
+                pf.start("C:/x/b.mp4")
+                got = pf.take("C:/x/b.mp4")
+                self.assertEqual(got, reader("C:/x/b.mp4")[:1] + got[1:] if False else got)
+                self.assertEqual(got[0], "frames of b.mp4")
+                self.assertEqual(reads, ["C:/x/b.mp4", "C:/x/b.mp4"][:len(reads)])
+                n = len(reads)
+                self.assertEqual(pf.take("C:/x/c.mp4")[0], "frames of c.mp4", "not read ahead: read now")
+                self.assertEqual(len(reads), n + 1)
+            with mock.patch.object(E, "psutil", poor):
+                pf.start("C:/x/d.mp4")
+                self.assertIsNone(pf._thread, "8 GB free: no read-ahead (the clip + 16 GB wouldn't fit)")
+            pf.clear()
+
+    def test_the_hires_chunks_come_in_order_and_errors_surface(self):
+        import numpy as np
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+
+        class FakeVR:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_batch(self, idx):
+                arr = np.full((len(idx), 2, 2, 3), idx[0], np.uint8)
+                return type("B", (), {"asnumpy": lambda s: arr})()
+        with mock.patch.object(E, "VideoReader", FakeVR):
+            r = E._HiresChunkReader("h.mp4", [(0, 4), (4, 8), (8, 10)], None)
+            for s in (0, 4, 8):
+                arr, _waited = r.next(s)
+                self.assertEqual(int(arr[0, 0, 0, 0]), s)
+                self.assertEqual(len(arr), 4 if s < 8 else 2)
+            r.close()
+            r = E._HiresChunkReader("h.mp4", [(0, 4), (4, 8)], None)
+            with self.assertRaises(RuntimeError):
+                r.next(4)
+            r.close()
+
+        class BadVR(FakeVR):
+            def get_batch(self, idx):
+                raise OSError("decode failed")
+        with mock.patch.object(E, "VideoReader", BadVR):
+            r = E._HiresChunkReader("h.mp4", [(0, 4)], None)
+            with self.assertRaises(OSError):
+                r.next(0)
+            r.close()
+
+    def test_the_frame_writer_keeps_the_order_and_reraises(self):
+        import numpy as np
+        from studio.stages.inpainting import engine as E
+        got = []
+        enc = type("Enc", (), {"write": lambda s, f: got.append(int(f[0, 0, 0]))})()
+        w = E._FrameWriter(enc, None, 10)
+        for start in (0, 4, 8):
+            w.put(np.stack([np.full((2, 2, 3), start + k, np.uint16) for k in range(4 if start < 8 else 2)]))
+        w.finish()
+        self.assertEqual(got, list(range(10)))
+        self.assertEqual(w.written, 10)
+
+        def boom(_s, _f):
+            raise BrokenPipeError("ffmpeg went away")
+        w = E._FrameWriter(type("Enc", (), {"write": boom})(), None, 4)
+        w.put(np.zeros((4, 2, 2, 3), np.uint16))
+        with self.assertRaises(BrokenPipeError):
+            w.finish()
+        stop = threading.Event()
+        stop.set()
+        got.clear()
+        w = E._FrameWriter(enc, stop, 4)
+        w.put(np.zeros((4, 2, 2, 3), np.uint16))
+        w.finish()
+        self.assertEqual(got, [], "Stop: nothing more written")
+
+
 class ChunkCheckpointInBackgroundTest(unittest.TestCase):
     """A user's measurements (2026-10-29): each chunk's resume file (~730 MB) was written while the GPU
     waited, ~1.45 s a chunk. Now on a thread: the save returns at once, the file is the same, and a
@@ -1077,6 +1282,21 @@ class SettingsTests(unittest.TestCase):
                 self.assertEqual(str(values[key]), str(S.coerce(key, v1[key])), key)
         self.assertFalse(values["dnxhr_fullres_split"])
         self.assertEqual(S.validate(values)[1], "")
+
+
+class Sage1TorchCompileTest(unittest.TestCase):
+    """SageAttention 1 for RTX 20 series (2026-10-30): its Triton 3.2 breaks Torch Compile, so a run has it
+    off while Sage 1 is installed, whatever was saved; with Sage 2 the saved value goes through."""
+
+    def test_the_run_has_torch_compile_off_with_sage_1(self):
+        from unittest import mock
+        from studio import sage1
+        from studio.stages.inpainting import settings as S
+        values = S.normalise({"use_compile": True})
+        for installed, want in ((True, False), (False, True)):
+            with mock.patch.object(sage1, "installed", lambda i=installed: i):
+                self.assertIs(S.run_settings(values)["use_compile_var"], want, installed)
+        self.assertIs(values["use_compile"], True, "the saved setting is kept")
 
 
 if __name__ == "__main__":

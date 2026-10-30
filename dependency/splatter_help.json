@@ -33,7 +33,7 @@
   "depth_dilate_size_y": "Vertical Dilate for the Depthhmask. Bilinear blending for decimals. 0 to disable. Below 0 applies erosion.",
   "depth_blur_size_x": "Horizontal Blur for the Depth Mask.",
   "depth_blur_size_y": "Vertical Blur for the Depth Mask.",
-  "depth_dilate_left": "Expands depth values ONLY to the left. Useful for smoothing blocky left edges without effecting right edges or forward-warp holes. Fractional values blend smoothly like other dilates.",
+  "depth_dilate_left": "Expands depth values ONLY to the left. Useful for smoothing blocky left edges without effecting right edges or forward-warp holes. Fractional values blend smoothly like other dilates. Below 0 erodes the left edges only, e.g. to take back some of a Dilate X there.",
   "depth_blur_left": "Blurs only around strong left-facing depth edges (ignores small gradients), to help smooth jagged left boundaries without blurring the whole depth map. Uses the H/V mix setting.",
   "depth_blur_left_mix": "Controls the balance between horizontal and vertical Blur Left. 0.0 = all horizontal, 0.5 = 50/50, 1.0 = all vertical. Recommend .5",
   "pop_amount": "Pop-Out: extra disparity in front of the screen only, in Disparity-dial units. Zero at and behind the convergence plane (the background and the screen plane are unchanged), rising smoothly (u^2) to the full amount at the clip's nearest depth. Spread over the whole front range, it warps outlines far less than Pop Out Boost for the same pop. Saved per clip; keyframable with the other Stereo Projection dials. 0 = off.",

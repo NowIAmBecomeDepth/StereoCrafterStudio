@@ -271,6 +271,7 @@ Item {
                     // Inpainting already, as Use Sage Attention (for V2))
                     CheckField {
                         objectName: "v2Compile"
+                        shown: !Theme.sage1     // SageAttention 1 (RTX 20): its Triton 3.2 breaks Torch Compile
                         store: page.st; key: "use_compile"; text: "Torch Compile"
                         help: "Compiles the model for this GPU when a run starts: faster chunks, after a first chunk that takes "
                               + "several minutes longer while it compiles (the compiled kernels are kept, so the next run of the "

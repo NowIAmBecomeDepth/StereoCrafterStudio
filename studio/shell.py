@@ -262,6 +262,19 @@ def _opacity_mode(value: Any) -> str:
     return min(GLASS_OPACITIES, key=lambda s: abs(float(s) - v))
 
 
+#: What a mouse side button can do (user, 2026-10-30): Splatting's one-click actions, as their buttons
+#: (SplattingPage.mouseAction runs them) -- no dials, nothing that starts or stops a job or clears them all
+MOUSE_ACTIONS = ("None", "Flip Preview Card", "Pick Convergence", "Play / Pause", "Fast Forward",
+                 "Previous Frame", "Next Frame", "Back 10 Frames", "Forward 10 Frames", "Previous Clip", "Next Clip",
+                 "First Frame", "Last Frame", "Add Static Keyframe", "Add Dynamic Keyframe", "Clear Current Keyframe",
+                 "Create / Update Sidecar", "Estimate Depth Pop", "Preview Auto-Converge", "Edit Depth Map",
+                 "Detect Text", "Hole Shift", "Full Preview")
+
+
+def _mouse_action(value: Any) -> str:
+    return value if value in MOUSE_ACTIONS else "None"
+
+
 def _scale_mode(value: Any) -> str:
     text = str(value or "auto")
     if text == "auto":
@@ -447,6 +460,14 @@ class StudioShell(QObject):
     glassOpacity = Property(str, lambda self: _opacity_mode(self._pref("glass_opacity", "auto")),
                             lambda self, v: self._set_pref("glass_opacity", _opacity_mode(v)), notify=changed)
     glassOpacities = Property("QVariantList", lambda self: list(GLASS_OPACITIES), constant=True)
+    # The mouse's side buttons (user, 2026-10-30): each runs the Splatting action picked for it in
+    # Settings > Studio ("None": nothing). SplattingPage.mouseAction() knows the names.
+    mouseActions = Property("QVariantList", lambda self: list(MOUSE_ACTIONS), constant=True)
+    mouseBackAction = Property(str, lambda self: _mouse_action(self._pref("mouse_back_action", "None")),
+                               lambda self, v: self._set_pref("mouse_back_action", _mouse_action(v)), notify=changed)
+    mouseForwardAction = Property(str, lambda self: _mouse_action(self._pref("mouse_forward_action", "None")),
+                                  lambda self, v: self._set_pref("mouse_forward_action", _mouse_action(v)),
+                                  notify=changed)
     # Merging's preview flip card: the Preview Source on each side.
     # Splatting's flip card (user, 2026-09-27): the preview source on each side
     splatFlipFront = Property(str, lambda self: str(self._pref("splat_flip_front", "Dubois Anaglyph")),

@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -76,6 +77,30 @@ class RGBPipeReaderTests(unittest.TestCase):
         r.get_batch([0])            # backwards: restarts
         self.assertIsNot(r._proc, old)
         self.assertIsNotNone(old.poll(), "the old ffmpeg was not reaped")
+
+    def test_read_ahead_gives_the_same_frames_and_frees_the_clip(self):
+        """Merging's chunks (user, 2026-10-30): the next run of frames read on a thread of its own while this
+        one is used; a jump or a single frame read there and then; dropped, the clip can be moved."""
+        import numpy as np
+        plain = self.reader()
+        want = {k: plain.get_batch(list(range(k, min(k + 4, 12)))).asnumpy() for k in (0, 4, 8)}
+        plain.close()
+        r = V.ReadAhead(self.reader(), name="test-read")
+        for k in (0, 4, 8):
+            got = r.get_batch(list(range(k, min(k + 4, 12)))).asnumpy()
+            self.assertTrue(np.array_equal(got, want[k]), f"chunk {k}")
+            if k < 8:
+                self.assertEqual(r._next[0], tuple(range(k + 4, min(k + 8, 12))), "the next chunk read ahead")
+        self.assertIsNone(r._next, "nothing past the end")
+        self.assertTrue(np.array_equal(r.get_batch([2]).asnumpy()[0], want[0][2]), "a jump back")
+        self.assertEqual(len(r), 12)
+        names = {t.name.split("_")[0] for t in threading.enumerate()}
+        self.assertIn("test-read", names)
+        del r
+        import gc
+        gc.collect()
+        self.assertNotIn("test-read", {t.name.split("_")[0] for t in threading.enumerate()}, "its thread ended")
+        self.assertTrue(self.moved(), "the clip is still held open")
 
     def test_a_file_ffmpeg_cant_read_says_why(self):
         """A 12 GB user's Merging failed on every clip with only "reached EOF" in the log (2026-10-30)."""
@@ -250,6 +275,42 @@ def _cuda() -> bool:
 
 
 @unittest.skipUnless(_cuda(), "the native-YUV read is for CUDA machines")
+@unittest.skipUnless(_cuda(), "the GPU resize needs CUDA")
+class DepthGpuResizeTest(unittest.TestCase):
+    """Splatting's depth read at its own size and resized on the GPU (user, 2026-10-30: FFmpeg's CPU scale
+    of 768x320 up to 2580x1080 was a fifth of a clip's time). The resize is the preview's own (cv2 bilinear
+    on floats), and within a few codes of the FFmpeg scale it replaces."""
+
+    def test_the_gpu_resize_is_the_previews_and_near_ffmpegs(self):
+        import cv2
+        import numpy as np
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        depth = Path(tmp.name) / "d.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "nullsrc=size=192x80:rate=24:duration=0.5,geq=lum='400+300*sin(X/11)*cos(Y/7)':cb=512:cr=512",
+                        "-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error:lossless=1",
+                        str(depth)], check=True)
+        idx = list(range(6))
+        native = V.FFmpegDepthPipeReader(str(depth), 192, 80, 10, 12, "yuv420p10le")
+        ffmpeg = V.FFmpegDepthPipeReader(str(depth), 645, 270, 10, 12, "yuv420p10le")
+        gpu = V.FFmpegDepthPipeReader(str(depth), 645, 270, 10, 12, "yuv420p10le", src_size=(192, 80))
+        for r in (native, ffmpeg, gpu):
+            self.addCleanup(r.close)
+        self.assertEqual(gpu._frame_bytes, 192 * 80 * 2, "FFmpeg decodes it at its own size")
+        got = gpu.get_batch(idx).asnumpy()
+        self.assertEqual((got.shape, got.dtype), ((6, 270, 645, 1), np.float32))
+        own = native.get_batch(idx).asnumpy()[..., 0].astype(np.float32)
+        preview = np.stack([cv2.resize(f, (645, 270), interpolation=cv2.INTER_LINEAR) for f in own])
+        self.assertLess(float(np.abs(got[..., 0] - preview).max()), 0.05, "the preview's resize")
+        old = ffmpeg.get_batch(idx).asnumpy()[..., 0].astype(np.float32)
+        diff = np.abs(got[..., 0] - old)
+        self.assertLess(float(diff.mean()), 1.0)
+        self.assertLess(float(diff.max()), 6.0, "within a few codes of FFmpeg's scale")
+        self.assertEqual(V.FFmpegDepthPipeReader(str(depth), 192, 80, 10, 12, "yuv420p10le",
+                                                 src_size=(192, 80))._gpu_from, None, "same size: as it was")
+
+
 class NativeYuvReadTest(unittest.TestCase):
     """2026-10-27: a clip read at its own size comes as YUV and is converted in torch on the GPU
     (NVDEC where it decodes) -- faster at 10 bits, and exact, where FFmpeg's rgb48 ran up to 1.0

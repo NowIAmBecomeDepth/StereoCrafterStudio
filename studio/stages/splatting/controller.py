@@ -181,6 +181,8 @@ class SplattingController(QObject):
         self._pass = -1
         self._pass_frames = [0, 0]
         self._pass_done = [False, False]
+        # High VRAM Mode (user, 2026-10-30): every job's clip and passes, and the clips they finished
+        self._jobs, self._jobs_done = [], []
         self._info: Dict[str, str] = {k: "N/A" for k in INFO_KEYS}
         self._queue: "queue.Queue" = queue.Queue()
         self._stop = threading.Event()
@@ -313,16 +315,7 @@ class SplattingController(QObject):
         """For a batch with Auto Size on: clip path -> (w, h) for a clip of another
         shape than the loaded one (its shape's pick), else None (the page's size).
         Called by core.splatting's batch on its own thread, once per clip."""
-        loaded = self._shape or None
-        picks = S.auto_sizes(settings_store.CONFIG_DIR)
-
-        def size_for(path: str):
-            shape = S.RP.ratio_class(S.RP.video_ratio(path))
-            if not shape or shape == loaded:
-                return None
-            return tuple(picks[shape])
-
-        return size_for
+        return S.LowResSizeFor(self._shape, S.auto_sizes(settings_store.CONFIG_DIR))
 
     #: what a size typed into the editor must be a multiple of
     presetStep = Property(int, lambda self: S.PRESET_STEP, constant=True)
@@ -611,6 +604,10 @@ class SplattingController(QObject):
     clipCount = Property(str, lambda self: self._clip_count, notify=infoChanged)
     passFrames = Property("QVariantList", lambda self: list(self._pass_frames), notify=infoChanged)
     passDone = Property("QVariantList", lambda self: list(self._pass_done), notify=infoChanged)
+    #: High VRAM Mode: [{name, frames, done}] per running job; the clips its jobs finished (names without
+    #: their extension), until the next run
+    parallelJobs = Property("QVariantList", lambda self: list(self._jobs), notify=infoChanged)
+    parallelDone = Property("QVariantList", lambda self: list(self._jobs_done), notify=infoChanged)
     info = Property("QVariantMap", lambda self: dict(self._info), notify=infoChanged)
 
     # ---- Stop After Clip: finish the clip rendering, then end the batch -------------
@@ -883,6 +880,14 @@ class SplattingController(QObject):
         self._outcome = None
         self._stop_after.clear()
         self._clip_total = 0
+        self._jobs, self._jobs_done = [], []
+        values = getattr(self, "_run_values", None) or {}
+        if values.get("high_vram_mode") and not getattr(settings, "is_test_mode", False):
+            # High VRAM Mode (user, 2026-10-30): the batch's clips side by side, a job each
+            # (one clip, or a clip given as a file: as it always ran)
+            from core.splatting.parallel import ParallelBatchProcessor
+            processor = ParallelBatchProcessor(self._queue, self._stop, int(values.get("high_vram_jobs") or 2),
+                                               getattr(processor, "sidecar_manager", None))
         processor.stop_after_clip = self._stop_after
         self.stopAfterClipChanged.emit()
         self._done, self._total, self._pass_frac = 0, 0, 0.0
@@ -973,6 +978,10 @@ class SplattingController(QObject):
                     for key, value in (message[1] or {}).items():
                         if key in self._info:
                             self._info[key] = str(value)
+                elif kind == "jobs":
+                    self._jobs = list(message[1] or [])
+                elif kind == "job_done":
+                    self._jobs_done = self._jobs_done + [str(message[1])]
                 elif kind == "diagnostic_capture":
                     self.preview.diagnostic_capture(message[1])
                 elif kind == "result":
@@ -1019,6 +1028,7 @@ class SplattingController(QObject):
             self.infoChanged.emit()
         self._busy = False
         self._thread = None
+        self._jobs = []
         self._done, self._pass_frac = 0, 0.0
         halted = self._stop_after.is_set()
         self._stop_after.clear()

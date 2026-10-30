@@ -130,10 +130,11 @@ def custom_dilate_left(
             return src_img.astype(np.float32)
         k_w = int(k_int) + 1
         kernel = np.ones((1, k_w), dtype=np.uint8)
-        anchor = (0, 0)
         if is_erosion:
-            return cv2.erode(src_img, kernel, anchor=anchor, iterations=1).astype(np.float32)
-        return cv2.dilate(src_img, kernel, anchor=anchor, iterations=1).astype(np.float32)
+            # the window to the LEFT of each pixel (anchor at its right end): a near object's left edge
+            # moves right (user, 2026-10-30) -- the mirror of the dilate, whose window looks right
+            return cv2.erode(src_img, kernel, anchor=(k_w - 1, 0), iterations=1).astype(np.float32)
+        return cv2.dilate(src_img, kernel, anchor=(0, 0), iterations=1).astype(np.float32)
 
     processed_frames = []
     for t_idx in range(tensor.shape[0]):

@@ -293,6 +293,13 @@
         folder. One downloads at a time and the others queue behind it; while a job runs, a download waits
         for it to finish, so the job isn't slowed. <span class="btn">Stop</span> keeps what came down: the
         next Download carries on from there.</li>
+    <li><b>Python packages</b>: a few rows add to Studio itself rather than its models --
+        <span class="btn">Install</span> in place of Download, into Studio's own environment.
+        <b>NVIDIA TensorRT</b> (about 2.3 GB) makes DepthCrafter and Inpainting faster (their TensorRT boxes,
+        Part 2). On an RTX 20 series card, <b>SageAttention 1 (RTX 20 Series)</b> is listed too: SageAttention 2
+        doesn't run on those cards, and Sage 1 does. It takes the place of SageAttention 2 and its Triton, and
+        Torch Compile is off while it's installed. Install it before running DepthCrafter or Inpainting (if
+        you already have this session, restart Studio first). Updates keep both.</li>
   </ul>
   <div class="tip"><b>Already have StereoCrafter?</b><span>Point <span class="btn">Change…</span> at its
      <code>weights</code> folder and Studio uses those models where they are -- nothing to download again. Studio
@@ -373,11 +380,15 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Splatting: Detect Text</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>Splatting: Edit Depth Map (the clip in the Depth Map Editor)</td></tr>
     <tr><td><kbd>S</kbd> · <kbd>D</kbd></td><td>Splatting: add a static · dynamic keyframe</td></tr>
+    <tr><td><kbd>C</kbd></td><td>Splatting: Pick Convergence -- then click the picture on what should sit on the screen (<kbd>C</kbd> again cancels)</td></tr>
     <tr><td><kbd>S</kbd> · <kbd>D</kbd></td><td>Depth Map Editor: key the selected layer, static · dynamic</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Depth Map Editor: undo · redo the last edit (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes too)</td></tr>
     <tr><td><kbd>I</kbd> · <kbd>O</kbd></td><td>Detect Text: Set From · Set To at the frame showing</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> · <kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>In the console: copy what's selected · select the whole tab</td></tr>
   </table>
+  <p>A mouse with side buttons: <span class="btn">Settings</span> &gt; <b>Studio</b> &gt; <b>Mouse Side Buttons</b>
+     gives each one a Splatting action -- flip the preview card, Pick Convergence, play, step frames or clips,
+     add a keyframe, update the sidecar and more. They work on the Splatting page with a clip in the preview.</p>
 </section>
 
 <!-- ======================================================================== -->

@@ -473,6 +473,31 @@ class BatchProcessor:
 
         return tasks
 
+    def select_videos(self, setup_result: "BatchSetupResult", settings: ProcessingSettings, from_index: int = 0,
+                      to_index: Optional[int] = None, video_list: Optional[List[Dict]] = None) -> List[str]:
+        """The batch's clips, in its order: the ticked ones (Process Selected), a range, or all of them.
+        High VRAM Mode's parallel processor hands out the same list (core.splatting.parallel)."""
+        input_videos = list(setup_result.input_videos)
+        if setup_result.is_single_file_mode:
+            return input_videos
+        only = getattr(settings, "only_videos", None)
+        if only:
+            keep = {os.path.normcase(os.path.abspath(p)) for p in only}
+            input_videos = [v for v in input_videos if os.path.normcase(os.path.abspath(v)) in keep]
+            self.logger.info(f"Process Selected: {len(input_videos)} ticked clip(s).")
+        elif video_list:
+            total = len(video_list)
+            start = max(0, min(total, from_index))
+            end = max(start + 1, min(total, to_index or total))
+            selected = video_list[start:end]
+            input_videos = [e.get("source_video") for e in selected if e.get("source_video")]
+        else:
+            total = len(input_videos)
+            start = max(0, min(total, from_index))
+            end = max(start + 1, min(total, to_index or total))
+            input_videos = input_videos[start:end]
+        return input_videos
+
     def run_batch_process(
         self,
         settings: ProcessingSettings,
@@ -496,32 +521,12 @@ class BatchProcessor:
                 result["error"] = setup_result.error
                 return
 
-            input_videos = setup_result.input_videos
             is_single_file = setup_result.is_single_file_mode
-
-            if not input_videos:
+            if not setup_result.input_videos:
                 self.logger.error("No input videos found for processing.")
                 result["note"] = "No input videos found for processing."
                 return
-
-            # Range selection -- or, for Process Selected, the ticked clips
-            only = getattr(settings, "only_videos", None)
-            if not is_single_file and only:
-                keep = {os.path.normcase(os.path.abspath(p)) for p in only}
-                input_videos = [v for v in input_videos if os.path.normcase(os.path.abspath(v)) in keep]
-                self.logger.info(f"Process Selected: {len(input_videos)} ticked clip(s).")
-            elif not is_single_file and video_list:
-                total = len(video_list)
-                start = max(0, min(total, from_index))
-                end = max(start + 1, min(total, to_index or total))
-                selected = video_list[start:end]
-                input_videos = [e.get("source_video") for e in selected if e.get("source_video")]
-            elif not is_single_file:
-                total = len(input_videos)
-                start = max(0, min(total, from_index))
-                end = max(start + 1, min(total, to_index or total))
-                input_videos = input_videos[start:end]
-
+            input_videos = self.select_videos(setup_result, settings, from_index, to_index, video_list)
             if not input_videos:
                 self.logger.error("No input videos left to process.")
                 result["note"] = "No input videos left to process."
@@ -1192,8 +1197,9 @@ class BatchProcessor:
         if settings.depth_blur_size_x < 0 or settings.depth_blur_size_y < 0:
             return False, "Depth Blur Sizes (X/Y) must be non-negative."
 
-        if settings.depth_dilate_left < 0.0 or settings.depth_dilate_left > 20.0:
-            return False, "Dilate Left must be between 0 and 20."
+        # below 0 erodes the left edges (user, 2026-10-30: to take back a Dilate X there)
+        if settings.depth_dilate_left < -10.0 or settings.depth_dilate_left > 20.0:
+            return False, "Dilate Left must be between -10 and 20."
 
         if settings.depth_blur_left < 0 or settings.depth_blur_left > 20:
             return False, "Blur Left must be between 0 and 20."

@@ -200,11 +200,35 @@ Window {
 
             Note { objectName: "hsInfo"; text: win.s.info || "0 selected"; Layout.topMargin: 8 }
 
+            // the whole clip by default; keyframes only when switched on (user, 2026-10-30)
+            AnimCheck {
+                objectName: "hsKeyframes"
+                text: "Keyframes"
+                Layout.topMargin: 10
+                checked: !!win.s.keyed
+                onToggled: {
+                    const on = checked
+                    checked = Qt.binding(() => !!win.s.keyed)
+                    if (!on && (win.s.keys || 0) > 1)
+                        confirmDlg.ask({
+                            title: "Hole Shift",
+                            message: "Use the shifts on this frame for the whole clip? The clip's other "
+                                     + ((win.s.keys || 1) - 1) + " keyframe(s) are removed.",
+                            buttons: [{ text: "Whole Clip", code: 1, kind: "filled" }, { text: "Cancel", code: 0, kind: "ghost" }],
+                            onDone: (code) => { if (code === 1) win.pv.editorOp("holeshift", "set_keyed", [false]) }
+                        })
+                    else
+                        win.pv.editorOp("holeshift", "set_keyed", [on])
+                }
+                HoverTip { tip: "Off: the shifts apply to the whole clip. On: each keyframe holds its own shifts, from its "
+                                + "frame to the next -- for a hole that moves. Turning it off keeps the shifts on the frame showing "
+                                + "for the whole clip." }
+            }
             RowLayout {
                 spacing: 4
-                Layout.topMargin: 10
-                AccentButton { text: "Add Key"; kind: "outline"; implicitWidth: 70; onClicked: win.pv.editorOp("holeshift", "add_key", []) }
-                AccentButton { text: "Del Key"; kind: "outline"; implicitWidth: 70; onClicked: win.pv.editorOp("holeshift", "del_key", []) }
+                Layout.topMargin: 6
+                AccentButton { visible: !!win.s.keyed; text: "Add Key"; kind: "outline"; implicitWidth: 70; onClicked: win.pv.editorOp("holeshift", "add_key", []) }
+                AccentButton { visible: !!win.s.keyed; text: "Del Key"; kind: "outline"; implicitWidth: 70; onClicked: win.pv.editorOp("holeshift", "del_key", []) }
                 AccentButton {
                     text: "Clear All"; kind: "outline"; implicitWidth: 76
                     onClicked: confirmDlg.ask({

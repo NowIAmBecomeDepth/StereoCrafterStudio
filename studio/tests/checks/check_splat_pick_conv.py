@@ -126,6 +126,19 @@ QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(c.x()), int(c.y()
 QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(c.x()), int(c.y()))); pump(0.2)
 check("the button again cancels", not page.property("pickingConv"))
 
+# C does what the button does (user, 2026-10-30): arms, a click picks; C again cancels
+win.requestActivate(); pump(0.2)
+QTest.keyClick(win, Qt.Key_C); pump(0.2)
+armed_by_key = bool(page.property("pickingConv"))
+shown = img.parentItem()
+p = shown.mapToScene(QPointF(shown.width() * 0.25, shown.height() * 0.5))
+QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(p.x()), int(p.y()))); pump(0.6); settle()
+check("C arms the picker, the click picks -> ~0.50", armed_by_key and abs(conv() - 0.50) <= 0.03
+      and not page.property("pickingConv"), f"armed {armed_by_key}, {conv():.3f}")
+QTest.keyClick(win, Qt.Key_C); pump(0.2)
+QTest.keyClick(win, Qt.Key_C); pump(0.2)
+check("...C again cancels", not page.property("pickingConv"))
+
 pv.shutdown()
 studio_warns = [w for w in warns if "SplattingPage" in w or "DialField" in w or "AccentButton" in w]
 check("no QML warnings from the Splatting page", not studio_warns, "\n    " + "\n    ".join(studio_warns[:12]))

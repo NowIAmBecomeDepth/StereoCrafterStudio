@@ -266,5 +266,10 @@ def validate(s: Dict[str, Any]) -> Tuple[Optional[dict], str]:
 
 
 def run_settings(s: Dict[str, Any]) -> Dict[str, Any]:
-    """The engine's frozen view: every key under its v1 attribute name."""
-    return {attr_for(k): v for k, v in s.items() if k not in ENCODING_KEYS or k.startswith("dnxhr")}
+    """The engine's frozen view: every key under its v1 attribute name. Torch Compile off while SageAttention
+    1 is installed (RTX 20 series, 2026-10-30), whatever was saved: its Triton 3.2 breaks it."""
+    from ... import sage1
+    out = {attr_for(k): v for k, v in s.items() if k not in ENCODING_KEYS or k.startswith("dnxhr")}
+    if sage1.installed():
+        out[attr_for("use_compile")] = False
+    return out

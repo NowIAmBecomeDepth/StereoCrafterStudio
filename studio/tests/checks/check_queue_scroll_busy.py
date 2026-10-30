@@ -148,6 +148,11 @@ sp._busy = True; sp.stateChanged.emit(); pump(0.3)
 mid, end = glide()
 check("during Splatting's own job it still glides", 0 < mid < end and abs(end - 2 * row) < 0.5, f"{mid:.0f} then {end:.0f}")
 sp._busy = False; sp.stateChanged.emit(); pump(0.3)
+# A job's end reads the folder again (meant: for the clips it moved to finished/), and these made-up clips
+# aren't on disk: listed again, or the next part scrolled an empty list
+q._paths = [str(tmp / f"made_up_clip_{i:03}.mp4") for i in range(N)]
+q._depths, q._fx, q._frames = [""] * N, [[] for _ in range(N)], [0] * N
+q.changed.emit(); pump(0.8)
 lst.setProperty("contentY", 0); pump(0.1)
 ip = objs["Inpainting"]
 ip._busy = True; ip.stateChanged.emit(); pump(0.3)
@@ -208,6 +213,7 @@ check("...the one it's on keeps its own highlight", not greenish(row_colour(name
 check("...the ones ahead stay plain", row_colour(names[3]) == plain and not greenish(row_colour(names[3])))
 if os.environ.get("QUEUE_SHOT"): win.grabWindow().save(os.environ["QUEUE_SHOT"])
 sp._busy = False; sp.stateChanged.emit(); pump(0.3)
+listed(names)                  # the run's end read the folder again: the made-up clips listed again
 check("...still green after the run", greenish(row_colour(names[0])))
 sp._busy = True; sp._info = dict(sp._info, filename="N/A"); sp.stateChanged.emit(); sp.infoChanged.emit(); pump(0.3)
 check("...cleared when the next run starts", not greenish(row_colour(names[0])) and not greenish(row_colour(names[1])))

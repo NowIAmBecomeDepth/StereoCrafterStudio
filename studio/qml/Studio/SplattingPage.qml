@@ -210,6 +210,68 @@ Item {
     Shortcut { enabled: page.keysLive; sequence: "End"; onActivated: page.pv.seek(Math.max(0, page.pv.frameCount - 1)) }
     Shortcut { objectName: "keyStaticShortcut"; enabled: page.keysLive; sequence: "S"; onActivated: page.pv.addKeyframe("static") }
     Shortcut { objectName: "keyDynamicShortcut"; enabled: page.keysLive; sequence: "D"; onActivated: page.pv.addKeyframe("dynamic") }
+    // The mouse's side buttons (user, 2026-10-30): each runs the action Settings > Studio picked for it --
+    // a one-click action of this page, as its button would, with a clip in the preview. Over the whole
+    // page, on top: a button or dial under the pointer would take the press first. It accepts the two
+    // side buttons only, so every other click, hover and the wheel go through to what's under it.
+    MouseArea {
+        id: sideButtons
+        objectName: "mouseSideButtons"
+        anchors.fill: parent
+        z: 100000
+        enabled: page.active && !Theme.modalOpen
+        acceptedButtons: Qt.BackButton | Qt.ForwardButton
+        onClicked: (mouse) => {
+            const name = mouse.button === Qt.BackButton ? Shell.mouseBackAction : Shell.mouseForwardAction
+            // Pick Convergence pressed over the picture picks right there, in one click (user,
+            // 2026-10-30); anywhere else it arms the picker, as its button does
+            if (name === "Pick Convergence" && page.pv.loaded && !page.pv.wiggling && shown.visible
+                    && shown.width > 0 && shown.height > 0) {
+                const p = shown.mapFromItem(sideButtons, mouse.x, mouse.y)
+                if (p.x >= 0 && p.y >= 0 && p.x < shown.width && p.y < shown.height) {
+                    page.pickingConv = false
+                    page.pv.pickConvergence(p.x / shown.width, p.y / shown.height)
+                    return
+                }
+            }
+            page.mouseAction(name)
+        }
+    }
+    function mouseAction(name) {
+        const pv = page.pv
+        if (!name || name === "None" || !pv.loaded) return
+        switch (name) {
+        case "Flip Preview Card": flipCard.flip(); break
+        case "Pick Convergence": if (!pv.wiggling) page.pickingConv = !page.pickingConv; break
+        case "Play / Pause": pv.togglePlay(); break
+        case "Fast Forward": pv.toggleFastForward(page.ffStep); break
+        case "Previous Frame": pv.stepFrames(-1); break
+        case "Next Frame": pv.stepFrames(1); break
+        case "Back 10 Frames": pv.stepFrames(-10); break
+        case "Forward 10 Frames": pv.stepFrames(10); break
+        case "Previous Clip": pv.step(-1); break
+        case "Next Clip": pv.step(1); break
+        case "First Frame": pv.seek(0); break
+        case "Last Frame": pv.seek(Math.max(0, pv.frameCount - 1)); break
+        case "Add Static Keyframe": pv.addKeyframe("static"); break
+        case "Add Dynamic Keyframe": pv.addKeyframe("dynamic"); break
+        case "Clear Current Keyframe": if (page.kfAtFrame !== "") pv.clearKeyframe(); break
+        case "Create / Update Sidecar": if (page.idle) page.updateSidecar(); break
+        case "Estimate Depth Pop": pv.estimateDepthPop(); break
+        case "Preview Auto-Converge":
+            if (page.autoConvRunning) pv.stopAutoConverge()
+            else if (page.idle && ["Average", "Peak", "Hybrid"].indexOf(String(page.st.auto_convergence_mode)) >= 0)
+                pv.autoConverge()
+            break
+        case "Edit Depth Map": if (page.canEditDepth) page.editDepthMap(); break
+        case "Detect Text": subMaskWin.openFor(); break
+        case "Hole Shift": holeShiftWin.openFor(); break
+        case "Full Preview": page.openFullPreview(); break
+        }
+    }
+    // C: Pick Convergence, as its button -- arms the picker, C again cancels (user, 2026-10-30)
+    Shortcut { objectName: "pickConvShortcut"; enabled: page.keysLive && !page.pv.wiggling; sequence: "C"
+               onActivated: page.pickingConv = !page.pickingConv }
     Shortcut { objectName: "sidecarShortcut"; enabled: page.keysLive && page.idle; sequence: "Ctrl+S"; onActivated: page.updateSidecar() }
     Shortcut { objectName: "detectTextShortcut"; enabled: page.keysLive; sequence: "Ctrl+T"; onActivated: subMaskWin.openFor() }
     Shortcut { objectName: "editDepthShortcut"; enabled: page.keysLive && page.canEditDepth; sequence: "Ctrl+M"; onActivated: page.editDepthMap() }
@@ -567,6 +629,29 @@ ChangeFoldersButton {
                               + "(Settings > Splatting > Custom Resolution Presets > Auto Size picks). In a batch, "
                               + "each clip of another shape runs its Low Res pass at its own shape's pick, so a "
                               + "chapter that switches aspect ratios gets the right size for every clip."
+                    }
+                    // High VRAM Mode (user, 2026-10-30): the batch's clips side by side, a job each (24-32 GB cards)
+                    RowLayout {
+                        spacing: 8
+                        visible: !page.bh["splat.high_vram"]
+                        SpCheck {
+                            objectName: "splatHighVram"
+                            key: "high_vram_mode"
+                            text: "High VRAM Mode"
+                            help: "For 24-32 GB cards: splats several clips at once, each in a job of its own, so the "
+                                  + "card stays busy. Each job needs the memory one clip takes at your batch sizes, plus "
+                                  + "about 1 GB of its own. One job starts, and another joins each time a clip finishes "
+                                  + "and the card has room for it, so a card that's too full runs fewer and the console "
+                                  + "says so. A single clip and a Test Render run as usual."
+                        }
+                        Caption { text: "Jobs at Once:"; visible: !!page.st.high_vram_mode }
+                        SpDrop {
+                            objectName: "splatHighVramJobs"
+                            key: "high_vram_jobs"
+                            model: [2, 3, 4]
+                            visible: !!page.st.high_vram_mode
+                            boxWidth: 56
+                        }
                     }
                 }
 
@@ -1340,7 +1425,7 @@ ChangeFoldersButton {
                         SpDial { key: "depth_dilate_size_y"; label: (page.bn["splat.expand_x"] || "Dilate X:").replace(/X:?\s*$/, "Y"); from: -10; to: 30; step: 0.5; decimals: 1; defaultValue: 0; fillFrom: 0; help: page.help("depth_dilate_size_y") }
                         SpDial { key: "depth_blur_size_x"; label: "Blur X:"; from: 0; to: 35; step: 1; decimals: 0; defaultValue: 0; help: page.help("depth_blur_size_x") }
                         SpDial { key: "depth_blur_size_y"; label: "Blur Y:"; from: 0; to: 35; step: 1; decimals: 0; defaultValue: 0; help: page.help("depth_blur_size_y") }
-                        SpDial { key: "depth_dilate_left"; label: page.bn["splat.expand_left"] || "Dilate Left:"; from: 0; to: 20; step: 0.5; decimals: 1; defaultValue: 0; help: page.help("depth_dilate_left") }
+                        SpDial { key: "depth_dilate_left"; label: page.bn["splat.expand_left"] || "Dilate Left:"; from: -10; to: 20; step: 0.5; decimals: 1; defaultValue: 0; fillFrom: 0; help: page.help("depth_dilate_left") }
                         SpDial { key: "depth_blur_left"; label: "Blur Left:"; from: 0; to: 20; step: 1; decimals: 0; defaultValue: 0; help: page.help("depth_blur_left") }
                         // how Blur Left mixes in, beside its dial
                         ColumnLayout {
@@ -1376,7 +1461,7 @@ ChangeFoldersButton {
                             HoverTip { tip: "Pick Convergence: click this, then click the picture on what should sit on the screen "
                                             + "-- a face, a building, anything that stays put. Its depth becomes the clip's "
                                             + "Convergence, so it looks clean with no doubling. Turns Auto-Converge Off. Click "
-                                            + "this again to cancel." }
+                                            + "this again to cancel. Key: C." }
                         }
                         // one dial for more pop in front of the screen, the rest
                         // of the scene left where it is (user, 2026-10-01)
@@ -1933,6 +2018,9 @@ No button lit means custom "
                 passOn: [!!page.st.enable_full_res, !!page.st.enable_low_res]
                 passFrames: page.sp.passFrames
                 passDone: page.sp.passDone
+                // High VRAM Mode: every job's clip with its own bars, and the ones they finished
+                jobs: page.sp.parallelJobs
+                jobsDone: page.sp.parallelDone
                 countText: String(page.sp.clipCount || "—")
                 countHelp: "Which clip of the batch is being splatted, and how many there are in total."
                 // what the badges mean, under the list (user, 2026-10-03)

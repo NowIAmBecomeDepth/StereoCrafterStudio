@@ -411,7 +411,9 @@ Popup {
                                     ["Ctrl+T", "Detect Text"],
                                     ["Ctrl+M", "Edit Depth Map: this clip in the Depth Map Editor"],
                                     ["S", "Add a static keyframe"],
-                                    ["D", "Add a dynamic keyframe"]] },
+                                    ["D", "Add a dynamic keyframe"],
+                                    ["C", "Pick Convergence: then click the picture (C again cancels)"],
+                                    ["Mouse side buttons", "The actions picked in Settings > Studio"]] },
                                 { title: "Detect Text", rows: [
                                     ["Left · Right", "One frame (Shift: ten)"],
                                     ["Home · End", "First · last frame"],

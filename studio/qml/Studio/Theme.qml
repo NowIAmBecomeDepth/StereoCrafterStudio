@@ -193,6 +193,13 @@ Item {
     signal toastRequested(string kind, string title, string message)
     function toast(kind, title, message) { toastRequested(kind, title, message) }
 
+    // ---- SageAttention: 2, or 1 on an RTX 20 series card ---------------------
+    // (an RTX 20 user, 2026-10-30: Sage 1 installed from Settings > Studio > Models in place of 2; the
+    // switches say which is here, and Torch Compile hides while 1 is: its Triton 3.2 breaks it)
+    readonly property bool sage1: typeof Models !== "undefined" && !!Models && Models.installed("sage1")
+    readonly property string sageName: sage1 ? "SageAttention 1 (RTX 20 Series)"
+                                             : "SageAttention 2 (RTX 30 Series and Up)"
+
     // ---- Settings > Studio > Models, opened at one row ---------------------
     // (user, 2026-10-29: a TensorRT box ticked without TensorRT goes there to install it)
     signal modelsRequested(string key)

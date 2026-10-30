@@ -104,8 +104,11 @@ def gpu_dilate_left(t: torch.Tensor, k_raw: float, max_value: float) -> torch.Te
             return src
         k_w = k_int + 1
         s = -src if erode else src
-        # anchor (0, 0): dst(x) = max(src[x .. x+k_w-1]); past the edge never wins
-        padded = F.pad(s, (0, k_w - 1), value=float("-inf"))
+        # dilate, anchor (0, 0): dst(x) = max(src[x .. x+k_w-1]); erode, anchor at the right end:
+        # dst(x) = min(src[x-k_w+1 .. x]), so a near object's left edge moves right (user, 2026-10-30).
+        # Past the edge never wins.
+        pad = (k_w - 1, 0) if erode else (0, k_w - 1)
+        padded = F.pad(s, pad, value=float("-inf"))
         o = F.max_pool2d(padded, kernel_size=(1, k_w), stride=1)
         return -o if erode else o
 
@@ -215,8 +218,8 @@ def normalize_and_gamma_depth_gpu(batch_depth_numpy_raw: np.ndarray, assume_raw_
                                   global_depth_min: float, max_expected_raw_value: float,
                                   zero_disparity_anchor_val: float, depth_gamma: float,
                                   debug_task_name: str = "Render") -> np.ndarray:
-    """core.splatting.depth_processing.normalize_and_gamma_depth, on the GPU
-    (dragging only, like the rest of this file). Same branches, same order."""
+    """core.splatting.depth_processing.normalize_and_gamma_depth, on the GPU. Same branches, same order.
+    The preview's while dragging, and since 2026-10-30 (user) a render's too."""
     kwargs = dict(locals())
     raw = batch_depth_numpy_raw
     if not torch.cuda.is_available() or raw.size < 4096:

@@ -368,6 +368,18 @@ class ControllerTest(FolderCase):
         self.assertIn("Make room there", why)
         self.assertFalse(self.ctl.property("download")["key"])
 
+    def test_sage1_is_refused_while_sage_is_loaded(self):
+        """Windows won't replace a loaded .pyd: a DepthCrafter or Inpainting run loads Sage and Triton."""
+        from unittest import mock
+        C.MODELS = (*C.MODELS, C.Model("sage1", "SageAttention 1 (RTX 20 Series)", "DepthCrafter", kind="package",
+                                       extra="sage1", modules=("sageattention", "triton")))
+        C.MODELS_BY_KEY = {m.key: m for m in C.MODELS}
+        with mock.patch.object(C.sage1, "installed", lambda: False), \
+                mock.patch.dict(sys.modules, {"sageattention": object()}):
+            said = self.ctl.start("sage1")
+        self.assertIn("Restart Studio", said)
+        self.assertEqual(self.ctl.property("download")["key"], "", "nothing started")
+
     def test_a_package_row_installs_through_the_same_queue(self):
         """TensorRT's row (2026-10-29): Install, no fraction on the bar, then Installed."""
         from unittest import mock
@@ -438,6 +450,31 @@ class PackageTest(unittest.TestCase):
         m = C.MODELS_BY_KEY["tensorrt"]
         self.assertEqual(m.kind, "package")
         self.assertEqual(m.modules, ("tensorrt", "onnx", "onnxscript"))
+
+    def test_sage1_swaps_in_sage_1_and_triton_32(self):
+        """An RTX 20 user (2026-10-30): Sage 2 doesn't run there, Sage 1 with Triton 3.2 does."""
+        m = C.MODELS_BY_KEY["sage1"]
+        self.assertEqual((m.kind, m.gpus), ("package", ("7.5",)))
+        self.assertIn("RTX 20 Series", m.name)
+        self.assertEqual(C.pins("sage1"), ["sageattention==1.0.6", "triton-windows==3.2.0.post21"])
+
+    def test_sage1_is_listed_on_an_rtx_20_or_where_its_installed(self):
+        from unittest import mock
+        m = C.MODELS_BY_KEY["sage1"]
+        for caps, there, want in ((("7.5",), False, True), (("12.0",), False, False), (("8.6",), True, True),
+                                  ((), False, False)):
+            with mock.patch.object(C, "gpu_caps", lambda c=caps: c), \
+                    mock.patch.object(C.sage1, "installed", lambda t=there: t):
+                self.assertEqual(C.listed(m), want, (caps, there))
+        self.assertTrue(C.listed(C.MODELS_BY_KEY["tensorrt"]), "rows for every card stay")
+
+    def test_sage1_counts_as_installed_by_its_version_only(self):
+        from unittest import mock
+        from importlib import metadata
+        m = C.MODELS_BY_KEY["sage1"]
+        for version, want in (("1.0.6", True), ("2.2.0+cu130torch2.10.0andhigher.post6", False)):
+            with mock.patch.object(metadata, "version", lambda name, v=version: v):
+                self.assertEqual(C.status(m)["state"], "installed" if want else "missing", version)
 
     def test_the_pins_are_uv_locks(self):
         pins = C.pins("tensorrt")

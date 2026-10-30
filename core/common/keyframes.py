@@ -305,8 +305,12 @@ class KeyframeTrack:
 
 
     # --- interpolation ------------------------------------------------------
-    def values_at(self, frame: int) -> Optional[Dict[str, float]]:
+    def values_at(self, frame: int, hold_first: bool = True) -> Optional[Dict[str, float]]:
         """{var_name: value} for `frame`, or None when the track is empty.
+
+        hold_first False (Splatting, user 2026-10-30): before the first keyframe nothing is keyed (None),
+        so the clip's own settings show there -- a key made partway through a clip changes things from
+        its frame on, not back to the start. True (the Depth Map Editor): the first snapshot holds.
 
         None means "change nothing" -- the common case, since most clips carry
         no keyframes at all, and it lets every caller skip its work entirely
@@ -336,6 +340,8 @@ class KeyframeTrack:
                 break
 
         if prev_entry is None:
+            if not hold_first:
+                return None
             return dict(next_entry[2]) if next_entry else None
 
         prev_frame, _prev_kind, prev_values = prev_entry
