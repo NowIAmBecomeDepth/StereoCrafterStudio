@@ -78,13 +78,32 @@ class DispatchTest(unittest.TestCase):
                           return_dict=False)[0]
             self.assertEqual(float(out.mean()), 1.0)
             rt.unet(sample(13), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids,
-                    return_dict=False)                                # the shorter last chunk
+                    return_dict=False)                                # a shorter last chunk: the engine too
+            rt.unet(sample(1), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids,
+                    return_dict=False)                                # one frame
             rt.unet(sample().float(), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids,
                     return_dict=False)                                # not fp16
-        self.assertEqual(ran, [(1, 25, 8, 4, 6)])
-        self.assertEqual(pipe.unet.calls, [(1, 13, 8, 4, 6), (1, 25, 8, 4, 6)])
-        self.assertEqual((rt.nets["unet"].trt_calls, rt.nets["unet"].torch_calls), (1, 2))
-        self.assertIn("UNet steps 1 TensorRT / 2 PyTorch", rt.summary())
+        self.assertEqual(ran, [(1, 25, 8, 4, 6), (1, 13, 8, 4, 6)])
+        self.assertEqual(pipe.unet.calls, [(1, 1, 8, 4, 6), (1, 25, 8, 4, 6)])
+        self.assertEqual((rt.nets["unet"].trt_calls, rt.nets["unet"].torch_calls), (2, 2))
+        self.assertIn("UNet steps 2 TensorRT / 2 PyTorch", rt.summary())
+
+    def test_one_unet_engine_takes_every_chunk_length(self):
+        """A 41-frame clip at Frames Chunk 25 has a 21-frame chunk: an engine for exactly 25 left it in
+        PyTorch, half the clip (2026-10-30)."""
+        rt, _ = trt()
+        asked = []
+
+        def engine(kind, key, name, build):
+            asked.append((key, name))
+            return lambda *a: torch.zeros(1, a[0].shape[1], 4, 4, 6)
+        ehs, ids = torch.zeros(1, 1, 1024, dtype=torch.float16), torch.zeros(1, 3, dtype=torch.float16)
+        with mock.patch.object(rt, "_engine", engine), mock.patch.object(T, "_gpu_tag", lambda: "gpu"), \
+                mock.patch.object(T, "_trt_version", lambda: "11"):
+            for f in (25, 21, 2):
+                rt.unet(sample(f), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids,
+                        return_dict=False)
+        self.assertEqual({a for a in asked}, {((8, 4, 6, (1, 1, 1024)), "svd_unet_48x32_f2-25_c8_gpu_trt11.engine")})
 
     def test_the_vae_odd_frame_and_fp32_go_to_pytorch(self):
         rt, pipe = trt()
@@ -207,9 +226,29 @@ class SmallCardTest(unittest.TestCase):
         rt, pipe = trt()
         rt.nets["unet"].engines = {"k": object()}
         ehs, ids = torch.zeros(1, 1, 1024, dtype=torch.float16), torch.zeros(1, 3, dtype=torch.float16)
-        rt.unet(sample(21), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids, return_dict=False)
+        rt.unet(sample(1), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids, return_dict=False)
         self.assertEqual(rt.nets["unet"].engines, {})
-        self.assertEqual(pipe.unet.calls, [(1, 21, 8, 4, 6)])
+        self.assertEqual(pipe.unet.calls, [(1, 1, 8, 4, 6)])
+
+    def test_idle_hands_everything_back_and_loads_again_after(self):
+        """The Hi-Res blend: the UNet engine held through it filled a 12 GB card (2026-10-30)."""
+        rt, _ = trt()
+        for net in rt.nets.values():
+            net.engines = {"k": object()}
+        rt.idle()
+        self.assertEqual([len(n.engines) for n in rt.nets.values()], [0, 0, 0])
+        self.assertFalse(any(n.off for n in rt.nets.values()), "not turned off: loaded again by the next call")
+
+    def test_pytorchs_unused_cache_goes_back_only_on_a_short_card(self):
+        G = 1 << 30
+        for free, cached, want in ((G, 2 * G, 1), (6 * G, 2 * G, 0), (G, 0, 0)):
+            emptied = []
+            with mock.patch.object(torch.cuda, "memory_reserved", lambda c=cached: 3 * G + c), \
+                    mock.patch.object(torch.cuda, "memory_allocated", lambda: 3 * G), \
+                    mock.patch.object(torch.cuda, "mem_get_info", lambda f=free: (f, 8 * G)), \
+                    mock.patch.object(torch.cuda, "empty_cache", lambda: emptied.append(1)):
+                T._hand_back_cache()
+            self.assertEqual(len(emptied), want, (free >> 30, cached >> 30))
 
     def test_with_room_it_stays_loaded(self):
         rt, _ = trt()

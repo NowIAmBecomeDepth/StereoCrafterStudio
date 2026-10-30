@@ -8,7 +8,7 @@ edges (the user's measurements, 2026-10-29).
 
 The pipeline calls these at its own call sites (StableVideoDiffusionInpaintingPipeline.tensorrt), not by
 replacing unet.forward: diffusers puts model CPU offload back after every tile (maybe_free_model_hooks),
-which restores the original forward. Whatever doesn't fit an engine -- a clip's shorter last chunk, the odd
+which restores the original forward. Whatever doesn't fit an engine -- a one-frame chunk, the odd
 last frame of a decode, the fp32 encode after an fp16 overflow -- runs through PyTorch, and so does a
 network that failed once (TensorRT missing, an export, build or run failing): it is said once in the log
 and that network is PyTorch for the rest of the run."""
@@ -39,6 +39,15 @@ _BUILD_LOCK = threading.Lock()
 #: engine asking, and the UNet engine is unloaded for the decode, reloaded for the next chunk (~2 s).
 LOW_VRAM = 2 << 30
 SHRINK_SPARE = 512 << 20
+
+
+def _hand_back_cache():
+    """On a card short of memory, what PyTorch holds cached but unused (CLIP's encode, a tile's set-up:
+    ~1.3 GB) goes back to the card before an engine runs: TensorRT can't use PyTorch's cache, and beside
+    the UNet engine it left an 8 GB card with nothing free (2026-10-30)."""
+    cached = torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+    if cached > SHRINK_SPARE // 2 and torch.cuda.mem_get_info()[0] < LOW_VRAM:
+        torch.cuda.empty_cache()
 
 
 def free_vram() -> int:
@@ -391,13 +400,15 @@ class TensorRT:
 
     def unet(self, sample, timestep, encoder_hidden_states=None, added_time_ids=None, return_dict=True, **kw):
         engine = None
-        if (not kw and sample.dim() == 5 and sample.shape[0] == 1 and sample.shape[1] == self.frames_chunk
+        # Any chunk of 2 to Frames Chunk frames (2026-10-30): an engine for exactly Frames Chunk left a
+        # clip's shorter last chunk in PyTorch -- half of a 41-frame clip at Frames Chunk 25
+        if (not kw and sample.dim() == 5 and sample.shape[0] == 1 and 2 <= sample.shape[1] <= self.frames_chunk
                 and sample.dtype == torch.float16 and encoder_hidden_states is not None
                 and added_time_ids is not None and encoder_hidden_states.shape[0] == 1
                 and tuple(added_time_ids.shape) == (1, 3)):
             _, f, c, h, w = sample.shape
-            engine = self._engine("unet", (f, c, h, w, tuple(encoder_hidden_states.shape)),
-                                  engine_name("unet", w * 8, h * 8, f, c),
+            engine = self._engine("unet", (c, h, w, tuple(encoder_hidden_states.shape)),
+                                  engine_name("unet", w * 8, h * 8, f"2-{self.frames_chunk}", c),
                                   lambda name: self._build_unet(name, sample, encoder_hidden_states, added_time_ids))
         if engine is not None:
             try:
@@ -426,11 +437,19 @@ class TensorRT:
         return self._decode_with(engine, z, num_frames, return_dict)
 
     def _torch_unet_room(self):
-        """A step the engine can't take (a clip's shorter last chunk) brings the PyTorch UNet onto the GPU:
+        """A step the engine can't take (one frame, not fp16) brings the PyTorch UNet onto the GPU:
         the engine's 2.8 GB goes first, loaded again by the next full chunk (~2 s). Both at once filled a
         12 GB card on a 41-frame clip's 21-frame chunk: 24.5 s a step instead of 0.6 (2026-10-30)."""
         self.nets["unet"].engines.clear()
         self.scratch.release()  # PyTorch needs the room (DC's UNet buffer is 7.7 GB)
+
+    def idle(self):
+        """Work that isn't TensorRT's next (the Hi-Res blend: ~7 GB of PyTorch at 2580x1080): its engines
+        and working memory back to the card, loaded again by the next clip's first call (~2 s). Held
+        through the blend, the UNet engine's 2.8 GB filled a 12 GB card (2026-10-30)."""
+        for net in self.nets.values():
+            net.engines.clear()
+        self.scratch.release()
 
     def _room_for_decode(self, engine):
         """The UNet engine (2.8 GB) waits idle through the decode: on a card without room for both it is
@@ -519,6 +538,7 @@ class TensorRT:
         elif self.offload_type == "none" and pipe.unet.device.type == "cuda":
             pipe.unet.to("cpu")
             torch.cuda.empty_cache()
+        _hand_back_cache()
 
     def _unpark_torch_unet(self):
         if self.offload_type == "none" and self.pipe.unet.device.type != "cuda":
@@ -546,11 +566,15 @@ class TensorRT:
         def to_ram():  # TensorRT's build wants the room; the engine denoises from now on (_park_torch_unet)
             pipe.unet.to("cpu")
             torch.cuda.empty_cache()
+        frames = torch.export.Dim("frames", min=2, max=self.frames_chunk)
+        top = (1, self.frames_chunk) + tuple(sample.shape[2:])
         try:
             build_engine(name, lambda p: _export(_UNetExport(pipe.unet).eval(),
                                                  (sample.cuda(), t, ehs.cuda(), ids.cuda()),
-                                                 ["sample", "timestep", "encoder_hidden_states", "added_time_ids"], p),
-                         release=to_ram)
+                                                 ["sample", "timestep", "encoder_hidden_states", "added_time_ids"], p,
+                                                 dynamic_shapes=({1: frames}, None, None, None)),
+                         release=to_ram,
+                         profile={"sample": ((1, 2) + tuple(sample.shape[2:]), top, top)})
         finally:
             configure_attention_processors(pipe, use_sageattention=self.use_sageattention)
 
