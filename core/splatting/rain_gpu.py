@@ -232,6 +232,39 @@ def _flows(ext, greys, t, ks):
     return dict(_POOL.map(pair, ks))
 
 
+def relight_gain(ops, frame: torch.Tensor, img: torch.Tensor, ok: torch.Tensor, scale: float):
+    """R.relight_gain on the GPU: [3, H/2, W/2], or None."""
+    def low(x):
+        return ops.gauss(ops.half(x), R.RELIGHT_BLUR * scale * 0.5)
+    v = ok.float()
+    lv = low(v)
+    g = torch.stack([(low(frame[..., c] * v / 255.0) + R.RELIGHT_FLOOR * lv)
+                     / (low(img[..., c] * v / 255.0) + R.RELIGHT_FLOOR * lv + 1e-6) for c in range(3)])
+    g = torch.where(lv < 0.25, torch.ones_like(g), g)
+    if not bool((g >= R.RELIGHT_FROM).any()):
+        return None
+    w = ((g - R.RELIGHT_FROM) / (R.RELIGHT_FULL - R.RELIGHT_FROM)).clamp(0, 1)
+    return (1.0 + w * (g - 1.0)).clamp(max=R.RELIGHT_MAX)
+
+
+def texture_match(ops, frame: torch.Tensor, img: torch.Tensor, ok: torch.Tensor, scale: float) -> torch.Tensor:
+    """R.texture_match on the GPU: [H/2, W/2], nan where img doesn't line up."""
+    s = scale * 0.5
+
+    def band(x):
+        h = ops.half(x.mean(-1) / 255.0)
+        return ops.gauss(h, R.TEXTURE_FINE * s) - ops.gauss(h, R.TEXTURE_COARSE * s)
+    a, b = band(frame), band(img)
+    v = ok[::2, ::2][: a.shape[0], : a.shape[1]].float()
+    a, b = a * v, b * v
+    sig = R.TEXTURE_WIN * scale * 0.5 / 2
+    ab = ops.gauss(a * b, sig)
+    aa = ops.gauss(a * a, sig) + R.TEXTURE_FLOOR ** 2
+    bb = ops.gauss(b * b, sig) + R.TEXTURE_FLOOR ** 2
+    out = ab / torch.sqrt(aa * bb)
+    return torch.where(ops.gauss(v, sig) < 0.5, torch.full_like(out, float("nan")), out)
+
+
 def background(ext, win_t: torch.Tensor, t: int, greys, quants=None):
     """R.RainExtractor._background on the GPU: [H, W, 3] float 0..1."""
     ops = ext.ops
@@ -268,6 +301,16 @@ def background(ext, win_t: torch.Tensor, t: int, greys, quants=None):
         warped = F.grid_sample(img, grid, mode="bilinear", padding_mode="border", align_corners=True)
         stack.append(warped[0].permute(1, 2, 0).round().clamp(0, 255))   # OpenCV's 8-bit remap rounds
         valid.append(okF)
+    if R.RELIGHT and not ext.sparks:                          # R.RainExtractor._background's relight
+        for i in range(1, len(stack)):
+            g = relight_gain(ops, stack[0], stack[i], valid[i], ext.scale)
+            if g is not None:
+                stack[i] = (stack[i] * ops.resize(g, (H, W)).permute(1, 2, 0)).clamp(0, 255)
+    ext.last_texture = None
+    if R.TEXTURE and not ext.sparks and len(stack) > 1 and getattr(ext.s, "preset", "downpour") != "mist":
+        m = torch.stack([texture_match(ops, stack[0], stack[i], valid[i], ext.scale) for i in range(1, len(stack))])
+        m = torch.where(torch.isnan(m), torch.full_like(m, float("inf")), m).amin(0)
+        ext.last_texture = torch.where(torch.isinf(m), torch.zeros_like(m), m)
     S = torch.stack(stack) / 255.0
     V = torch.stack(valid)
     ext.last_lined_up = (V[1:].float().mean(0).cpu().numpy()) if len(valid) > 1 else None
@@ -324,6 +367,9 @@ def rain_of(ext, frame_u8: torch.Tensor, bg: torch.Tensor) -> Tuple[np.ndarray, 
         mask &= ~strands(ops, frame_u8, ext.scale)
     if getattr(ext.s, "lights", True):                  # the CPU's R.lights: one blur and an opening
         mask &= ~torch.from_numpy(R.lights(frame_u8.cpu().numpy(), ext.scale)).to(ops.dev)
+    tex = getattr(ext, "last_texture", None)
+    if R.TEXTURE and tex is not None:                   # Keep texture out (R.RainExtractor._rain)
+        mask &= ops.resize(tex, mask.shape) < R.TEXTURE_FROM
     mask = _open_vertical3(mask)
     rain = (res * mask[..., None]).cpu().numpy().astype(np.float32)
     ext.last_src = res

@@ -81,6 +81,12 @@ DEFAULTS: Dict[str, Any] = {
     "robust_output_suffix": "_clipped_depth",
     "is_depth_far_black": True,
     "use_sageattention_var": True,
+    # TensorRT (the boxes under CPU Offload Mode, 2026-10-29): the VAE as TensorRT FP16 engines, built once per
+    # size into trt_engines/ -- as close to exact as the normal path. Installed from Settings > Studio > Models.
+    "use_tensorrt_var": False,
+    # ...and the UNet too (user, 2026-10-29: split in two): ~1.8x on a real clip, but the depth ~1.7 codes
+    # from exact (mostly a uniform lift), against the VAE's 0.25
+    "use_tensorrt_unet_var": False,
     # Resume (user, 2026-10-25: "like the other stages so any stage can turn off using finished folders"):
     # on, a finished clip's source moves into <input>/finished (a failed one into failed/) and the next
     # Start skips it, as before; off, the sources stay where they are

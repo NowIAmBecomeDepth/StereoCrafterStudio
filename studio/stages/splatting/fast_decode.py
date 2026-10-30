@@ -31,6 +31,8 @@ from typing import Callable, List, Optional
 
 import numpy as np
 
+from core.common.frame_pipe import popen_frames
+
 logger = logging.getLogger("splatting.v2.preview")
 
 #: Frames decoded ahead of the one asked for.
@@ -126,9 +128,8 @@ class FFmpegStream:
         self._failed = False
         self._next = start
         self._want = start
-        self._proc = subprocess.Popen(self._build_cmd(start), stdout=subprocess.PIPE,
-                                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                                      creationflags=_NO_WINDOW)
+        # a 1 MB pipe: twice the 4 KB default's throughput
+        self._proc = popen_frames(self._build_cmd(start), stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._pump, name="preview-decode", daemon=True)
             self._thread.start()

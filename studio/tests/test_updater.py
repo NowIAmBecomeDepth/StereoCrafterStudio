@@ -78,7 +78,8 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(r["commits"][0]["subject"], "Edge Fill: filled clips green")
         self.assertEqual(r["commits"][0]["body"], "A clip filled in an earlier run stays green.\n- one\n- two")
         self.assertEqual(U.changelog_text(""), "")
-        self.assertTrue(U.changelog_text("x" * 2000).endswith("...") and len(U.changelog_text("x" * 2000)) <= U.CHANGELOG_CHARS)
+        # a long note whole (user, 2026-10-29: no 600-character cap)
+        self.assertEqual(U.changelog_text("word " * 400), ("word " * 400).strip())
 
     def test_the_files_it_changes_are_listed(self):
         """The dialog's file list (user, 2026-10-18): added, changed, deleted, renamed."""

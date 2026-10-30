@@ -93,8 +93,12 @@ if %errorlevel% neq 0 (
     )
 )
 
-REM Run the sync
-uv sync
+REM Run the sync -- with Inpainting's TensorRT extra when it is installed, or the sync takes it out
+if exist ".venv\Lib\site-packages\tensorrt\" (
+    uv sync --extra tensorrt
+) else (
+    uv sync
+)
 
 if %errorlevel% equ 0 (
     echo.

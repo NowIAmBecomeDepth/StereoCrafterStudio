@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from decord import VideoReader
 
 from core.common.video_io import (
+    as_uint8,
     start_ffmpeg_pipe_process,
     start_ffmpeg_pipe_process_dnxhr,
     start_ffmpeg_pipe_process_mask,
@@ -683,7 +684,8 @@ class RenderProcessor:
                 _first = input_video_reader.get_batch([0]).asnumpy()[0]
                 _kind = "orb" if _rain_settings.preset == "orb" else "strands"
                 logger.info(f"[{task_name}] Web ({'moving' if _kind == 'orb' else 'strands'}): finding it (once for this clip)...")
-                _web = build_track(_kind, input_video_reader, depth_map_reader, (_first.shape[1], _first.shape[0]),
+                from core.common.video_io import Uint8Frames   # its detection reads 8-bit pictures
+                _web = build_track(_kind, Uint8Frames(input_video_reader), depth_map_reader, (_first.shape[1], _first.shape[0]),
                                    flip=flip_horizontal)
                 logger.info(f"[{task_name}] Web: {_web.describe()}; depth {_rain_settings.depth:.2f}, "
                             f"amount {_rain_settings.amount:.2f}"
@@ -835,7 +837,7 @@ class RenderProcessor:
                     for _k in range(batch_depth_normalized.shape[0]):
                         _dk = batch_depth_normalized[_k]
                         _d2 = _dk[..., 0] if _dk.ndim == 3 else _dk
-                        _lit, _zf, _scene = _web.frame(batch_video_numpy[_k], _d2, grow=_rain_settings.grow,
+                        _lit, _zf, _scene = _web.frame(as_uint8(batch_video_numpy[_k]), _d2, grow=_rain_settings.grow,
                                                        index=int(batch_indices[_k]))
                         if _dk.ndim == 3:
                             batch_depth_normalized[_k][..., 0] = _scene
@@ -990,7 +992,7 @@ class RenderProcessor:
                     if flip_horizontal:
                         _win = np.flip(_win, axis=2).copy()
                     _rd = batch_depth_numpy_float[..., 0] if batch_depth_numpy_float.ndim == 4 else batch_depth_numpy_float
-                    _parts = _rain_ext.extract(_win, _centres)
+                    _parts = _rain_ext.extract(as_uint8(_win), _centres)   # OpenCV detection: 8-bit frames
                     if _rain_settings.guard > 0:        # Foreground guard: the near part keeps its rain
                         from core.splatting.rain import apply_guard   # as the preview does (bug sweep A5)
                         _parts = [apply_guard(r, b, _rd[k], _rain_settings.guard, width / 1920.0)

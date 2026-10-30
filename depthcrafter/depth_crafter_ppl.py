@@ -178,6 +178,11 @@ def encode_video_latents_upcast(vae, encode, video, chunk_size, progress_cb):
 
 
 class DepthCrafterPipeline(StableVideoDiffusionPipeline):
+    #: pipelines.trt_unet.DepthCrafterTensorRT while DepthCrafter's TensorRT box is on (2026-10-29): the
+    #: denoise, the encode and the decode call it instead of the UNet and VAE. Asked at the call: diffusers
+    #: puts model offload's hooks back after every call, which would undo a replaced forward.
+    tensorrt = None
+
     @torch.inference_mode()
     def encode_video(
         self,
@@ -243,12 +248,13 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         :return: vae latents in shape of [b, c, h, w]
         """
         total_in = video.shape[0]
+        encode = self.tensorrt.vae_encode if self.tensorrt is not None else self.vae.encode
         video_latents = []
         for i in range(0, total_in, chunk_size):
             chunk = video[i : i + chunk_size]
             if target_dtype is not None and chunk.dtype != target_dtype:
                 chunk = chunk.to(target_dtype)
-            video_latents.append(self.vae.encode(chunk).latent_dist.mode())
+            video_latents.append(encode(chunk).latent_dist.mode())
             del chunk
             if progress_cb is not None:
                 progress_cb(min(i + chunk_size, total_in))
@@ -264,7 +270,8 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
         the default is back at 4 for that (2026-10-21)."""
         try:
             kw = {"num_frames": chunk.shape[0]} if accepts_num_frames else {}
-            return self.vae.decode(chunk, **kw).sample
+            decode = self.tensorrt.vae_decode if self.tensorrt is not None else self.vae.decode
+            return decode(chunk, **kw).sample
         except torch.OutOfMemoryError:
             if chunk.shape[0] <= 1:
                 raise
@@ -368,6 +375,10 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
             "width": int(width),
             "noise_aug_strength": float(noise_aug_strength),
         }
+        if self.tensorrt is not None:
+            # TensorRT's latents and PyTorch's never resume into each other (2026-10-29); a PyTorch run's
+            # header is as it was
+            header["tensorrt"] = True
         if extra:
             for k, v in extra.items():
                 header[str(k)] = v
@@ -696,6 +707,7 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
             window_idx = 0
             frames_covered = 0
 
+            denoise = self.tensorrt.unet if self.tensorrt is not None else self.unet
             # inference strategy for long videos
             # two main strategies: 1. noise init from previous frame, 2. segments stitching
             while idx_start < num_frames - overlap:
@@ -732,7 +744,7 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
                         latent_model_input = latents  # [1, t, c, h, w]
                         latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)  # [1, t, c, h, w]
                         latent_model_input = torch.cat([latent_model_input, video_latents_current], dim=2)
-                        noise_pred = self.unet(
+                        noise_pred = denoise(
                             latent_model_input,
                             t,
                             encoder_hidden_states=video_embeddings_current,
@@ -746,7 +758,7 @@ class DepthCrafterPipeline(StableVideoDiffusionPipeline):
                             latent_model_input = torch.cat(
                                 [latent_model_input, torch.zeros_like(latent_model_input)], dim=2
                             )
-                            noise_pred_uncond = self.unet(
+                            noise_pred_uncond = denoise(
                                 latent_model_input,
                                 t,
                                 encoder_hidden_states=torch.zeros_like(video_embeddings_current),

@@ -46,6 +46,28 @@ opening of LIGHT_WIDTH px); grown LIGHT_GROW px for its halo and the misalignmen
 taken there. On the five ch.28 rain clips (3 frames each, scratchpad rainlights/survey.py) it
 took 2-7% of the rain, the lights; without the contrast test up to a third (lit rain sheets).
 
+Lit-up frames (user, 2026-10-29 -- ch.28 00115209, the girl and the man in the hat: "pretty
+sensitive when lighting hits picking up false positives even with guard all the way up"):
+there the light flickers (a frame 35% brighter than the next, bluer) and the camera shakes,
+so a frame is brighter and sharper than its lined-up neighbours. Rain only adds light, so
+everything the frame has over the background's low quantile counted: the lit brick wall's
+texture read as short streaks, and placed in front it landed on her face and shoulder in the
+right eye (Guard keeps rain off NEAR things, not out of the rain). Two steps, for rain (not
+sparks):
+- Relight: each lined-up neighbour's light is matched to the frame's, per channel, where it
+  is lit up past RELIGHT_FROM (its light blurred RELIGHT_BLUR px over where it lines up;
+  scaled fully from RELIGHT_FULL) -- under that, as before.
+- The scene's own texture: no rain where the frame's fine detail is in EVERY lined-up
+  neighbour too (local correlation of the band-passed grey >= TEXTURE_FROM, the least of
+  the neighbours) -- light and a little blur don't change it; rain, splashes and glitter
+  are new each frame (a long streak still overlaps itself the next frame, hence every
+  neighbour). Not for mist (its own misalignment test).
+On 00115209 the lit frames' rain light fell to ~a quarter (frame 0: 10.2k -> 2.5k), an
+ordinary frame keeps its streaks (it loses the web's edges). The old golden frames
+(downpour_golden.py, Keep lights out off): 00115290 -7% of the rain's light (the lamp, the
+falling people's edges, some street glitter), 00117796 -10% (mostly the rooftops' texture);
+00114672 loses its brick wall, kerbs and lamp, 00115480 keeps 88%. CPU = GPU 99.97%.
+
 Depth: Layers planes (1..10, user 2026-10-07), the rain split between them
 by streak length (long = near) at this clip's own length quantiles, so each
 plane holds an equal share (the cuts smoothed over the clip). The planes are
@@ -128,6 +150,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -346,6 +369,57 @@ STRAND_LINE, STRAND_LO, STRAND_HI, STRAND_MIN_LEN, STRAND_GROW = 31, 0.06, 0.13,
 #: Keep Lights Out (see the top): brightness, standing out by, over a blur of (px at 1920),
 #: wider than (px), grown by (px)
 LIGHT_ABS, LIGHT_STAND, LIGHT_AROUND, LIGHT_WIDTH, LIGHT_GROW = 0.4, 0.15, 20, 5, 12
+#: Relight (see the top): blur (px at 1920), dark floor, the ratio it starts at / is full at, at most
+RELIGHT_BLUR, RELIGHT_FLOOR, RELIGHT_FROM, RELIGHT_FULL, RELIGHT_MAX = 20, 0.03, 1.25, 1.4, 3.0
+#: The scene's own texture (see the top): band-pass (px at 1920), correlation window (px at
+#: 1920), no rain where every lined-up neighbour correlates at least this much, dark floor
+TEXTURE_FINE, TEXTURE_COARSE, TEXTURE_WIN, TEXTURE_FROM, TEXTURE_FLOOR = 1.5, 6.0, 15, 0.5, 0.004
+#: both on (False: the detector as before them -- prototypes/rain/downpour_golden.py)
+RELIGHT = TEXTURE = True
+
+
+def _band(grey_half: np.ndarray, scale: float) -> np.ndarray:
+    s = scale * 0.5
+    return cv2.GaussianBlur(grey_half, (0, 0), TEXTURE_FINE * s) - cv2.GaussianBlur(grey_half, (0, 0), TEXTURE_COARSE * s)
+
+
+def texture_match(frame: np.ndarray, img: np.ndarray, ok: np.ndarray, scale: float) -> np.ndarray:
+    """How much frame's fine detail is img's (lined up on it, where ok), around each pixel:
+    local normalised correlation of the band-passed grey at half size, float32 [H/2, W/2],
+    nan where img doesn't line up. Light and a little blur don't change it; rain and
+    splashes, new every frame, don't correlate."""
+    def half(x):
+        g = x.mean(-1, dtype=np.float32) / 255.0
+        return cv2.resize(g, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+    a, b = _band(half(frame), scale), _band(half(img), scale)
+    v = cv2.resize(ok.astype(np.uint8), (a.shape[1], a.shape[0]), interpolation=cv2.INTER_NEAREST).astype(np.float32)
+    a, b = a * v, b * v
+    sig = TEXTURE_WIN * scale * 0.5 / 2
+    ab = cv2.GaussianBlur(a * b, (0, 0), sig)
+    aa = cv2.GaussianBlur(a * a, (0, 0), sig) + TEXTURE_FLOOR ** 2
+    bb = cv2.GaussianBlur(b * b, (0, 0), sig) + TEXTURE_FLOOR ** 2
+    out = (ab / np.sqrt(aa * bb)).astype(np.float32)
+    out[cv2.GaussianBlur(v, (0, 0), sig) < 0.5] = np.nan
+    return out
+
+
+def relight_gain(frame: np.ndarray, img: np.ndarray, ok: np.ndarray, scale: float) -> Optional[np.ndarray]:
+    """How much brighter frame is than the lined-up neighbour img (both [H, W, 3], any range
+    0..255) around each pixel, per channel, where img lines up (ok): float32 [H/2, W/2, 3] at
+    half size, 1 where the light is the same; None when nowhere is it lit up past RELIGHT_FROM."""
+    def low(x):
+        h = cv2.resize(x, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+        return cv2.GaussianBlur(h, (0, 0), RELIGHT_BLUR * scale * 0.5)
+    v = ok.astype(np.float32)
+    lv = low(v)
+    f = frame.astype(np.float32) * (v / 255.0)[..., None]
+    n = img.astype(np.float32) * (v / 255.0)[..., None]
+    g = (low(f) + RELIGHT_FLOOR * lv[..., None]) / (low(n) + RELIGHT_FLOOR * lv[..., None] + 1e-6)
+    g[lv < 0.25] = 1.0
+    if not (g >= RELIGHT_FROM).any():
+        return None
+    w = np.clip((g - RELIGHT_FROM) / (RELIGHT_FULL - RELIGHT_FROM), 0, 1)
+    return np.minimum(1.0 + w * (g - 1.0), RELIGHT_MAX).astype(np.float32)
 
 
 def lights(frame: np.ndarray, scale: float) -> np.ndarray:
@@ -457,6 +531,19 @@ class RainExtractor:
             okF &= (mx >= 0) & (mx <= W - 1) & (my >= 0) & (my <= H - 1)
             stack.append(cv2.remap(window[k], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE))
             valid.append(okF)
+        if RELIGHT and not self.sparks:
+            for i in range(1, len(stack)):
+                g = relight_gain(stack[0], stack[i], valid[i], self.scale)
+                if g is not None:
+                    g = cv2.resize(g, (W, H), interpolation=cv2.INTER_LINEAR)
+                    stack[i] = np.clip(stack[i].astype(np.float32) * g, 0, 255)
+        self.last_texture = None                # the least any lined-up neighbour correlates
+        if TEXTURE and not self.sparks and len(stack) > 1 and getattr(self.s, "preset", "downpour") != "mist":
+            m = np.stack([texture_match(stack[0], stack[i], valid[i], self.scale) for i in range(1, len(stack))])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)          # nowhere lined up: nan
+                m = np.nanmin(m, axis=0)
+            self.last_texture = np.nan_to_num(m, nan=0.0)
         S = np.stack(stack).astype(np.float32) / 255.0
         V = np.stack(valid)
         self.last_lined_up = (V[1:].sum(0) / max(len(V) - 1, 1)) if len(V) > 1 else None
@@ -587,6 +674,10 @@ class RainExtractor:
             mask &= ~strands(frame, self.scale)
         if getattr(self.s, "lights", True):
             mask &= ~lights(frame, self.scale)
+        tex = getattr(self, "last_texture", None)
+        if TEXTURE and tex is not None:
+            tex = cv2.resize(tex, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_LINEAR)
+            mask &= tex < TEXTURE_FROM
         mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN,
                                 cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3))).astype(bool)
         rain = res * mask[..., None]

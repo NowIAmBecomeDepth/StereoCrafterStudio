@@ -10,6 +10,8 @@ Item {
     property string text: ""
     property string help: ""
     property bool shown: true
+    // function () -> bool, asked before a tick goes in: false leaves the box off (it said why)
+    property var guard: null
 
     Layout.fillWidth: true
     implicitWidth: check.implicitWidth
@@ -25,7 +27,13 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         text: root.text
         checked: root.store && root.key ? !!root.store[root.key] : false
-        onToggled: if (root.store && root.key) root.store[root.key] = checked
+        onToggled: {
+            if (checked && root.guard && !root.guard()) {
+                checked = Qt.binding(() => root.store && root.key ? !!root.store[root.key] : false)
+                return
+            }
+            if (root.store && root.key) root.store[root.key] = checked
+        }
         opacity: enabled ? 1 : Theme.dim(0.45)
     }
     // over the box and its text only, not the empty rest of the row

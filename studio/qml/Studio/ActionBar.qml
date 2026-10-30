@@ -153,6 +153,8 @@ Item {
                 tips: bar.tips
                 Layout.fillWidth: true
                 Layout.bottomMargin: 6
+                // clear of the Batch ETA at this line's right end
+                Layout.rightMargin: batchEta.visible ? batchEta.implicitWidth + 24 : 0
             }
             // the clip, when this stage has the numbers
             RowLayout {
@@ -197,20 +199,22 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.bottom
                         anchors.topMargin: 4
-                        text: visible ? bar.etaText(JobStats.eta, JobStats.etaPartial) : ""
+                        text: visible ? bar.etaText(JobStats.eta, JobStats.etaPartial, "Clip ETA") : ""  // user, 2026-10-27: "Clip ETA"
                         color: JobStats.eta >= 0 ? Theme.fg : Theme.fgFaint
                         font.family: Theme.bodyFont
                         font.pixelSize: Theme.smallSize + 1
                         font.features: { "tnum": 1 }
                     }
-                    // ...and the whole batch's, beside it, while clips come after this one
-                    // (JobStats.batchEta; user, 2026-10-21) -- a titled bar has it on its heading
+                    // ...and the whole batch's, while clips come after this one (JobStats.batchEta;
+                    // user, 2026-10-21) -- above the percentage, at the tip line's end (user,
+                    // 2026-10-27: beside the clip's it crowded the status); a titled bar has it on its heading
                     Text {
+                        id: batchEta
                         objectName: "batchEtaText"
                         visible: bar.batchEtaShown && bar.title === ""
-                        anchors.right: jobEta.left
-                        anchors.rightMargin: 18
-                        anchors.top: jobEta.top
+                        anchors.right: parent.right
+                        anchors.bottom: parent.top
+                        anchors.bottomMargin: 8
                         text: visible ? bar.etaText(JobStats.batchEta, JobStats.etaPartial, "Batch") : ""
                         color: JobStats.batchEta >= 0 ? Theme.fg : Theme.fgFaint
                         font.family: Theme.bodyFont

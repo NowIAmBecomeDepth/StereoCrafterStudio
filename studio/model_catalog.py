@@ -17,6 +17,11 @@ urllib for the one file not on the Hub) so a Stop ends it at once; the next Down
 part-files it left. Progress is the bytes on disk -- finished files plus the part-files -- read
 every couple of seconds. Moved here from Inpainting V2's weights.py, which still names its parts.
 
+A "package" row (TensorRT, user 2026-10-29: "download and install tensorrt from studio like we do
+the weights") is Python packages, not weights: Install runs `uv pip install` into Studio's own
+environment at the versions uv.lock pins for the extra (what `uv sync --extra tensorrt` would put
+there; the updater keeps them once they're here). Nothing it installs is imported before it's used.
+
 No Qt and no torch here.
 """
 
@@ -67,10 +72,13 @@ class Model:
     parts: Tuple[Part, ...] = ()
     gated: bool = False                     # the account must be granted access on the model page
     page: str = ""
-    kind: str = "download"                  # "download" | "rose" (Set Up ROSE) | "bundled" | "manual"
+    kind: str = "download"                  # "download" | "rose" (Set Up ROSE) | "bundled" | "manual" | "package"
     note: str = ""
     tip: str = ""                           # on hovering its name
     manual_file: str = ""                   # kind "manual": the file to put in the folder (under SceneCut/)
+    extra: str = ""                         # kind "package": the pyproject extra it installs
+    modules: Tuple[str, ...] = ()           # ...and the modules that must import for it to count as here
+    installed_size: str = ""                # ...as the page says it
 
 
 # ---- the parts ------------------------------------------------------------------------------
@@ -201,6 +209,12 @@ MODELS: Tuple[Model, ...] = (
           page="https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m"),
     Model("sscd", "SSCD", "Scene Cut (cut validation)", (SSCD,),
           page="https://github.com/facebookresearch/sscd-copy-detection"),
+    Model("tensorrt", "NVIDIA TensorRT", "DepthCrafter, Inpainting (their TensorRT boxes)", kind="package",
+          extra="tensorrt", modules=("tensorrt", "onnx", "onnxscript"), installed_size="2.3 GB",
+          page="https://developer.nvidia.com/tensorrt",
+          note="Python packages, installed into Studio's own environment.",
+          tip="Makes DepthCrafter and Inpainting about twice as fast when their TensorRT box is on. Each "
+              "builds its engines the first time it meets a new size (kept in trt_engines)."),
 )
 MODELS_BY_KEY: Dict[str, Model] = {m.key: m for m in MODELS}
 
@@ -314,6 +328,11 @@ def status(model: Model) -> Dict[str, object]:
         row["state"] = "installed" if rose_env.ready() else "missing"
         row["where"] = str(rose_env.ROSE_DIR)
         row["size"] = f"{rose_env.DOWNLOAD_GB:.1f} GB"
+        return row
+    if model.kind == "package":
+        row["state"] = "installed" if packages_ready(model) else "missing"
+        row["where"] = _site_packages() if row["state"] == "installed" else ""
+        row["size"] = model.installed_size
         return row
     if model.kind == "bundled":
         own = weights_paths.find("SceneCut", "transnetv2-pytorch-weights.pth")
@@ -498,3 +517,105 @@ def _explain(tail: str) -> str:
 def _eta(seconds: float) -> str:
     m = int(seconds // 60)
     return f"{m // 60} h {m % 60:02d} min" if m >= 60 else (f"{m} min" if m else "a minute")
+
+
+# ---- packages (kind "package") --------------------------------------------------------------
+
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def packages_ready(model: Model) -> bool:
+    """Every module of `model` importable in Studio's environment (found, not imported)."""
+    importlib.invalidate_caches()      # a folder listed before the install would hide what it put there
+    try:
+        return all(importlib.util.find_spec(m) is not None for m in model.modules)
+    except (ImportError, ValueError):
+        return False
+
+
+def _site_packages() -> str:
+    import sysconfig
+    return sysconfig.get_paths().get("purelib", "")
+
+
+def pins(extra: str, lock: Optional[Path] = None) -> List[str]:
+    """The extra's packages at the versions uv.lock pins ("name==version"); bare names without a lock."""
+    import tomllib
+    try:
+        with open(lock or _REPO / "uv.lock", "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, ValueError):
+        data = {}
+    pkgs = data.get("package", [])
+    versions = {p.get("name"): p.get("version") for p in pkgs}
+    for p in pkgs:
+        names = [d.get("name") for d in p.get("optional-dependencies", {}).get(extra, [])]
+        if names and (p.get("source", {}).get("editable") or p.get("source", {}).get("virtual")):
+            return [f"{n}=={versions[n]}" if versions.get(n) else n for n in names]
+    if extra == "tensorrt":
+        return ["tensorrt-cu13", "onnx", "onnxscript"]
+    raise RuntimeError(f"No packages known for '{extra}'.")
+
+
+def _uv() -> List[str]:
+    """uv: on PATH, or where its installer puts it."""
+    found = shutil.which("uv")
+    if found is None:
+        cand = Path.home() / ".local" / "bin" / ("uv.exe" if os.name == "nt" else "uv")
+        found = str(cand) if cand.is_file() else None
+    if found is None:
+        raise RuntimeError("Installing needs uv, the tool Studio's installer and updater use, and it isn't on "
+                           "this PC's PATH. Run the Studio installer again, or install uv from "
+                           "https://docs.astral.sh/uv/ and try once more.")
+    return [found]
+
+
+def install_packages(model: Model, progress: Callable[[float, str], None], stop: threading.Event,
+                     python: Optional[str] = None, poll_s: float = 2.0, procs: Optional[list] = None,
+                     wait: Optional[Callable[[], str]] = None) -> None:
+    """`uv pip install` the model's extra into Studio's environment (or `python`'s). progress(-1, text):
+    uv says no sizes, so the bar has no fraction. `wait()` holds it back while a job runs. Raises
+    Stopped on a Stop (uv's cache keeps what came down), RuntimeError on a failure."""
+    while wait is not None:
+        why = wait()
+        if not why:
+            break
+        progress(-1.0, f"Waiting: {why}")
+        if stop.wait(poll_s):
+            raise Stopped()
+    cmd = [*_uv(), "pip", "install", "--python", python or sys.executable, *pins(model.extra)]
+    logger_line = " ".join(cmd)
+    progress(-1.0, f"{model.name}: starting")
+    env = dict(os.environ, NO_COLOR="1", PYTHONIOENCODING="utf-8")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace", env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if procs is not None:
+        procs.append(proc)
+    lines: List[str] = []
+    reader = threading.Thread(target=lambda: lines.extend(proc.stdout), daemon=True)
+    reader.start()
+    began = time.monotonic()
+    try:
+        while proc.poll() is None:
+            if stop.wait(poll_s):
+                proc.kill()
+                proc.wait()
+                raise Stopped()
+            said = next((s.strip() for s in reversed(lines) if s.strip()), "working")
+            took = int(time.monotonic() - began)
+            progress(-1.0, f"{model.name}: {said[:90]} ({took // 60}:{took % 60:02d})")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        reader.join(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if procs is not None and proc in procs:
+            procs.remove(proc)
+    if proc.returncode != 0:
+        tail = "".join(lines[-8:]).strip()
+        raise RuntimeError(f"Installing {model.name} failed (exit {proc.returncode}).\n\n> {logger_line}\n{tail}")
+    if not packages_ready(model):
+        raise RuntimeError(f"uv finished, but {', '.join(model.modules)} still can't be found in "
+                           f"{_site_packages()}.")
+    progress(1.0, "Installed.")

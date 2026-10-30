@@ -14,6 +14,10 @@ Popup {
     property bool jobRunning: false          // Main binds it
     property string folderError: ""
     property string rowError: ""
+    property string focusKey: ""             // the row a page sent us to, highlighted (showRow)
+    // ...kept in view until the user scrolls: every refresh (the access check's too, a moment after
+    // opening) brings new rows, which put the list back at the top
+    property bool scrollPending: false
     // Sign Out asked first, in Main's prompt (user, 2026-10-20): it signs the whole PC out
     signal askSignOut(var opts)
 
@@ -32,11 +36,31 @@ Popup {
         if (!m) return
         m.refresh()
         if (m.account.state !== "checking") m.checkAccount()
+        if (scrollPending) Qt.callLater(scrollToFocus)
     }
 
     Connections {
         target: dlg.m
         function onToast(kind, title, text) { Theme.toast(kind, title, text) }
+    }
+    Connections {
+        target: Theme
+        function onModelsRequested(key) { dlg.showRow(key) }
+    }
+    onClosed: { focusKey = ""; scrollPending = false }
+
+    // open at one model's row, highlighted (Theme.needModel: a TensorRT box without TensorRT)
+    function showRow(key) {
+        focusKey = key
+        scrollPending = true
+        if (opened) Qt.callLater(scrollToFocus)
+        else open()
+    }
+    function scrollToFocus() {
+        const rows = dlg.m ? dlg.m.rows : []
+        const i = rows.findIndex(r => r.key === dlg.focusKey)
+        if (i >= 0 && list.height > 0 && list.count === rows.length)
+            list.positionViewAtIndex(i, ListView.Center)
     }
 
     FolderPicker {
@@ -309,15 +333,22 @@ Popup {
                 spacing: 8
                 Bar {
                     objectName: "modelsProgress"
+                    visible: (dlStrip.dl.progress || 0) >= 0
                     Layout.fillWidth: true
                     value: dlStrip.dl.progress || 0
+                }
+                // an install (TensorRT, 2026-10-29): uv says no sizes, so no fraction
+                IndeterminateBar {
+                    visible: (dlStrip.dl.progress || 0) < 0
+                    running: visible
+                    Layout.fillWidth: true
                 }
                 AccentButton {
                     objectName: "modelsStop"
                     text: "Stop"
                     kind: "ghost"
                     onClicked: dlg.m.stop()
-                    HoverTip { tip: "Stops the download (and the queue). What came down is kept: the next Download carries on from there." }
+                    HoverTip { tip: "Stops the download or install (and the queue). What came down is kept: the next Download carries on from there." }
                 }
             }
             Small {
@@ -353,6 +384,10 @@ Popup {
             clip: true
             spacing: 2
             model: dlg.m ? dlg.m.rows : []
+            onCountChanged: if (dlg.scrollPending) Qt.callLater(dlg.scrollToFocus)
+            onModelChanged: if (dlg.scrollPending) Qt.callLater(dlg.scrollToFocus)
+            onHeightChanged: if (dlg.scrollPending) Qt.callLater(dlg.scrollToFocus)
+            onMovementStarted: dlg.scrollPending = false
             ScrollBar.vertical: SlimScrollBar {}
             delegate: Rectangle {
                 id: rowItem
@@ -363,7 +398,10 @@ Popup {
                 width: ListView.view.width - 10
                 implicitHeight: rowLay.implicitHeight + 16
                 radius: 8
-                color: rowHover.hovered ? Theme.hover : "transparent"
+                color: rowItem.r.key === dlg.focusKey ? Theme.alpha(Theme.accent, 0.14)
+                     : rowHover.hovered ? Theme.hover : "transparent"
+                border.width: rowItem.r.key === dlg.focusKey ? 1 : 0
+                border.color: Theme.accent
                 HoverHandler { id: rowHover }
                 RowLayout {
                     id: rowLay
@@ -419,7 +457,8 @@ Popup {
                     Text {
                         objectName: "modelsState_" + rowItem.r.key
                         Layout.preferredWidth: 90
-                        text: rowItem.r.downloading ? "Downloading" : rowItem.r.queued ? "Queued"
+                        text: rowItem.r.downloading ? (rowItem.r.kind === "package" ? "Installing" : "Downloading")
+                            : rowItem.r.queued ? "Queued"
                             : rowItem.here ? "Installed" : rowItem.r.state === "partial" ? "Partly here" : "Missing"
                         color: rowItem.here ? Theme.success : rowItem.r.downloading || rowItem.r.queued ? Theme.accentInk
                              : Theme.warning
@@ -436,13 +475,15 @@ Popup {
                             spacing: 6
                             AccentButton {
                                 objectName: "modelsDownload_" + rowItem.r.key
-                                visible: rowItem.r.kind === "download" && !rowItem.here && !rowItem.r.downloading
-                                         && !rowItem.r.queued && rowItem.r.access !== "request"
-                                text: "Download"
+                                visible: (rowItem.r.kind === "download" || rowItem.r.kind === "package") && !rowItem.here
+                                         && !rowItem.r.downloading && !rowItem.r.queued && rowItem.r.access !== "request"
+                                text: rowItem.r.kind === "package" ? "Install" : "Download"
                                 kind: "outline"
                                 iconGlyph: Theme.icon.importIcon
                                 onClicked: dlg.rowError = dlg.m.start(rowItem.r.key)
-                                HoverTip { tip: rowItem.r.left + " into " + (dlg.m ? dlg.m.folder : "") + (dlg.jobRunning ? ". A job is running: it starts once that has finished." : ".") }
+                                HoverTip { tip: (rowItem.r.kind === "package" ? "About " + rowItem.r.size + " into Studio's own environment, the versions Studio was tested with"
+                                                 : rowItem.r.left + " into " + (dlg.m ? dlg.m.folder : ""))
+                                                + (dlg.jobRunning ? ". A job is running: it starts once that has finished." : ".") }
                             }
                             AccentButton {
                                 visible: rowItem.r.queued

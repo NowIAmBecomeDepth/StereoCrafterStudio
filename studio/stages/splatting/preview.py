@@ -95,6 +95,27 @@ def same_clip(entries, path: str, key: str = "source_video") -> str:
     return str(path)
 
 
+def pick_depth(depth, fx: float, fy: float, shown_aspect: float = 0.0) -> Optional[float]:
+    """The depth under a click, for the Convergence picker (user, 2026-10-29): `depth` the frame's
+    depth as the warp sees it (HxW, 0..1), (fx, fy) the click as fractions of the picture shown. A
+    picture twice the depth's aspect is a side-by-side pair: either half maps onto the frame (the
+    other eye's half is off by that point's disparity). The median of a patch ~2% of the width
+    across, so a click near an edge doesn't catch what is behind it."""
+    import numpy as np
+    d = np.asarray(depth, dtype=np.float32)
+    if d.ndim == 3:
+        d = d[..., 0]
+    if d.ndim != 2 or d.size == 0:
+        return None
+    h, w = d.shape
+    if shown_aspect > 0 and abs(shown_aspect / (w / h) - 2.0) < 0.1:
+        fx = (fx * 2.0) % 1.0
+    x = min(w - 1, max(0, int(fx * w)))
+    y = min(h - 1, max(0, int(fy * h)))
+    r = max(1, int(round(w * 0.01)))
+    return float(np.median(d[max(0, y - r):y + r + 1, max(0, x - r):x + r + 1]))
+
+
 def _left_overlay_hook(overlay, flip: bool):
     """The Depth Map Editor's masks over the 3D view's LEFT eye (render_external; user, 2026-10-25):
     `overlay` = (colour HxWx3, strength HxW), float 0..1 at the frame's size -- fitted to the eye the
@@ -191,6 +212,8 @@ class SplattingPreview(QObject):
     statusMessage = Signal(str)            # v1's status label
     singleReady = Signal("QVariantMap")    # SINGLE: the clip's paths, the test setup
     autoConvRunning = Signal(bool)
+    #: The Convergence picker's value: the depth under the click (pickConvergence)
+    convergencePicked = Signal(float)
     settingsWritten = Signal("QVariantMap")
     toast = Signal(str, str, str)
     #: Hole Shift / Detect Text ("holeshift" | "submask"): the editor's
@@ -583,6 +606,13 @@ class SplattingPreview(QObject):
     def estimateDepthPop(self) -> None:
         """v1 run_estimate_dp_total_max (the ≈ button)."""
         self._submit("estimate")
+
+    @Slot(float, float)
+    def pickConvergence(self, fx: float, fy: float) -> None:
+        """A click on the picture with the Convergence picker armed, as fractions of it:
+        convergencePicked follows with the depth there."""
+        aspect = self._image_w / self._image_h if self._image_w > 0 and self._image_h > 0 else 0.0
+        self._submit("pick_conv", (float(fx), float(fy), aspect))
 
     def prepare_single(self, test: str) -> None:
         """SINGLE: the clip on screen (and, for Map/Splat Test, v1's
@@ -1141,6 +1171,10 @@ class SplattingPreview(QObject):
             eng.on_auto_convergence_mode_select(None)
         elif kind == "estimate":
             eng.run_estimate_dp_total_max()
+        elif kind == "pick_conv":
+            state = self._state(eng, pv, kind)
+            state["picked"] = self._pick_convergence(eng, pv, arg)
+            return state
         elif kind in ("sidecars_d2s", "sidecars_s2d"):
             from . import preview_engine as PE
             PE.messagebox.answer = True        # QML asked v1's "Continue?" first
@@ -1213,6 +1247,24 @@ class SplattingPreview(QObject):
             if pv.source_readers and kind not in ("render", "seek"):
                 pv.update_preview()
         return self._state(eng, pv, kind)
+
+    def _pick_convergence(self, eng, pv, arg) -> Optional[float]:
+        """The depth under the click at the frame on screen, as the warp sees it: the render's own
+        depth steps with this frame's settings (Gamma, normalisation, Dilate, Blur), stopped before
+        the warp (the engine's _pick_only, see gen PATCHES). Nothing drawn, nothing cached."""
+        if not pv.source_readers:
+            return None
+        fx, fy, aspect = arg
+        if pv.get_params_callback:
+            pv.current_params = pv.get_params_callback()
+        eng._pick_depth = None
+        eng._pick_only = True
+        try:
+            pv._process_frame_for_preview(int(pv.frame_scrubber_var.get() or 0), source_frames={})
+        finally:
+            eng._pick_only = False
+        depth, eng._pick_depth = eng._pick_depth, None
+        return None if depth is None else pick_depth(depth, fx, fy, aspect)
 
     def _clip_info(self, eng, pv, info: Dict[str, Any]) -> Dict[str, Any]:
         """Current Clip Info for the clip the preview shows (user, 2026-09-27:
@@ -1592,6 +1644,11 @@ class SplattingPreview(QObject):
             self.autoConvRunning.emit(False)
         if result["kind"] == "single":
             self.singleReady.emit(result.get("single") or {})
+        if result["kind"] == "pick_conv":
+            if result.get("picked") is None:
+                self.toast.emit("error", "Convergence not picked", "The depth there could not be read (see the console).")
+            else:
+                self.convergencePicked.emit(float(result["picked"]))
         if not self._loaded:
             self.provider.put("frame", None)
             self._image_w = self._image_h = 0

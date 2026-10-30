@@ -68,6 +68,17 @@ Section {
     readonly property var ticks: src ? src.checked : []
     readonly property int picked: src ? src.checkedCount : 0
     readonly property bool moving: !!src && src.moving
+    // Shift+click (a tester, 2026-10-29): every row from the last one ticked or unticked to this
+    // one takes this one's new state. The anchor is a path, so a rescan can't point it elsewhere.
+    property string tickAnchor: ""
+    function tickTo(index) {
+        if (!src || busy || moving || index < 0 || index >= paths.length) return
+        const on = !ticks[index]
+        const a = paths.indexOf(tickAnchor)
+        const lo = a < 0 ? index : Math.min(a, index), hi = a < 0 ? index : Math.max(a, index)
+        src.setCheckedMany(paths.slice(lo, hi + 1), on)
+        tickAnchor = paths[index]
+    }
     Connections {
         target: queue.src
         function onMovedToFinished(moved, left) {
@@ -160,15 +171,20 @@ Section {
     onBusyChanged: {
         if (busy) { done = ({}); worked = ({}); lastRunning = "" }
         batchKey = pathsKey       // the clips the batch ran over (held while it runs)
+        batchPaths = paths.slice()
         countStale = false
     }
     // The batch's count stays up after it ends -- until the list holds other
     // clips (a new batch loaded): then it's "—" until the next run (user,
-    // 2026-10-05: the last batch's 29 / 29 sat over a new batch of 40).
+    // 2026-10-05: the last batch's 29 / 29 sat over a new batch of 40). Clips
+    // that only LEFT the list (the batch moved them to finished, and the list is
+    // read again after every job) keep it.
     readonly property string pathsKey: src ? JSON.stringify(paths) : ""
     property string batchKey: ""
+    property var batchPaths: []
     property bool countStale: false
-    onPathsKeyChanged: if (!busy && batchKey !== "" && pathsKey !== batchKey) countStale = true
+    onPathsKeyChanged: if (!busy && batchKey !== "" && pathsKey !== batchKey
+                           && paths.some(p => batchPaths.indexOf(p) < 0)) countStale = true
     function markWorked() {
         const k = keyOf(running)
         if (running !== "" && (trustRunning || working) && !worked[k]) {
@@ -607,8 +623,21 @@ Section {
                     checked: !!queue.ticks[row.index]
                     enabled: !queue.busy && !queue.moving && row.path !== ""
                     Layout.alignment: Qt.AlignVCenter
-                    onClicked: queue.src.setChecked(row.path, !checked)
-                    HoverTip { tip: "Tick to include this clip in Process Selected or Move to Finished." }
+                    onClicked: { queue.src.setChecked(row.path, !checked); queue.tickAnchor = row.path }
+                    // Shift+click: the run from the last tick to here. On a layer over the box, so it
+                    // takes the press before the box does (check_clip_select: the run, and only once)
+                    Item {
+                        anchors.fill: parent
+                        TapHandler {
+                            objectName: "jobQueueCheckShift"
+                            acceptedModifiers: Qt.ShiftModifier
+                            gesturePolicy: TapHandler.ReleaseWithinBounds
+                            enabled: tick.enabled
+                            onTapped: queue.tickTo(row.index)
+                        }
+                    }
+                    HoverTip { tip: "Tick to include this clip in Process Selected or Move to Finished. "
+                                    + "Shift+click ticks every clip from the last one you ticked to this one." }
                 }
                 // its place in the batch (user, 2026-09-28), before the still;
                 // wide enough for the list's biggest number so the stills line up
@@ -768,7 +797,15 @@ Section {
             HoverHandler { id: rowHover; enabled: !queue.busy && !Theme.modalOpen; cursorShape: queue.pv ? Qt.PointingHandCursor : Qt.ArrowCursor }
             TapHandler {
                 enabled: !queue.busy && !!queue.pv && !Theme.modalOpen
+                acceptedModifiers: Qt.NoModifier
                 onTapped: queue.pv.showClip(row.path)
+            }
+            // Shift+click on the row ticks a run too, as on its box
+            TapHandler {
+                objectName: "jobQueueRowShift"
+                enabled: !queue.busy && !queue.moving && row.path !== "" && !Theme.modalOpen
+                acceptedModifiers: Qt.ShiftModifier
+                onTapped: queue.tickTo(row.index)
             }
             // open during a job too: Play is only a look (the actions wait for the job)
             TapHandler {

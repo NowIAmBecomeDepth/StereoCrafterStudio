@@ -204,8 +204,9 @@ def discover_sources(input_path_str: str) -> Tuple[List[Dict[str, str]], bool]:
         raise InputError(f"Could not read directory contents for '{input_path_str}':\n{e}")
     # os.listdir's order is the file system's, not the name order Upcoming Jobs
     # shows (clip_queue.dc_clips): sorted the same way, the batch starts at the
-    # top of the list instead of part-way down it
-    specs.sort(key=lambda s: os.path.basename(s["path"]).lower())
+    # top of the list instead of part-way down it; in number order, clip_110 before clip_1009
+    from core.common.clip_names import natural_key
+    specs.sort(key=lambda s: natural_key(os.path.basename(s["path"])))
     return specs, False
 
 
@@ -339,6 +340,12 @@ class DepthCrafterRunner:
                 use_sageattention=o["use_sageattention_var"],
             )
             demo.stop_event = self.stop_now  # Stop now ends the clip at its next step (#13)
+            if o.get("use_tensorrt_var"):  # 2026-10-29: the log says why when it can't
+                from pipelines.trt_unet import DepthCrafterTensorRT, enable_tensorrt
+                offload = o["cpu_offload"] if o["cpu_offload"] in ("model", "sequential") else "none"
+                enable_tensorrt(demo.pipe, int(o["window_size"]), o["use_sageattention_var"], offload,
+                                kind=DepthCrafterTensorRT, logger=_logger, stage="DepthCrafter",
+                                trt_unet=bool(o.get("use_tensorrt_unet_var")))
             self._capped = self._cap_vram(True)
         except Exception as e:
             _logger.exception(f"CRITICAL: Failed to initialize DepthCrafterDemo: {e}")
@@ -600,6 +607,8 @@ class DepthCrafterRunner:
             try:
                 pipe = getattr(demo, "pipe", None)
                 if pipe is not None:
+                    from pipelines.trt_unet import release_tensorrt
+                    release_tensorrt(pipe)  # its counts in the log, its engines freed (2026-10-29)
                     for part in ("vae", "unet"):
                         if getattr(pipe, part, None) is not None:
                             delattr(pipe, part)

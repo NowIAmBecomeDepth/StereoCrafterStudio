@@ -59,6 +59,28 @@ def tensor2vid(video: torch.Tensor, processor, output_type="np"):
     return outputs
 
 
+#: The VRAM a decode takes per output pixel: 11.2 GB at 1840x768, 25 frames, decode_chunk_size 2 (a user's
+#: 5090, 2026-10-29), and a quarter more besides before the UNet and CLIP stay put for it.
+_DECODE_BYTES_PER_PIXEL = 11.2 * 2**30 / (1840 * 768)
+_DECODE_MARGIN = 1.25
+
+
+def _decode_fits(latents, device) -> bool:
+    """Room on the VAE's GPU for decoding `latents` with everything else where it is: what the driver has
+    free plus what torch holds and isn't using."""
+    device = torch.device(device)
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return True
+    h, w = int(latents.shape[-2]) * 8, int(latents.shape[-1]) * 8
+    need = h * w * _DECODE_BYTES_PER_PIXEL * _DECODE_MARGIN
+    try:
+        free, _total = torch.cuda.mem_get_info(device)
+        free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+    except Exception:
+        return False
+    return free >= need
+
+
 def encode_frames_upcast_on_overflow(vae, encode, frames: torch.Tensor) -> torch.Tensor:
     """``encode(frames)`` with the VAE in its own fp16, the frames cast to match.
 
@@ -215,11 +237,12 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
         self, frames: torch.Tensor, device, num_videos_per_prompt, do_classifier_free_guidance, n_frames_per_time=5
     ):
         frames = frames.to(device=device)  # f c h w
+        encode = self.tensorrt.vae_encode if self.tensorrt is not None else self.vae.encode
 
         # self.vae.to(device=device,dtype=torch.float16)
         latent_list = []
         for i in range(0, frames.shape[0], n_frames_per_time):
-            frame_latent = self.vae.encode(frames[i : i + n_frames_per_time]).latent_dist.mode()
+            frame_latent = encode(frames[i : i + n_frames_per_time]).latent_dist.mode()
             latent_list.append(frame_latent)
         frame_latents = torch.cat(latent_list, dim=0).unsqueeze(0)
 
@@ -279,15 +302,32 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
 
         return add_time_ids
 
-    #: Set by load_inpainting_pipeline for offload "none": see decode_latents.
+    #: Set by load_inpainting_pipeline for offload "none": see decode_latents. True parks for every
+    #: decode, "auto" only when the decode wouldn't fit beside the UNet and CLIP (_decode_fits).
     park_idle_for_decode = False
+    _parked_last = None
+    #: pipelines.trt_unet.TensorRT while Inpainting's TensorRT box is on (2026-10-29): the denoise, the
+    #: encode and the decode call it instead of the UNet and VAE. Asked at the call: diffusers puts model
+    #: offload's hooks back after every call, which would undo a replaced forward.
+    tensorrt = None
 
     def decode_latents(self, latents, num_frames, decode_chunk_size=14):
         """With offload "none" the UNet and CLIP stay on the GPU through the
         full-frame decode, and at 1408x768 that overflowed 16 GB into shared
         memory and crawled (2026-10-09). Park them in RAM for the decode only:
-        one move per chunk, where model offload moves them for every tile."""
-        if not self.park_idle_for_decode:
+        one move per chunk, where model offload moves them for every tile.
+        A card with room for the decode beside them keeps them (a user, 2026-10-29:
+        parking cost 0.93 s a chunk and 3 GB of RAM traffic each way on a 32 GB card).
+        Asked of the free memory, not by the card's size: Windows spills into shared
+        memory instead of running out, so trying and parking on failure never fails."""
+        park = self.park_idle_for_decode
+        if park == "auto":
+            park = not _decode_fits(latents, self.vae.device)
+            if park != self._parked_last:
+                self._parked_last = park
+                logger.info("Decode: " + ("UNet and CLIP parked in RAM -- not enough free VRAM beside them."
+                                          if park else "UNet and CLIP stay on the GPU (room for the decode beside them)."))
+        if not park:
             return self._decode_latents(latents, num_frames, decode_chunk_size)
         parked = [(m, m.device) for m in (self.unet, self.image_encoder) if m.device.type == "cuda"]
         for m, _ in parked:
@@ -309,6 +349,7 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
         accepts_num_frames = "num_frames" in set(inspect.signature(forward_vae_fn).parameters.keys())
 
         # decode decode_chunk_size frames at a time to avoid OOM
+        decode = self.tensorrt.vae_decode if self.tensorrt is not None else self.vae.decode
         frames = []
         for i in range(0, latents.shape[0], decode_chunk_size):
             num_frames_in = latents[i : i + decode_chunk_size].shape[0]
@@ -317,7 +358,7 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
                 # we only pass num_frames_in if it's expected
                 decode_kwargs["num_frames"] = num_frames_in
 
-            frame = self.vae.decode(latents[i : i + decode_chunk_size], **decode_kwargs).sample
+            frame = decode(latents[i : i + decode_chunk_size], **decode_kwargs).sample
             frames.append(frame)
         frames = torch.cat(frames, dim=0)
 
@@ -598,6 +639,7 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
         # 8. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
+        denoise = self.tensorrt.unet if self.tensorrt is not None else self.unet
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
@@ -609,7 +651,7 @@ class StableVideoDiffusionInpaintingPipeline(DiffusionPipeline):
 
                 # predict the noise residual
                 # print(f'latent_model_input: {latent_model_input.dtype}, image_embeddings: {image_embeddings.dtype}, t: {t.dtype},added_time_ids:{added_time_ids.dtype} ')
-                noise_pred = self.unet(
+                noise_pred = denoise(
                     latent_model_input,
                     t,
                     encoder_hidden_states=image_embeddings,
@@ -866,7 +908,7 @@ def load_inpainting_pipeline(
     elif offload_type == "sequential":
         pipeline.enable_sequential_cpu_offload()
     elif offload_type == "none":
-        pipeline.park_idle_for_decode = True  # only the decode needs the room
+        pipeline.park_idle_for_decode = "auto"  # only the decode needs the room, and only when it's short
     else:
         raise ValueError("Invalid offload_type")
 

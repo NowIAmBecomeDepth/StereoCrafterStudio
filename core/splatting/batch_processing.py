@@ -415,7 +415,10 @@ class BatchProcessor:
                 result.input_videos.extend(glob.glob(os.path.join(input_source, ext)))
             # Detect Text's <clip>_submask.mp4 sits beside the clips: not a clip
             from core.common.submask_files import is_subtitle_mask
-            result.input_videos = sorted(v for v in result.input_videos if not is_subtitle_mask(v))
+            # in number order, clip_110 before clip_1009, as Upcoming Jobs lists them (user, 2026-10-29)
+            from core.common.clip_names import natural_key
+            result.input_videos = sorted((v for v in result.input_videos if not is_subtitle_mask(v)),
+                                         key=lambda p: natural_key(os.path.basename(p)))
 
         else:
             result.error = (
@@ -1033,6 +1036,7 @@ class BatchProcessor:
                 pre_res_width=task.target_width,
                 pre_res_height=task.target_height,
                 strict_ffmpeg_decode=settings.strict_ffmpeg_decode,
+                high_bit_source=True,      # a 10-bit source warped at 10 bits, not Decord's 8
             )
 
             # Depth reader setup

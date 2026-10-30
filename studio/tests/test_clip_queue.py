@@ -94,27 +94,103 @@ class HeldQueueTests(unittest.TestCase):
         self.assertTrue(pump(lambda: self.q.property("clipPaths") == ["c.mp4"], 3),
                         f"the change was lost: {self.q.property('clipPaths')}")
 
-    def test_no_rescan_after_a_job_nothing_asked_for(self):
+    def test_the_list_is_read_again_after_a_job(self):
+        """A tester (2026-10-29): Splatting's and Merging's list didn't update after a job."""
         self.scanned()
         self.q.hold(True)
-        self.folder = []                    # the batch moved its clips to finished/
+        self.folder = ["b.mp4"]             # the batch moved a.mp4 to finished/
         self.q.hold(False)
-        pump(lambda: False, 0.6)
-        self.assertEqual(self.q.property("clipPaths"), ["a.mp4", "b.mp4"],
-                         "the finished job's rows should stay until something asks for a rescan")
+        self.assertTrue(pump(lambda: self.q.property("clipPaths") == ["b.mp4"], 3),
+                        f"the finished clip is still listed: {self.q.property('clipPaths')}")
 
-
-    def test_a_badge_refresh_mid_job_keeps_the_rows(self):
+    def test_a_badge_refresh_mid_job_waits_for_the_job(self):
         self.scanned()
         self.q.hold(True)
-        self.folder = []                    # clips moved to finished/ by the batch
         Q.merge_fx = lambda values, paths: [[True] for _ in paths]   # a sidecar saved mid-job
         self.q.refreshFx()
         self.assertEqual(self.q.property("clipFx"), [[False], [False]], "badges changed mid-job")
         self.q.hold(False)
-        pump(lambda: False, 0.6)
-        self.assertEqual(self.q.property("clipPaths"), ["a.mp4", "b.mp4"], "the rows went: a full rescan ran")
-        self.assertEqual(self.q.property("clipFx"), [[True], [True]], "the badges were not re-read")
+        self.assertTrue(pump(lambda: self.q.property("clipFx") == [[True], [True]], 3), "the badges were not re-read")
+
+    def test_shift_click_ticks_a_run_at_once(self):
+        self.folder = ["a.mp4", "b.mp4", "c.mp4"]
+        self.scanned()
+        seen = []
+        self.q.checkedChanged.connect(lambda: seen.append(1))
+        self.q.setCheckedMany(["a.mp4", "b.mp4"], True)
+        self.assertEqual(self.q.property("checked"), [True, True, False])
+        self.assertEqual(len(seen), 1, "one change for the run, not one a row")
+        self.q.setCheckedMany(["a.mp4", "b.mp4"], True)
+        self.assertEqual(len(seen), 1, "nothing changed: no signal")
+        self.q.setCheckedMany(["b.mp4", "c.mp4"], False)
+        self.assertEqual(self.q.property("checked"), [True, False, False])
+
+
+class NaturalOrderTests(unittest.TestCase):
+    """A tester (2026-10-29): DepthCrafter listed clip_1100 next to clip_110, not after clip_1009."""
+
+    def test_numbers_sort_as_numbers(self):
+        from core.common.clip_names import natural_key
+        names = ["clip_1100.mp4", "clip_110.mp4", "Clip_9.mp4", "clip_1009.mp4", "clip_10.mp4", "intro.mp4"]
+        self.assertEqual(sorted(names, key=natural_key),
+                         ["Clip_9.mp4", "clip_10.mp4", "clip_110.mp4", "clip_1009.mp4", "clip_1100.mp4", "intro.mp4"])
+
+    def test_depthcrafter_lists_and_runs_in_that_order(self):
+        from studio.stages.depthcrafter.runner import discover_sources
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("clip_1100.mp4", "clip_110.mp4", "clip_1009.mp4"):
+                Path(d, n).write_bytes(b"")
+            want = ["clip_110.mp4", "clip_1009.mp4", "clip_1100.mp4"]
+            specs, _single = discover_sources(d)
+            self.assertEqual([os.path.basename(s["path"]) for s in specs], want)
+            self.assertEqual([os.path.basename(p) for p in Q.dc_clips({"input_dir_or_file_var": d})], want)
+
+    def test_every_stage_lists_and_runs_in_that_order(self):
+        """User, 2026-10-29: every stage by number, not DepthCrafter only -- each list, and each
+        batch in the same order (Splatting's setup, Inpainting V2's gather, Inpainting V1's and
+        Merging's run_batch_process)."""
+        import types
+        nums = ("1100", "110", "1009")
+        want = ["110", "1009", "1100"]
+        num = lambda p: os.path.splitext(os.path.basename(p))[0].split("_")[1]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            for sub in ("src", "depth", "lowres", "inpainted", "mask"):
+                (d / sub).mkdir()
+            for n in nums:
+                (d / "src" / f"clip_{n}.mp4").write_bytes(b"")
+                (d / "depth" / f"clip_{n}_depth.mp4").write_bytes(b"")
+                (d / "lowres" / f"clip_{n}_640_splatted2.mp4").write_bytes(b"")
+                (d / "inpainted" / f"clip_{n}_640_inpainted_right_eye.mp4").write_bytes(b"")
+                (d / "mask" / f"clip_{n}_640_splatted2.mp4").write_bytes(b"")
+            pairs = Q.splat_pairs({"input_source_clips": str(d / "src"), "input_depth_maps": str(d / "depth")})
+            self.assertEqual([num(v) for v, _p in pairs], want, "Splatting's list")
+            self.assertEqual([num(p) for p in Q.inpaint_clips({"input_folder": str(d / "lowres")})], want,
+                             "Inpainting's list")
+            self.assertEqual([num(p) for p in Q.inpaint_v2_clips({"input_folder": str(d / "lowres")})], want,
+                             "Inpainting V2's list")
+            self.assertEqual([num(p) for p in Q.merge_clips({"inpainted_folder": str(d / "inpainted"),
+                                                              "mask_folder": str(d / "mask")})], want,
+                             "Merging's list")
+            # the batches
+            import queue
+            import threading
+            from core.splatting.batch_processing import BatchProcessor
+            bp = BatchProcessor(queue.Queue(), threading.Event())
+            setup = bp.setup_batch_processing(types.SimpleNamespace(
+                input_source_clips=str(d / "src"), input_depth_maps=str(d / "depth"),
+                output_splatted=str(d / "out"), move_to_finished=False))
+            self.assertEqual([num(p) for p in setup.input_videos], want, "Splatting's batch")
+            from studio.stages.inpainting_v2 import engine as V2E
+            self.assertEqual([num(p) for p in V2E.WanInpaintRunner._gather_videos(None, str(d / "lowres"))], want,
+                             "Inpainting V2's batch")
+        # Inpainting V1's and Merging's batch lists are made inside run_batch_process: their sort, in the
+        # generated engines (test_inpainting / test_merging SyncTest prove the engines are the generators')
+        for mod, line in (("studio/stages/inpainting/engine.py",
+                           "input_videos.sort(key=lambda p: natural_key(os.path.basename(p)))"),
+                          ("studio/stages/merging/engine.py",
+                           "inpainted_videos.sort(key=lambda p: natural_key(os.path.basename(p)))")):
+            self.assertIn(line, (REPO / mod).read_text(encoding="utf-8"), mod)
 
 class MultiMapFoldersTests(unittest.TestCase):
     """user 2026-09-29: the Depth Map Editor's edit_history (the maps Use in

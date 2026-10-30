@@ -113,6 +113,22 @@ check("Select All ticks every clip", jc.property("checked") == [True, True])
 click(one(sq, "queueSelectNone"))
 check("Deselect All clears them", jc.property("checked") == [False, False]
       and one(sq, "queueProcessSelected").property("enabled") is False)
+# Shift+click (a tester, 2026-10-29): the run from the last tick to here
+def shift_click(item):
+    c = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+    QTest.mouseClick(win, Qt.LeftButton, Qt.ShiftModifier, QPoint(int(c.x()), int(c.y())))
+    pump(0.3)
+click(one(row_of(sq, "clipA"), "jobQueueCheck"))
+was_loaded = pv.property("loaded"), pv.property("videoIndex")
+name_b = one(row_of(sq, "clipB"), "jobQueueName")
+shift_click(name_b)
+check("Shift+click on clipB's row ticks clipA through clipB", jc.property("checked") == [True, True], str(jc.property("checked")))
+pump(1.0)
+check("...and doesn't load it into the preview", (pv.property("loaded"), pv.property("videoIndex")) == was_loaded)
+click(one(row_of(sq, "clipA"), "jobQueueCheck"))                  # untick A: the anchor is A again
+shift_click(one(row_of(sq, "clipB"), "jobQueueCheck"))
+check("Shift+click on clipB's ticked box unticks clipA through clipB (once: the box and the row don't both act)",
+      jc.property("checked") == [False, False], str(jc.property("checked")))
 click(one(row_of(sq, "clipB"), "jobQueueCheck"))
 run_to_end(sp, lambda: click(one(sq, "queueProcessSelected")))
 outs = sorted(os.path.basename(p) for p in glob.glob(str(FIX / "out" / "**" / "*.mp4"), recursive=True))

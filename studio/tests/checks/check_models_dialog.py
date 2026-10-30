@@ -128,6 +128,20 @@ check("...where Scene Cut now finds it", D.DETECTORS["OmniShotCut"].weights_path
 pump(0.3)
 check("...and the row says Installed", named("modelsState_omnishotcut").property("text") == "Installed")
 
+# ---- TensorRT (2026-10-29): packages, not weights -- an Install, never run here
+_real_ready = C.packages_ready
+C.packages_ready = lambda m: False
+models.refresh(); pump(0.3)
+_ix = [m.key for m in C.MODELS].index("tensorrt")
+QMetaObject.invokeMethod(named("modelsList"), "positionViewAtIndex", Q_ARG(int, _ix), Q_ARG(int, 0)); pump(0.4)
+inst = named("modelsDownload_tensorrt")
+check("TensorRT missing: an Install button", inst is not None and inst.isVisible() and inst.property("text") == "Install",
+      str(inst and inst.property("text")))
+check("...the row says Missing, 2.3 GB", named("modelsState_tensorrt").property("text") == "Missing"
+      and row("tensorrt")["size"] == "2.3 GB")
+C.packages_ready = _real_ready
+models.refresh(); pump(0.3)
+
 # ---- during a job
 mg = objs["Merging"]
 _fixtures.fake_busy(mg, True); pump(0.4)

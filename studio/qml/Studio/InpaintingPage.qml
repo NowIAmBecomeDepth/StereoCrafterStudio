@@ -293,10 +293,25 @@ ChangeFoldersButton {
                         }
                         PairRow {
                             // Torch Compile where Single Clip ID was (user, 2026-10-11: Upcoming Jobs'
-                            // Inpaint This Clip Now does one clip better); it was File > Optimise Model
-                            IpCheck {
-                                key: "use_compile"; text: "Torch Compile"; Layout.preferredWidth: 1
-                                help: "Compiles the model for this GPU when a run starts: each chunk is about 13% faster (with SageAttention), but the first chunk of each run takes about 10 minutes longer while it compiles. Worth it for long unattended runs such as a whole chapter, not for a clip or two."
+                            // Inpaint This Clip Now does one clip better); it was File > Optimise Model.
+                            // TensorRT beside it (user, 2026-10-29): the two don't go together, so either
+                            // one ticked hides the other (both shown if a saved config has both on)
+                            RowLayout {
+                                Layout.fillWidth: true; Layout.preferredWidth: 1
+                                spacing: 16
+                                IpCheck {
+                                    key: "use_compile"; text: "Torch Compile"
+                                    shown: !page.st.use_tensorrt || !!page.st.use_compile
+                                    help: "Compiles the model for this GPU when a run starts: each chunk is about 13% faster (with SageAttention), but the first chunk of each run takes about 10 minutes longer while it compiles. Worth it for long unattended runs such as a whole chapter, not for a clip or two. TensorRT is hidden while this is on: the two don't go together."
+                                }
+                                IpCheck {
+                                    key: "use_tensorrt"; text: "TensorRT"
+                                    shown: !page.st.use_compile || !!page.st.use_tensorrt
+                                    // not installed: to Settings > Studio > Models to install it (user, 2026-10-29)
+                                    guard: () => Theme.needModel("tensorrt", "TensorRT isn't installed yet",
+                                                                 "Install NVIDIA TensorRT here, then tick TensorRT again.")
+                                    help: "Runs the model through NVIDIA TensorRT: chunks are about 1.5 to 1.8 times faster, against Torch Compile's 13%. The first chunk at a new frame or tile size waits a few minutes while its engines are built (about 3 GB of disk per size, kept in trt_engines and reused).\n\nThe normal way (PyTorch with SageAttention, compiled or not) is slightly more accurate. TensorRT works in half precision, so its fill comes out a touch different: on average under half a level out of 255 inside the holes, about a fifth of a level along their edges. That is far below what the eye can see, even flipping between the two, and the rest of the frame is untouched.\n\nNeeds TensorRT installed once (Settings > Studio > Models: NVIDIA TensorRT, Install); without it Inpainting runs the normal way. Torch Compile is hidden while this is on: the two don't go together."
+                                }
                             }
                             Half { label: "Inpaint Pre Thresh"; shown: !page.bh["inp.pre_thresh"]; help: page.help("inpaint_mask_initial_threshold"); IpBox { key: "inpaint_mask_initial_threshold" } }
                         }

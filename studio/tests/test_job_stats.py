@@ -342,6 +342,46 @@ class TailTimingTests(unittest.TestCase):
         self.assertAlmostEqual(hook2._tail_for("1920x1038"), 1.2, msg="kept for the next run")
         hook2.restore()
 
+    def test_a_streamed_hires_encode_ends_the_tail_too(self):
+        """Since 2026-10-29 the Hi-Res frames are encoded as they're made: the clip's encode ends in
+        finish_streamed_encode, not encode_frames_to_mp4 -- timed the same."""
+        import logging
+        import types
+        from unittest import mock
+        from studio import job_stats as J
+
+        log = logging.getLogger("test.inpaint.tail.streamed")
+        log.setLevel(logging.INFO)
+        clock = [100.0]
+        rates = []
+        fake = types.SimpleNamespace(logger=log)
+        fake.spatial_tiled_process = lambda *a, **k: "latents"
+        fake.encode_frames_to_mp4 = lambda *a, **k: True
+        finish = lambda *a, **k: True          # noqa: E731
+        fake.finish_streamed_encode = finish
+
+        class FakeEngine:
+            def process_single_video(self, **kw):
+                log.info("Hi-Res blending enabled. Target resolution: 2560x1080")
+                fake.spatial_tiled_process()
+                clock[0] += 50
+                fake.finish_streamed_encode()
+                return True, None
+
+        fake.InpaintingEngine = FakeEngine
+        stats = JobStats()
+        stats.tail_rate = rates.append
+        with mock.patch.object(J.InpaintingChunks, "_count_frames", staticmethod(lambda p, l: 25)), \
+                mock.patch.object(J.time, "monotonic", lambda: clock[0]):
+            hook = J.InpaintingChunks(fake, stats)
+            try:
+                FakeEngine().process_single_video(input_video_path="x.mp4", frames_chunk=25, overlap=3)
+            finally:
+                hook.restore()
+        self.assertTrue(rates)
+        self.assertAlmostEqual(rates[-1], 50 / 25, msg="the streamed encode didn't end the clip's tail")
+        self.assertIs(fake.finish_streamed_encode, finish, "not put back")
+
     def test_an_uncounted_clip_never_runs_backwards(self):
         # bug sweep 2026-10-09 (A2): cv2 (and ffprobe) can't count the frames: the
         # total grew one chunk at a time, so the bar read 100% after each chunk

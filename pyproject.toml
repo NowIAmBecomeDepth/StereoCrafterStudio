@@ -78,6 +78,15 @@ dependencies = [
     "customtkinter>=6.0.0",
 ]
 
+[project.optional-dependencies]
+# Inpainting's TensorRT box (a user's patch, 2026-10-29): `uv sync --extra tensorrt`. Studio's updater
+# keeps the extra when it finds TensorRT installed.
+tensorrt = [
+    "tensorrt-cu13",
+    "onnx",
+    "onnxscript",
+]
+
 [tool.uv]
 # Studio is a Windows application: .bat launchers, a native menubar workaround,
 # tkinterdnd2, triton-windows. Saying so lets the resolver ignore the other

@@ -23,6 +23,8 @@ import time
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
@@ -108,6 +110,22 @@ class SettingsTests(unittest.TestCase):
                              os.path.join(tmp, "sidecars"))
             self.assertEqual(S.effective_depth_folder({"multi_map": True, "input_depth_maps": tmp,
                                                        "selected_depth_map": "x"}), os.path.join(tmp, "x"))
+
+    def test_a_depth_map_file_picked_with_multi_map_on(self):
+        """A user, 2026-10-26: one map picked as Input Depth Maps, Multi-Map on -- the preview failed
+        to load ([WinError 3] ...\100_depth.mp4\sidecars): the sidecars folder was made INSIDE the
+        file. Its folder is the file's folder, as for the depth maps."""
+        from types import SimpleNamespace
+        from studio.stages.splatting.preview_engine import SplattingPreviewEngine
+        with tempfile.TemporaryDirectory() as tmp:
+            f = os.path.join(tmp, "100_depth.mp4")
+            open(f, "wb").close()
+            want = os.path.join(tmp, "sidecars")
+            self.assertEqual(S.sidecar_folder({"multi_map": True, "input_depth_maps": f}), want)
+            var = lambda v: SimpleNamespace(get=lambda: v)
+            eng = SimpleNamespace(multi_map_var=var(True), input_depth_maps_var=var(f), selected_depth_map_var=var(""))
+            self.assertEqual(SplattingPreviewEngine._get_sidecar_base_folder(eng), want)
+            self.assertTrue(os.path.isdir(want))
 
 
 class KeyframedBoostTest(unittest.TestCase):
@@ -196,6 +214,30 @@ class DepthOnGpuTests(unittest.TestCase):
             with mock.patch("torch.cuda.is_available", return_value=False):
                 dp.process_depth_batch(**kw)
         self.assertEqual(calls, ["gpu", "cpu"])
+
+    @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
+    def test_a_batch_with_an_active_dilate_region_stays_on_the_gpu(self):
+        """2026-10-27 (user): a batch with a Dilate Region fell back to the CPU for all of its
+        depth prep (3.5x slower at 1080p). Now only the region's shift is per frame; the result
+        is the CPU's within one 16-bit unit, and the region still moves the depth."""
+        from unittest import mock
+        import numpy as np
+        from core.common import dilate_regions as DR
+        from core.splatting import depth_gpu, depth_processing as dp
+        yy, xx = np.mgrid[0:96, 0:160]
+        d = 300 + 0.5 * xx + 0.0 * yy
+        d[(xx - 80) ** 2 / 30 ** 2 + (yy - 48) ** 2 / 25 ** 2 < 1] = 850
+        raw = np.stack([d, d, d]).astype(np.float32)
+        regs = DR.DilateRegions(keyframes=[DR.Keyframe(frame=1, regions=[
+            DR.Region(polys=[[(0.35, 0.2), (0.65, 0.2), (0.65, 0.8), (0.35, 0.8)]], offset_x=4.0)])])
+        kw = dict(batch_depth_numpy_raw=raw, depth_gamma=1.0, depth_dilate_size_x=2.5, depth_dilate_size_y=0.5,
+                  depth_blur_size_x=3.0, depth_blur_size_y=5.0, max_raw_value=1023.0, dilate_regions=regs,
+                  frame_indices=[0, 1, 2])
+        cpu = dp.process_depth_batch_cpu(**kw)
+        with mock.patch.object(dp, "process_depth_batch_cpu", side_effect=AssertionError("fell back to the CPU")):
+            gpu = depth_gpu.process_depth_batch_gpu(**kw)
+        self.assertLessEqual(float(np.abs(cpu - gpu).max()), 1023.0 / 65535 * 1.01)
+        self.assertGreater(float(np.abs(gpu[1] - gpu[0]).max()), 1.0, "the region did not move the depth")
 
 
 class _Shell:
@@ -740,6 +782,91 @@ class OutOfMemoryHintTest(unittest.TestCase):
         self.assertEqual(r["failed"], 1)
         self.assertNotIn("hint", r)
 
+
+
+class SourceBitDepthTest(unittest.TestCase):
+    """user, 2026-10-27: the warped eye lost the source's 10 bits -- the render read the source through
+    Decord, 8-bit RGB. A 10-bit grey ramp rising 1 code every 8 px reaches the warp in 1-code steps
+    (0.25 on the 0..255 scale), not Decord's 4-code ones; an 8-bit source still comes as uint8."""
+
+    def _clip(self, path, pix_fmt, codes, w=256, h=64, n=4):
+        import subprocess
+        import numpy as np
+        y = np.tile(codes, (h, 1)).astype(np.uint16 if "10" in pix_fmt else np.uint8)
+        neutral = 512 if "10" in pix_fmt else 128
+        frame = np.concatenate([y.ravel(), np.full(w * h * 2, neutral, y.dtype)]).tobytes()
+        enc = (["-c:v", "libx265", "-x265-params", "lossless=1:log-level=error"] if "10" in pix_fmt
+               else ["-c:v", "libx264", "-qp", "0"])
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", pix_fmt.replace("420", "444"),
+                        "-s", f"{w}x{h}", "-r", "24", "-i", "-", *enc, "-pix_fmt", pix_fmt.replace("420", "444"),
+                        "-color_range", "tv", "-colorspace", "bt709", str(path)], input=frame * n, check=True)
+
+    def _source(self, clip):
+        from types import SimpleNamespace
+        from core.splatting.batch_processing import BatchProcessor
+        depth = Path(clip).with_name("d.mp4")
+        self._clip(depth, "yuv420p", np.full(256, 128))
+        bp = BatchProcessor.__new__(BatchProcessor)
+        import logging
+        bp.logger = logging.getLogger("test")
+        settings = SimpleNamespace(process_length=-1, strict_ffmpeg_decode=False, skip_lowres_preproc=False,
+                                   match_depth_res=True)
+        task = SimpleNamespace(set_pre_res=False, target_width=256, target_height=64, is_low_res=False)
+        readers = bp._initialize_readers(str(clip), str(depth), settings, task)
+        self.assertIsNotNone(readers)
+        return readers["source"]
+
+    def test_a_10_bit_source_reaches_the_warp_at_10_bits(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Decord holds its clip
+            clip = Path(tmp) / "ramp10.mp4"
+            codes = 300 + np.arange(256) // 8                      # 300..331
+            self._clip(clip, "yuv420p10le", codes)
+            src = self._source(clip)
+            f = src.get_batch([0, 2]).asnumpy()
+            src.close() if hasattr(src, "close") else None
+            row = f[1, 32, 8:-8, 1].astype(np.float64)              # green: luma's largest share
+            steps = np.unique(np.round(np.abs(np.diff(row)), 2))
+            self.assertLessEqual(steps.max(), 0.35, f"steps {steps}: Decord's 8-bit read (1.0 a step)")
+
+    def test_an_8_bit_source_is_read_as_before(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # Decord holds its clip
+            clip = Path(tmp) / "ramp8.mp4"
+            self._clip(clip, "yuv420p", 60 + np.arange(256) // 8)
+            src = self._source(clip)
+            self.assertEqual(src.get_batch([0]).asnumpy().dtype, np.uint8)
+
+
+
+class PickDepthTest(unittest.TestCase):
+    """The Convergence picker's sample (preview.pick_depth, user 2026-10-29): the depth under the
+    click, as fractions of the picture shown."""
+
+    def setUp(self):
+        from studio.stages.splatting.preview import pick_depth
+        self.pick = pick_depth
+        # 100 x 200, depth = x / 199 (a left-to-right ramp)
+        self.d = np.tile(np.linspace(0.0, 1.0, 200, dtype=np.float32), (100, 1))
+
+    def test_the_depth_under_the_click(self):
+        self.assertAlmostEqual(self.pick(self.d, 0.25, 0.5), 50 / 199, places=3)
+        self.assertAlmostEqual(self.pick(self.d[..., None], 0.75, 0.1), 150 / 199, places=3)   # HxWx1 too
+
+    def test_a_click_by_an_edge_takes_the_side_it_is_on(self):
+        d = np.zeros((100, 200), np.float32)
+        d[:, 100:] = 0.8                      # a near wall from the middle on
+        self.assertAlmostEqual(self.pick(d, 101 / 200, 0.5), 0.8, places=5)
+        self.assertAlmostEqual(self.pick(d, 98 / 200, 0.5), 0.0, places=5)
+
+    def test_a_side_by_side_picture_maps_either_half_onto_the_frame(self):
+        aspect = 2 * 200 / 100                # the pair shown: twice the frame's width
+        self.assertAlmostEqual(self.pick(self.d, 0.125, 0.5, aspect), 50 / 199, places=3)
+        self.assertAlmostEqual(self.pick(self.d, 0.625, 0.5, aspect), 50 / 199, places=3)
+        # the frame alone (Splat Result, anaglyph): no remap
+        self.assertAlmostEqual(self.pick(self.d, 0.625, 0.5, 200 / 100), 125 / 199, places=2)
+
+    def test_outside_the_picture_clamps_and_nothing_to_read_is_none(self):
+        self.assertAlmostEqual(self.pick(self.d, 1.5, -1.0), 1.0, delta=0.01)   # the last column's patch
+        self.assertIsNone(self.pick(np.zeros((0, 0), np.float32), 0.5, 0.5))
 
 if __name__ == "__main__":
     unittest.main()

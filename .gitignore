@@ -142,6 +142,7 @@ _install/install_log.txt
 # Pre-edit file snapshots written by .claude/hooks/snapshot.py
 .claude/backups/
 torchinductor_cache/
+trt_engines/
 
 # The manual's one-page phone copy: built from docs/manual by build_offline.py
 docs/manual/StereoCrafter-Studio-Manual.html

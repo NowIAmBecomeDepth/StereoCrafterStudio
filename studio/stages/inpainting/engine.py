@@ -48,12 +48,13 @@ from core.common.file_organizer import move_files_to_finished, split_already_fin
 from core.common.gpu_utils import release_cuda_memory
 from core.common import gpu_ops
 from studio.outcome import Outcome
-from core.common.video_io import encode_frames_to_mp4, read_video_frames_decord, reverse_frames
+from core.common.video_io import RawFrameEncoder, encode_frames_to_mp4, read_video_frames_decord, reverse_frames
 from pipelines.stereo_video_inpainting import (
     StableVideoDiffusionInpaintingPipeline,
     load_inpainting_pipeline,
     tensor2vid,
 )
+from pipelines.trt_unet import enable_tensorrt, release_tensorrt, unavailable_reason as trt_unavailable_reason
 
 _REPO = Path(__file__).resolve().parents[3]
 
@@ -153,6 +154,148 @@ def _join_chunks(chunks):
     return out
 
 
+#: Patch 1 (a user's measurements, 2026-10-29): the mask blur a slice of about this many values at a time
+_BLUR_SLICE_VALUES = 1 << 26
+
+
+def _blur_xy(mask, kernel_x, kernel_y, padding_x, padding_y):
+    """v1's two blur convolutions, X then Y, a slice of frames at a time on the GPU in plain fp32 (no
+    TF32), each slice back to the mask's device and dtype. v1 ran them over the whole clip at once on the
+    CPU: a 778-frame 1840x768 clip asked for 70-103 GB, failed, and the blur was skipped -- hard-edged
+    masks (a user, 2026-10-29). The blur is per frame, so the slices change nothing; once the GPU can't
+    fit a slice, the rest run on the CPU, still a slice at a time."""
+    groups = mask.shape[1]
+    step = max(1, _BLUR_SLICE_VALUES // max(1, int(mask[0].numel())))
+    out = torch.empty(mask.shape, dtype=mask.dtype, device=mask.device)
+    use_cuda = torch.cuda.is_available()
+    with torch.no_grad():
+        for start in range(0, mask.shape[0], step):
+            part = mask[start:start + step]
+            if use_cuda:
+                try:
+                    with torch.backends.cudnn.flags(enabled=True, benchmark=False, deterministic=False,
+                                                    allow_tf32=False):
+                        p = part.to("cuda", torch.float32)
+                        p = F.conv2d(p, kernel_x.to(p.device, torch.float32), padding=(0, padding_x), groups=groups)
+                        p = F.conv2d(p, kernel_y.to(p.device, torch.float32), padding=(padding_y, 0), groups=groups)
+                        out[start:start + step] = p.to(mask.device, mask.dtype)
+                        del p
+                    continue
+                except torch.cuda.OutOfMemoryError:
+                    use_cuda = False
+                    p = None
+                    torch.cuda.empty_cache()
+                    logger.warning("Mask blur: the GPU is full; the rest of the blur runs on the CPU.")
+            p = F.conv2d(part.float(), kernel_x.to(part.device, torch.float32), padding=(0, padding_x), groups=groups)
+            p = F.conv2d(p, kernel_y.to(part.device, torch.float32), padding=(padding_y, 0), groups=groups)
+            out[start:start + step] = p.to(mask.dtype)
+            del p
+    return out
+
+
+def _decoded_to_frames(decoded_frames, image_processor):
+    """Patch 4 (a user, 2026-10-29): v1's tensor2vid(..., "pil") and back to float frames, the same numbers.
+    The denormalise, the x255 and the rounding (diffusers' postprocess + numpy_to_pil) run on the GPU and
+    only the 8-bit frames come to the CPU; v1 brought float frames over, made 25 PIL images and turned
+    them back into tensors, ~0.5 s a chunk with the GPU idle. [T, C, H, W] float32 0-1 on the CPU."""
+    vid = image_processor.postprocess(decoded_frames[0].permute(1, 0, 2, 3), output_type="pt")
+    frames_u8 = (vid.float() * 255).round().to(torch.uint8)
+    return frames_u8.cpu().float() / 255.0
+
+
+#: Patch 5: the chunk checkpoint being written in the background -- one at a time, in order. Module-wide,
+#: so the next run's resume waits for the last run's write too.
+_CHECKPOINT_WRITE = {"thread": None}
+
+
+def _wait_checkpoint_writes():
+    """Until the chunk checkpoint being written (if any) is on disk."""
+    t = _CHECKPOINT_WRITE["thread"]
+    if t is not None:
+        t.join()
+        _CHECKPOINT_WRITE["thread"] = None
+
+
+def _write_checkpoint_in_background(payload, checkpoint_path):
+    """Patch 5 (a user, 2026-10-29): v1 torch.saved each chunk's resume data (~730 MB) while the GPU
+    waited, ~1.45 s a chunk. The same file, written the same way (tmp, then replace), on a thread of
+    its own; the write before it finishes first, so at most one is in flight and they land in order.
+    Not a daemon thread: a normal exit finishes the write. `payload` must be the thread's own copies."""
+    _wait_checkpoint_writes()
+
+    def write():
+        tmp_path = f"{checkpoint_path}.tmp"
+        try:
+            torch.save(payload, tmp_path)
+            os.replace(tmp_path, checkpoint_path)
+            housekeeping_log.debug(f"Saved chunk checkpoint: {checkpoint_path}")
+        except Exception as e:
+            housekeeping_log.warning(f"Failed to save chunk checkpoint {checkpoint_path}: {e}")
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+
+    t = threading.Thread(target=write, name="inpaint-chunk-checkpoint", daemon=False)
+    _CHECKPOINT_WRITE["thread"] = t
+    t.start()
+
+
+#: Patch 2 (a user, 2026-10-29): OpenCV's RGB->grey in integers, Y = (R*r + G*g + B*b + half) >> shift.
+#: Which constants a build uses varies (4.10 and 5.0: the first; older builds: the second);
+#: _gray_formula finds this build's by asking cv2 itself.
+_CV2_GRAY_FORMULAS = ((9798, 19235, 3735, 15), (4899, 9617, 1868, 14))
+_GRAY = {}
+
+
+def _gray_formula():
+    """The (r, g, b, shift) that gives cv2.cvtColor(RGB2GRAY)'s exact result in this build, or None (then
+    the mask chain stays cv2's, frame by frame). Tried once, on every grey level, the pure colours and
+    65,536 random pixels."""
+    if "f" not in _GRAY:
+        rng = np.random.default_rng(0)
+        img = rng.integers(0, 256, (256, 256, 3), dtype=np.uint8)
+        img[0, :, :] = np.arange(256, dtype=np.uint8)[:, None]
+        img[1, :, :] = 0
+        img[1, :, 0] = 255
+        img[2, :, :] = 0
+        img[2, :, 1] = 255
+        img[3, :, :] = 0
+        img[3, :, 2] = 255
+        want = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.int64)
+        i = img.astype(np.int64)
+        found = None
+        for r, g, b, sh in _CV2_GRAY_FORMULAS:
+            if np.array_equal((i[..., 0] * r + i[..., 1] * g + i[..., 2] * b + (1 << (sh - 1))) >> sh, want):
+                found = (r, g, b, sh)
+                break
+        if found is None:
+            logger.info("Mask chain: this OpenCV's grey isn't a known formula; it stays on the CPU.")
+        _GRAY["f"] = found
+    return _GRAY["f"]
+
+
+def _gpu_clock():
+    """Patch 7: time.perf_counter() once the GPU's queued work is done -- what a step really took."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
+
+
+def _frames_to_uint16(frames):
+    """[T, 3, H, W] float 0-1 -> [T, H, W, 3] uint16 numpy on the CPU: v1's PNG frames, the same numbers
+    (np.clip, x 65535.0 in float32, truncated), worked out where the frames are."""
+    v = (frames.float().clamp(0.0, 1.0) * 65535.0).to(torch.int32).permute(0, 2, 3, 1)
+    return v.cpu().numpy().astype(np.uint16)
+
+
+def finish_streamed_encode(encoder, stop_event):
+    """Patch 6: the streamed Hi-Res frames' encode, finished -- the streamed path's encode_frames_to_mp4
+    (a module-level name, as that is, so job_stats times it the same way)."""
+    return encoder.finish(stop_event)
+
+
 class _Counter:
     """Stands in for v1's tk.IntVar progress counters."""
 
@@ -197,6 +340,10 @@ class InpaintingEngine:
         # ends at its next denoising step. stop_event alone stops between chunks
         # (each finished chunk is checkpointed, so that is the resumable stop).
         self.stop_now = None
+        # Patch 6 (2026-10-29): the streamed Hi-Res frames go straight to an encoder, made at the first
+        # frame from these (process_single_video sets them before the finalize)
+        self._stream_encode_args = None
+        self._stream_encoder = None
         messagebox.hooks = hooks
 
     def _stop_now_step(self, pipe, step, timestep, callback_kwargs):
@@ -228,7 +375,12 @@ class InpaintingEngine:
 
     def processing_done(self, stopped=False):
         """v1's processing_done without the widgets: release the model, report."""
+        self._abort_stream_encoder()  # a streamed encode never finished (2026-10-29)
+        # the last chunk's resume file on disk before the job counts as over (2026-10-29: it is written
+        # in the background, and a Stop after this chunk returns while it is still being written)
+        _wait_checkpoint_writes()
         if self.pipeline:
+            release_tensorrt(self.pipeline)  # its counts in the log, its engines freed (2026-10-29)
             try:
                 del self.pipeline
                 release_cuda_memory()
@@ -254,6 +406,92 @@ class InpaintingEngine:
             )
         self.update_video_info_display("N/A", "N/A", "N/A", "N/A", "N/A")
         self.hooks.finished(bool(stopped), self.outcome)
+
+    # ---- a user's Inpainting patches (2026-10-29) -------------------------
+
+    def _encoding_options(self):
+        """The Encoding Settings a clip is encoded with. v1 built this in the encode call; the streamed
+        Hi-Res frames need it before the finalize, so it is built here, for both."""
+        return {
+            "codec": self.app_config.get("codec", "Auto"),
+            "encoder": self.app_config.get("encoding_encoder", "NVENC"),
+            "encoding_quality": self.app_config.get("encoding_quality", "Medium"),
+            "encoding_tune": self.app_config.get("encoding_tune", "None"),
+            "bit_depth": self.app_config.get("bit_depth", "Auto"),
+            "pix_fmt": self.app_config.get("pix_fmt", "Auto"),
+            "nvenc_lookahead_enabled": self.app_config.get("nvenc_lookahead_enabled", False),
+            "nvenc_lookahead": self.app_config.get("nvenc_lookahead", 16),
+            "nvenc_spatial_aq": self.app_config.get("nvenc_spatial_aq", False),
+            "nvenc_temporal_aq": self.app_config.get("nvenc_temporal_aq", False),
+            "nvenc_aq_strength": self.app_config.get("nvenc_aq_strength", 8),
+            # v2: Enable DNxHR (user, 2026-10-11)
+            "dnxhr": bool(self.app_config.get("dnxhr_fullres_split", False)),
+            "dnxhr_profile": self.app_config.get("dnxhr_profile", "HQX (10-bit 4:2:2)"),
+        }
+
+    def _stream_encoder_for(self, width, height):
+        """The streamed Hi-Res frames' encoder, made for the first frame's size."""
+        if getattr(self, "_stream_encoder", None) is None:
+            args = getattr(self, "_stream_encode_args", None)
+            if not args:
+                raise RuntimeError("no encode set up for the streamed Hi-Res frames")
+            self._stream_encoder = RawFrameEncoder(width, height, **args)
+        return self._stream_encoder
+
+    def _abort_stream_encoder(self):
+        """A stopped or failed clip: its streamed encode, and the part file, gone."""
+        enc, self._stream_encoder = getattr(self, "_stream_encoder", None), None
+        if enc is not None:
+            try:
+                enc.abort()
+            except Exception as e:
+                logger.warning(f"Could not stop the streamed encode: {e}")
+
+    def _finish_stream_encoder(self, stop_event, temp_png_dir):
+        """The streamed path's encode step: the encoder finished (no PNGs to read back)."""
+        enc, self._stream_encoder = getattr(self, "_stream_encoder", None), None
+        shutil.rmtree(temp_png_dir, ignore_errors=True)
+        if enc is None:
+            logger.error("The streamed Hi-Res frames have no encoder to finish.")
+            return False
+        return finish_streamed_encode(enc, stop_event)
+
+    def _process_mask_frames_gpu(self, mask_u8, out_device, pre_threshold, post_threshold,
+                                 morph_kernel_size, dilate_kernel_size, blur_kernel_size):
+        """Patch 2 (a user, 2026-10-29): v1's mask chain -- grey, threshold, closing, dilation, blur,
+        threshold -- 32 frames at a time on the GPU, into a float32 [T, 1, H, W] on `out_device`. v1
+        greyed each frame with cv2 in a Python loop and ran the rest over the whole clip on the CPU,
+        twice a clip and again for every Hi-Res chunk. The grey is cv2's own integer formula
+        (_gray_formula); every other step is per frame and the same functions v1 calls."""
+        r, g, b, sh = _gray_formula()
+        t_all, _c, h, w = mask_u8.shape
+        out = torch.empty((t_all, 1, h, w), dtype=torch.float32, device=out_device)
+        # level / 255 divided on the CPU, as v1's chain does: the GPU divides by a scalar as a multiply by
+        # its reciprocal, a last-bit difference
+        levels = (torch.arange(256, dtype=torch.float32) / 255.0).to("cuda")
+        with torch.no_grad():
+            for s in range(0, t_all, 32):
+                p = mask_u8[s:s + 32].to("cuda")
+                if p.shape[1] == 1:
+                    gray = p[:, 0]
+                else:
+                    p = p.to(torch.int32)
+                    gray = ((p[:, 0] * r + p[:, 1] * g + p[:, 2] * b + (1 << (sh - 1))) >> sh).to(torch.uint8)
+                m = levels[gray.long()].unsqueeze(1)
+                del p, gray
+                if pre_threshold != 0.0:
+                    m = (m > pre_threshold).float()
+                if morph_kernel_size != 0:
+                    m = self._apply_morphological_closing(m, morph_kernel_size)
+                if dilate_kernel_size != 0:
+                    m = self._apply_mask_dilation(m, dilate_kernel_size)
+                if blur_kernel_size != 0:
+                    m = self._apply_gaussian_blur(m, blur_kernel_size)
+                if post_threshold != 0.0:
+                    m = (m > post_threshold).float()
+                out[s:s + 32] = m.to(out_device)
+                del m
+        return out
 
     # ---- v1's engine, verbatim below --------------------------------------
 
@@ -390,10 +628,9 @@ class InpaintingEngine:
             kernel_y = kernel_y.view(1, 1, kernel_val, 1)
 
             padding_x = kernel_val // 2
-            blurred_mask = F.conv2d(mask, kernel_x, padding=(0, padding_x), groups=mask.shape[1])
-
             padding_y = kernel_val // 2
-            blurred_mask = F.conv2d(blurred_mask, kernel_y, padding=(padding_y, 0), groups=mask.shape[1])
+            # v2: a slice of frames at a time on the GPU (2026-10-29: the whole clip at once ran out of RAM)
+            blurred_mask = _blur_xy(mask, kernel_x, kernel_y, padding_x, padding_y)
 
             logger.debug(
                 f"Applied Gaussian blur with kernel {kernel_val}x{kernel_val} (derived sigma {sigma:.2f})."
@@ -548,6 +785,11 @@ class InpaintingEngine:
             if mask_raw.numel() > 0 and float(mask_raw.max().item()) <= 1.0:
                 mask_raw = mask_raw * 255.0
             mask_raw = torch.clamp(mask_raw, 0.0, 255.0).to(torch.uint8)
+
+        if (not (save_debug and debug_prefix) and gpu_ops.gpu_available() and mask_raw.shape[1] in (1, 3)
+                and _gray_formula() is not None):  # v2: on the GPU (2026-10-29)
+            return self._process_mask_frames_gpu(mask_raw, frames_mask_raw.device, pre_threshold, post_threshold,
+                                                 morph_kernel_size, dilate_kernel_size, blur_kernel_size)
 
         processed_masks_grayscale = []
         for t in range(mask_raw.shape[0]):
@@ -973,6 +1215,7 @@ class InpaintingEngine:
             # checkpoints don't resume into the new one (other clips' signatures unchanged)
             **({"dual_eye_order": "right reversed"} if os.path.splitext(os.path.basename(str(input_video_path)))[0]
                .endswith(("_splatted2D", "_splatted2DF")) else {}),
+            **({"tensorrt": True} if getattr(self.pipeline, "tensorrt", None) is not None else {}),
             "frames_chunk": int(frames_chunk),
             "frame_overlap": int(overlap),
             "tile_num": int(tile_num),
@@ -1040,6 +1283,7 @@ class InpaintingEngine:
         video_stream_info: Optional[dict],
     ):
         """Saves tensors needed to resume from pre-finalize stage."""
+        _wait_checkpoint_writes()  # v2: the last chunk's checkpoint on disk first
         payload = {
             "signature": signature,
             "frames_output_final": frames_output_final.detach().cpu(),
@@ -1052,9 +1296,11 @@ class InpaintingEngine:
         }
         tmp_path = f"{checkpoint_path}.tmp"
         try:
+            _t0 = time.perf_counter()
             torch.save(payload, tmp_path)
             os.replace(tmp_path, checkpoint_path)
-            housekeeping_log.info(f"Saved resume checkpoint: {checkpoint_path}")
+            housekeeping_log.info(f"Saved resume checkpoint: {checkpoint_path} "
+                                  f"({time.perf_counter() - _t0:.1f} s)")  # v2: how long (2026-10-29)
         except Exception as e:
             housekeeping_log.warning(f"Failed to save resume checkpoint {checkpoint_path}: {e}")
             try:
@@ -1077,6 +1323,7 @@ class InpaintingEngine:
         self, checkpoint_path: str, expected_signature: dict, chunk_start_idx: int, expected_append_length: int
     ) -> Optional[dict]:
         """Loads a chunk checkpoint if signature/shape are valid."""
+        _wait_checkpoint_writes()  # v2: not a file still being written
         if not os.path.exists(checkpoint_path):
             return None
         try:
@@ -1121,26 +1368,16 @@ class InpaintingEngine:
         payload = {
             "signature": signature,
             "chunk_start_idx": int(chunk_start_idx),
-            "current_chunk_generated": current_chunk_generated.detach().cpu(),
-            "append_frames": append_frames.detach().cpu(),
+            "current_chunk_generated": current_chunk_generated.detach().to("cpu", copy=True),  # v2: its own copy
+            "append_frames": append_frames.detach().to("cpu", copy=True),
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        tmp_path = f"{checkpoint_path}.tmp"
-        try:
-            torch.save(payload, tmp_path)
-            os.replace(tmp_path, checkpoint_path)
-            housekeeping_log.debug(f"Saved chunk checkpoint: {checkpoint_path}")
-        except Exception as e:
-            housekeeping_log.warning(f"Failed to save chunk checkpoint {checkpoint_path}: {e}")
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except OSError:
-                pass
+        _write_checkpoint_in_background(payload, checkpoint_path)  # v2: the GPU doesn't wait (2026-10-29)
 
     # -- v1 InpaintingGUI._cleanup_chunk_checkpoints (inpainting_gui.py:1476)
     def _cleanup_chunk_checkpoints(self, base_video_name: str, checkpoint_path: Optional[str] = None):
         """Removes per-chunk checkpoints once a full pre-finalize checkpoint exists."""
+        _wait_checkpoint_writes()  # v2: a write in flight would leave its file behind
         if checkpoint_path:
             resume_dir = os.path.dirname(checkpoint_path)
             video_stem = os.path.basename(checkpoint_path)
@@ -1698,6 +1935,8 @@ class InpaintingEngine:
 
         hires_reader = None
         frames_written = 0
+        _dev = torch.device("cuda") if gpu_ops.gpu_available() else torch.device("cpu")  # v2: on the GPU
+        self._abort_stream_encoder()  # v2: nothing left over from a clip before
         try:
             hires_reader = VideoReader(hires_video_path, ctx=cpu(0))
             chunk_size = max(1, int(self._setting("frames_chunk_var")))
@@ -1726,13 +1965,13 @@ class InpaintingEngine:
 
                 # --- 1. Upscale low-res inpainted + mask for this chunk ---
                 inpainted_chunk = F.interpolate(
-                    lowres_inpainted[start_idx:end_idx].float(),
+                    lowres_inpainted[start_idx:end_idx].to(_dev).float(),
                     size=(hires_H, hires_W),
                     mode="bicubic",
                     align_corners=False,
                 )
                 lowres_mask_chunk_hires = F.interpolate(
-                    lowres_mask[start_idx:end_idx].float(),
+                    lowres_mask[start_idx:end_idx].to(_dev).float(),
                     size=(hires_H, hires_W),
                     mode="bilinear",
                     align_corners=False,
@@ -1740,7 +1979,7 @@ class InpaintingEngine:
 
                 # --- 2. Read hi-res source chunk and split panels ---
                 hires_frames_np = hires_reader.get_batch(frame_indices).asnumpy()
-                hires_frames_torch = torch.from_numpy(hires_frames_np).permute(0, 3, 1, 2).float()
+                hires_frames_torch = torch.from_numpy(hires_frames_np).to(_dev).permute(0, 3, 1, 2).float()
                 hires_mask_chunk_processed = None
                 hires_left_chunk = None
 
@@ -1818,7 +2057,14 @@ class InpaintingEngine:
                         if chunk_index == 1:
                             logger.warning("Color transfer skipped: No valid reference frames available.")
                     else:
-                        for t in range(inpainted_chunk.shape[0]):
+                        if _dev.type == "cuda":  # v2: the whole chunk at once (each frame's own Lab stats)
+                            ref_resized = F.interpolate(
+                                reference_chunk.to(_dev).float(), size=(hires_H, hires_W), mode="bilinear",
+                                align_corners=False,
+                            )
+                            inpainted_chunk = gpu_ops.color_transfer(ref_resized, inpainted_chunk)
+                            del ref_resized
+                        for t in range(inpainted_chunk.shape[0] if _dev.type != "cuda" else 0):
                             ref_frame_resized = (
                                 F.interpolate(
                                     reference_chunk[t].unsqueeze(0),
@@ -1866,24 +2112,22 @@ class InpaintingEngine:
                     self._save_debug_image(debug_sbs_frame, "10_final_sbs_for_encoding", base_video_name, 0)
                     del debug_sbs_frame
 
-                # --- 7. Write 16-bit PNGs for this chunk ---
-                for local_idx in range(right_final.shape[0]):
+                # --- 7. v2: this chunk's 16-bit frames to the encoder (2026-10-29: were PNGs) ---
+                if left_final is not None:
+                    out_chunk = torch.cat([left_final.to(_dev), right_final.to(_dev)], dim=3)
+                else:
+                    out_chunk = right_final.to(_dev)
+                frames_u16 = _frames_to_uint16(out_chunk)
+                del out_chunk
+                encoder = self._stream_encoder_for(frames_u16.shape[2], frames_u16.shape[1])
+                for local_idx in range(frames_u16.shape[0]):
                     if stop_event is not None and stop_event.is_set():
-                        logger.info(f"Stop requested during Hi-Res streaming PNG write for {base_video_name}.")
+                        logger.info(f"Stop requested during Hi-Res streaming encode for {base_video_name}.")
                         return None
-                    global_idx = start_idx + local_idx
-                    frame_tensor = right_final[local_idx]
-                    if left_final is not None:
-                        frame_tensor = torch.cat([left_final[local_idx], frame_tensor], dim=2)
-                    frame_np = frame_tensor.cpu().permute(1, 2, 0).numpy()
-                    frame_uint16 = (np.clip(frame_np, 0.0, 1.0) * 65535.0).astype(np.uint16)
-                    frame_bgr = cv2.cvtColor(frame_uint16, cv2.COLOR_RGB2BGR)
-                    png_path = os.path.join(temp_png_dir, f"{global_idx:05d}.png")
-                    if not cv2.imwrite(png_path, frame_bgr):
-                        logger.error(f"Failed to write PNG frame {global_idx} to {png_path}.")
-                        return None
+                    encoder.write(frames_u16[local_idx])
                     frames_written += 1
                     draw_progress_bar(frames_written, num_frames_original)
+                del frames_u16
 
                 del inpainted_chunk, lowres_mask_chunk_hires, mask_chunk, hires_warped_chunk
                 if hires_left_chunk is not None:
@@ -2908,6 +3152,7 @@ class InpaintingEngine:
                     f" ({actual_sliced_length} frames{padded_note})..."
                 )
                 start_time = time.time()
+                _t_start = _gpu_clock()  # v2: the chunk's timing line (2026-10-29)
 
                 with torch.no_grad(), _StopNowGuard() as _stopped_now:  # v2: audit #13
                     video_latents = spatial_tiled_process(
@@ -2927,10 +3172,12 @@ class InpaintingEngine:
                         callback_on_step_end=self._stop_now_step,
                     )
                     video_latents = video_latents.unsqueeze(0)
+                    _t_tiles = _gpu_clock()
                     pipeline.vae.to(dtype=torch.float16)
                     decoded_frames = pipeline.decode_latents(
                         video_latents, num_frames=video_latents.shape[1], decode_chunk_size=2
                     )
+                _t_decode = _gpu_clock()
                 if _stopped_now.hit:
                     logger.info(f"Stopped part-way through chunk {i}-{end_idx_for_slicing} of {input_video_path}; "
                                 "the chunks before it are kept for the next run.")
@@ -2943,10 +3190,9 @@ class InpaintingEngine:
                     f" completed in {inference_duration:.2f} seconds."
                 )
 
-                video_frames = tensor2vid(decoded_frames, pipeline.image_processor, output_type="pil")[0]
-                current_chunk_generated = torch.stack(
-                    [torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0 for img in video_frames]
-                ).cpu()
+                # v2: on the GPU, the same numbers as v1's PIL round trip (2026-10-29)
+                current_chunk_generated = _decoded_to_frames(decoded_frames, pipeline.image_processor)
+                _t_frames = time.perf_counter()
                 self._save_debug_image(current_chunk_generated, f"07_inpainted_chunk_{i}", base_video_name, i)
 
                 # Append frames with temporal cross-fade in the overlap region
@@ -2996,6 +3242,12 @@ class InpaintingEngine:
                 )
 
                 previous_chunk_output_frames = current_chunk_generated
+                _t_end = time.perf_counter()
+                logger.debug(
+                    f"[timing] chunk {i}: tiles (encode+denoise) {_t_tiles - _t_start:.1f}s | "
+                    f"VAE decode {_t_decode - _t_tiles:.1f}s | to frames {_t_frames - _t_decode:.1f}s | "
+                    f"blend+checkpoint {_t_end - _t_frames:.1f}s | total {_t_end - _t_start:.1f}s"
+                )
             # --- END INPAINTING CHUNKS ---
 
             # 4. PREPARE FRAMES FOR FINALIZATION (Temporal/Spatial Cropping)
@@ -3058,6 +3310,11 @@ class InpaintingEngine:
         temp_png_dir = os.path.join(save_dir, f"temp_inpainted_pngs_{video_name_for_output}_{os.getpid()}")
         os.makedirs(temp_png_dir, exist_ok=True)
 
+        # v2 (2026-10-29): the streamed Hi-Res frames are encoded as they are made -- with these
+        self._stream_encode_args = dict(
+            final_output_path=output_video_path, fps=fps, video_stream_info=video_stream_info,
+            user_output_crf=output_crf, encoding_options=self._encoding_options(),
+        )
         finalized_outputs = self._finalize_output_frames(
             inpainted_frames=frames_output_final,
             mask_frames=frames_blend_mask_processed_unpadded_original_length,
@@ -3072,6 +3329,7 @@ class InpaintingEngine:
         )
 
         if finalized_outputs is None:
+            self._abort_stream_encoder()  # v2: its part file goes too
             shutil.rmtree(temp_png_dir, ignore_errors=True)
             if stop_event is not None and stop_event.is_set():
                 logger.info(f"Finalization stopped by user for {base_video_name}.")
@@ -3195,7 +3453,9 @@ class InpaintingEngine:
                     ),
                 )
 
-            encoding_success = encode_frames_to_mp4(
+            encoding_success = self._finish_stream_encoder(  # v2: the streamed frames' encode (2026-10-29)
+                stop_event_non_optional, temp_png_dir
+            ) if streamed_frame_count is not None else encode_frames_to_mp4(
                 temp_png_dir=temp_png_dir,
                 final_output_mp4_path=output_video_path,
                 fps=fps,
@@ -3205,22 +3465,7 @@ class InpaintingEngine:
                 sidecar_json_data=None,
                 user_output_crf=output_crf,
                 output_sidecar_ext=".spsidecar",
-                encoding_options={
-                    "codec": self.app_config.get("codec", "Auto"),
-                    "encoder": self.app_config.get("encoding_encoder", "NVENC"),
-                    "encoding_quality": self.app_config.get("encoding_quality", "Medium"),
-                    "encoding_tune": self.app_config.get("encoding_tune", "None"),
-                    "bit_depth": self.app_config.get("bit_depth", "Auto"),
-                    "pix_fmt": self.app_config.get("pix_fmt", "Auto"),
-                    "nvenc_lookahead_enabled": self.app_config.get("nvenc_lookahead_enabled", False),
-                    "nvenc_lookahead": self.app_config.get("nvenc_lookahead", 16),
-                    "nvenc_spatial_aq": self.app_config.get("nvenc_spatial_aq", False),
-                    "nvenc_temporal_aq": self.app_config.get("nvenc_temporal_aq", False),
-                    "nvenc_aq_strength": self.app_config.get("nvenc_aq_strength", 8),
-                    # v2: Enable DNxHR (user, 2026-10-11)
-                    "dnxhr": bool(self.app_config.get("dnxhr_fullres_split", False)),
-                    "dnxhr_profile": self.app_config.get("dnxhr_profile", "HQX (10-bit 4:2:2)"),
-                },
+                encoding_options=self._encoding_options(),  # v2: one place for both encodes
             )
 
             if not encoding_success:
@@ -3228,6 +3473,7 @@ class InpaintingEngine:
                 return False, None
 
         except Exception as e:
+            self._abort_stream_encoder()  # v2
             logger.error(f"Error during PNG saving or Encoding for {base_video_name}: {e}", exc_info=True)
             messagebox.showerror("Error", f"Error during PNG saving or Encoding for {base_video_name}: {str(e)}")
             shutil.rmtree(temp_png_dir, ignore_errors=True)
@@ -3319,6 +3565,8 @@ class InpaintingEngine:
                     glob.glob(os.path.join(input_folder, "*.mp4")) + glob.glob(os.path.join(input_folder, "*.mov"))
                     + glob.glob(os.path.join(input_folder, "*.mkv"))  # v2: Splatting's Container may be MKV
                 )
+            from core.common.clip_names import natural_key  # v2: clips in number order, as Upcoming Jobs lists them (user, 2026-10-29)
+            input_videos.sort(key=lambda p: natural_key(os.path.basename(p)))
             _only = getattr(self, "only_videos", None)  # v2: Process Selected
             if _only:
                 _keys = {os.path.normcase(os.path.abspath(p)) for p in _only}
@@ -3403,8 +3651,13 @@ class InpaintingEngine:
                 dtype=torch.float16,
                 offload_type=offload_type,
                 use_sageattention=self._setting("use_sageattention_var"),
-                use_compile=self._setting("use_compile_var"),  # v2: File > Optimise Model
+                # v2: File > Optimise Model; skipped while TensorRT runs the model (a user's patch, 2026-10-29)
+                use_compile=self._setting("use_compile_var") and not (
+                    self._setting("use_tensorrt_var") and not trt_unavailable_reason()),
             )
+            if self._setting("use_tensorrt_var"):  # v2: the log says why when it can't
+                enable_tensorrt(self.pipeline, frames_chunk, self._setting("use_sageattention_var"),
+                                offload_type)
 
             # finished_folder = os.path.join(input_folder, "finished")
             # os.makedirs(finished_folder, exist_ok=True)

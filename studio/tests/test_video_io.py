@@ -232,5 +232,77 @@ class NvencFallbackTest(unittest.TestCase):
         self.assertIn("h264_nvenc", cmds[0])
 
 
+
+def _cuda() -> bool:
+    import torch
+    return torch.cuda.is_available()
+
+
+@unittest.skipUnless(_cuda(), "the native-YUV read is for CUDA machines")
+class NativeYuvReadTest(unittest.TestCase):
+    """2026-10-27: a clip read at its own size comes as YUV and is converted in torch on the GPU
+    (NVDEC where it decodes) -- faster at 10 bits, and exact, where FFmpeg's rgb48 ran up to 1.0
+    of 255 dark (white at 254.0) and its rgb24 up to 3 codes low. Flat colours, against the
+    BT.709 maths of the decoded codes."""
+
+    def _flat(self, path, pix_fmt, y, u, v, w=64, h=32):
+        import numpy as np
+        cw = w // 2
+        ch = h // 2 if "420" in pix_fmt else h
+        frame = np.concatenate([np.full(w * h, y), np.full(cw * ch, u), np.full(cw * ch, v)]).astype(np.uint16)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", pix_fmt, "-color_range", "tv",
+                        "-colorspace", "bt709", "-s", f"{w}x{h}", "-i", "-", "-c:v", "ffv1", str(path)],
+                       input=frame.tobytes() * 3, check=True)
+        dec = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(path), "-frames:v", "1", "-f", "rawvideo",
+                              "-pix_fmt", pix_fmt, "-"], capture_output=True, check=True).stdout
+        a = np.frombuffer(dec, np.uint16)
+        y, u, v = int(a[0]), int(a[w * h]), int(a[w * h + cw * ch])   # the codes as stored
+        yn, un, vn = (y - 64) / 876, (u - 512) / 896, (v - 512) / 896
+        r, bl = yn + 1.5748 * vn, yn + 1.8556 * un
+        return np.clip([r, (yn - 0.2126 * r - 0.0722 * bl) / 0.7152, bl], 0, 1) * 255
+
+    def test_flat_10_bit_colours_come_out_exact(self):
+        import numpy as np
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            for pix_fmt in ("yuv420p10le", "yuv422p10le"):
+                for yuv in ((940, 512, 512), (300, 512, 512), (700, 600, 450), (420, 300, 700)):
+                    clip = Path(tmp) / f"{pix_fmt}_{yuv[0]}.mkv"
+                    want = self._flat(clip, pix_fmt, *yuv)
+                    r = V.open_rgb_reader(str(clip))
+                    got = r.get_batch([1]).asnumpy()[0, 16, 32].astype(np.float64)
+                    r.close()
+                    self.assertTrue(np.allclose(got, want, atol=0.15), f"{pix_fmt} {yuv}: {got} vs {want}")
+
+    def test_flat_8_bit_colours_come_out_rounded_exactly(self):
+        import numpy as np
+        w, h = 64, 32
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            for i, (y, u, v) in enumerate(((235, 128, 128), (75, 128, 128), (180, 100, 160), (120, 150, 110))):
+                clip = Path(tmp) / f"f{i}.mkv"
+                frame = np.concatenate([np.full(w * h, y), np.full(w * h // 4, u), np.full(w * h // 4, v)]).astype(np.uint8)
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv420p",
+                                "-color_range", "tv", "-colorspace", "bt709", "-s", f"{w}x{h}", "-i", "-",
+                                "-c:v", "ffv1", str(clip)], input=frame.tobytes() * 3, check=True)
+                yn, un, vn = (y - 16) / 219, (u - 128) / 224, (v - 128) / 224
+                r, bl = yn + 1.5748 * vn, yn + 1.8556 * un
+                want = np.round(np.clip([r, (yn - 0.2126 * r - 0.0722 * bl) / 0.7152, bl], 0, 1) * 255)
+                rd = V.open_rgb_reader(str(clip))
+                got = rd.get_batch([1]).asnumpy()[0, 16, 32]
+                rd.close()
+                self.assertEqual((str(got.dtype), got.tolist()), ("uint8", want.astype(int).tolist()), f"YUV {y},{u},{v}")
+
+    def test_a_failed_native_read_falls_back_to_rgb48(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            clip = Path(tmp) / "c.mkv"
+            self._flat(clip, "yuv420p10le", 500, 400, 640)
+            r = V.open_rgb_reader(str(clip))
+            self.assertIsNotNone(r._yuv)
+            r._force_fallback = True       # as get_batch sets it on a short read
+            f = r.get_batch([0, 1]).asnumpy()
+            r.close()
+            self.assertIsNone(r._yuv)
+            self.assertEqual((f.shape, str(f.dtype)), ((2, 32, 64, 3), "float16"))
+
+
 if __name__ == "__main__":
     unittest.main()

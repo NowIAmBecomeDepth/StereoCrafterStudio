@@ -36,6 +36,7 @@ import torch.nn.functional as F
 import cv2
 from PIL import Image
 from decord import VideoReader, cpu
+from core.common.video_io import open_rgb_reader  # v2: colour at its own bit depth (see gen PATCHES)
 import logging
 import time
 import queue
@@ -136,7 +137,11 @@ def make_grain_field(
 
     Returns (noise_l [b,1,h,w], noise_c [b,3,h,w]), each unit-std.
     """
-    if generator is not None:
+    if generator is not None and torch.device(device).type != generator.device.type:
+        # v2: a seeded CPU draw for a GPU frame -- the same numbers, moved over
+        noise_l = torch.randn((b, 1, h, w), generator=generator, dtype=dtype).to(device)
+        noise_c = torch.randn((b, 3, h, w), generator=generator, dtype=dtype).to(device)
+    elif generator is not None:
         noise_l = torch.randn((b, 1, h, w), generator=generator, device=device, dtype=dtype)
         noise_c = torch.randn((b, 3, h, w), generator=generator, device=device, dtype=dtype)
     else:
@@ -1486,6 +1491,8 @@ class MergingEngine:
                 + glob.glob(os.path.join(glob.escape(settings["inpainted_folder"]), "*.mov"))
                 + glob.glob(os.path.join(glob.escape(settings["inpainted_folder"]), "*.mkv"))
             )
+            from core.common.clip_names import natural_key  # v2: clips in number order, as Upcoming Jobs lists them (user, 2026-10-29)
+            inpainted_videos.sort(key=lambda p: natural_key(os.path.basename(p)))
             single_mode = False
             _only = getattr(self, "only_clips", None)  # v2: Process Selected
             if _only:
@@ -1817,8 +1824,8 @@ class MergingEngine:
                         self.after(0, self.progress_var.set, i + 1)
                         continue
 
-                inpainted_reader = VideoReader(inpainted_video_path, ctx=cpu(0))
-                splatted_reader = None if is_dual_eye_sbs else VideoReader(splatted_file_path, ctx=cpu(0))
+                inpainted_reader = open_rgb_reader(inpainted_video_path)  # v2: its own bit depth
+                splatted_reader = None if is_dual_eye_sbs else open_rgb_reader(splatted_file_path)
                 mask_reader = VideoReader(mask_file_path, ctx=cpu(0)) if is_split_input else None
 
                 # Dual-eye composite source: supplies BOTH the occlusion masks and
@@ -1826,7 +1833,7 @@ class MergingEngine:
                 dual_splat_reader = None
                 if dual_splat_path:
                     try:
-                        _gr = VideoReader(dual_splat_path, ctx=cpu(0))
+                        _gr = open_rgb_reader(dual_splat_path)  # v2: its own bit depth
                         if len(_gr) != len(inpainted_reader):
                             logger.warning(
                                 f"[merge] dual-eye: frame-count mismatch for '{core_name}' — "
@@ -1874,7 +1881,7 @@ class MergingEngine:
                         housekeeping_log.info(
                             f"Found matching original video for dual-input: {os.path.basename(original_video_path)}"
                         )
-                        original_reader = VideoReader(original_video_path, ctx=cpu(0))
+                        original_reader = open_rgb_reader(original_video_path)  # v2: its own bit depth
                     else:
                         if core_name not in (getattr(self, "accept_missing_originals", None) or ()):
                             raise FileNotFoundError(  # v2: fail, never a black left eye
@@ -1942,7 +1949,7 @@ class MergingEngine:
                             )
                             if _am_src and os.path.exists(_am_src):
                                 try:
-                                    _am_extra_reader = VideoReader(_am_src, ctx=cpu(0))
+                                    _am_extra_reader = open_rgb_reader(_am_src)  # v2: its own bit depth
                                     _am_orig = _am_extra_reader
                                 except Exception as _e:
                                     logger.debug(
@@ -3016,6 +3023,9 @@ class MergingEngine:
         if not res_before:
             out["reason"] = "no render"
             return out
+        if torch.cuda.is_available():  # v2: measured on the GPU (see gen PATCHES)
+            _cu = lambda r: r if r is None else {k: (v.cuda() if torch.is_tensor(v) else v) for k, v in r.items()}
+            res_before, res_after = _cu(res_before), _cu(res_after)
         blend_raw = res_before["blended"]
         pm = res_before["mask"]
         fillsel = (pm[0] > 0.5).float()
@@ -3178,7 +3188,8 @@ class MergingEngine:
             floor = 0.0
         info["floor"] = floor
         info["eligible"] = len(eligible)
-        picks = [fi for _c, fi in eligible[: max(1, int(n_samples))]]
+        # v2: in frame order -- the readers only run forward cheaply; a median doesn't care
+        picks = sorted(fi for _c, fi in eligible[: max(1, int(n_samples))])
         if not picks:
             info["reason"] = "no frame had any measurable fill"
             _bar(bar_total)  # close the line rather than leave it part-drawn

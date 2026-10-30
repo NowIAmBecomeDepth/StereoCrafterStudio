@@ -368,6 +368,138 @@ class ControllerTest(FolderCase):
         self.assertIn("Make room there", why)
         self.assertFalse(self.ctl.property("download")["key"])
 
+    def test_a_package_row_installs_through_the_same_queue(self):
+        """TensorRT's row (2026-10-29): Install, no fraction on the bar, then Installed."""
+        from unittest import mock
+        site = _FakeSite(self)
+        pkg = C.Model("pkg", "Fake TensorRT", "DepthCrafter", kind="package", extra="tensorrt",
+                      modules=(site.module,), installed_size="2.3 GB")
+        C.MODELS = (*C.MODELS, pkg)
+        C.MODELS_BY_KEY = {m.key: m for m in C.MODELS}
+        self.ctl.refresh()
+        self.assertEqual(self.state("pkg")["state"], "missing")
+        self.assertEqual(self.state("pkg")["size"], "2.3 GB")
+        with mock.patch.object(C, "_uv", site.uv):
+            self.assertEqual(self.ctl.start("pkg"), "")
+            self.assertEqual(self.ctl.property("download")["progress"], -1.0, "the bar has no fraction")
+            self.assertTrue(self.pump(lambda: self.state("pkg")["state"] == "installed"))
+        self.assertTrue(self.pump(lambda: not self.ctl.property("download")["key"]))
+        self.assertNotIn("error", self.ctl.property("download"))
+
+
+class _FakeSite:
+    """A temp folder on sys.path standing in for site-packages, and a fake uv that records its
+    arguments and writes the module there (exit 3 when told to fail)."""
+
+    SCRIPT = (
+        "import os, sys, json\n"
+        "site = os.environ['SC_FAKE_SITE']\n"
+        "open(os.path.join(site, 'argv.json'), 'w').write(json.dumps(sys.argv[1:]))\n"
+        "print('Resolved 3 packages in 0.1s', flush=True)\n"
+        "if os.environ.get('SC_FAKE_FAIL'):\n"
+        "    print('error: no wheel for this platform', flush=True); sys.exit(3)\n"
+        "import time; time.sleep(float(os.environ.get('SC_FAKE_SLEEP', '0')))\n"
+        "open(os.path.join(site, os.environ['SC_FAKE_MODULE'] + '.py'), 'w').write('')\n"
+    )
+
+    def __init__(self, case: unittest.TestCase):
+        self.dir = Path(tempfile.mkdtemp())
+        self.module = "sc_fake_trt_" + str(abs(hash(str(self.dir))))
+        sys.path.insert(0, str(self.dir))
+        env = {"SC_FAKE_SITE": str(self.dir), "SC_FAKE_MODULE": self.module}
+        saved = {k: os.environ.get(k) for k in (*env, "SC_FAKE_FAIL", "SC_FAKE_SLEEP")}
+        os.environ.update(env)
+
+        def undo():
+            sys.path.remove(str(self.dir))
+            for k, v in saved.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+            shutil.rmtree(self.dir, ignore_errors=True)
+        case.addCleanup(undo)
+
+    def uv(self):
+        return [sys.executable, "-c", self.SCRIPT]
+
+    def argv(self):
+        import json
+        return json.loads((self.dir / "argv.json").read_text())
+
+
+class PackageTest(unittest.TestCase):
+    """Kind "package" (TensorRT, user 2026-10-29: "download and install tensorrt from studio like we do
+    the weights"): uv pip install into Studio's own environment at uv.lock's pins. A fake uv: nothing is
+    installed."""
+
+    def model(self, site):
+        return C.Model("pkg", "Fake TensorRT", "DepthCrafter", kind="package", extra="tensorrt",
+                       modules=(site.module,), installed_size="2.3 GB")
+
+    def test_tensorrt_has_a_row(self):
+        m = C.MODELS_BY_KEY["tensorrt"]
+        self.assertEqual(m.kind, "package")
+        self.assertEqual(m.modules, ("tensorrt", "onnx", "onnxscript"))
+
+    def test_the_pins_are_uv_locks(self):
+        pins = C.pins("tensorrt")
+        self.assertEqual(sorted(p.split("==")[0] for p in pins), ["onnx", "onnxscript", "tensorrt-cu13"])
+        self.assertTrue(all("==" in p for p in pins), pins)
+        self.assertEqual(C.pins("tensorrt", Path(tempfile.gettempdir()) / "no-such.lock"),
+                         ["tensorrt-cu13", "onnx", "onnxscript"], "without a lock: bare names")
+
+    def test_install_into_studios_python_then_its_here(self):
+        from unittest import mock
+        site = _FakeSite(self)
+        m = self.model(site)
+        self.assertEqual(C.status(m)["state"], "missing")
+        seen = []
+        with mock.patch.object(C, "_uv", site.uv):
+            C.install_packages(m, lambda f, t: seen.append((f, t)), threading.Event(), poll_s=0.05)
+        self.assertEqual(site.argv()[:4], ["pip", "install", "--python", sys.executable])
+        self.assertEqual(site.argv()[4:], C.pins("tensorrt"))
+        self.assertEqual(seen[-1], (1.0, "Installed."))
+        self.assertTrue(all(f == -1.0 for f, _t in seen[:-1]), "no fraction while uv works")
+        self.assertEqual(C.status(m)["state"], "installed", "found at once: the import caches are refreshed")
+
+    def test_a_failure_says_what_uv_said(self):
+        from unittest import mock
+        site = _FakeSite(self)
+        os.environ["SC_FAKE_FAIL"] = "1"
+        with mock.patch.object(C, "_uv", site.uv), self.assertRaises(RuntimeError) as e:
+            C.install_packages(self.model(site), lambda f, t: None, threading.Event(), poll_s=0.05)
+        self.assertIn("exit 3", str(e.exception))
+        self.assertIn("no wheel for this platform", str(e.exception))
+
+    def test_stop_ends_uv(self):
+        from unittest import mock
+        site = _FakeSite(self)
+        os.environ["SC_FAKE_SLEEP"] = "30"
+        stop = threading.Event()
+        threading.Timer(0.5, stop.set).start()
+        began = time.monotonic()
+        with mock.patch.object(C, "_uv", site.uv), self.assertRaises(C.Stopped):
+            C.install_packages(self.model(site), lambda f, t: None, stop, poll_s=0.05)
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertEqual(C.status(self.model(site))["state"], "missing")
+
+    def test_it_waits_for_a_job(self):
+        from unittest import mock
+        site = _FakeSite(self)
+        busy = [True]
+        threading.Timer(0.3, lambda: busy.__setitem__(0, False)).start()
+        seen = []
+        with mock.patch.object(C, "_uv", site.uv):
+            C.install_packages(self.model(site), lambda f, t: seen.append(t), threading.Event(), poll_s=0.05,
+                               wait=lambda: "DepthCrafter is running a job." if busy[0] else "")
+        self.assertTrue(seen[0].startswith("Waiting: DepthCrafter"), seen[:2])
+        self.assertEqual(C.status(self.model(site))["state"], "installed")
+
+    def test_no_uv_says_so(self):
+        from unittest import mock
+        with mock.patch.object(C.shutil, "which", return_value=None),                 mock.patch.object(C.Path, "home", return_value=Path(tempfile.gettempdir()) / "nobody-home"):
+            with self.assertRaises(RuntimeError) as e:
+                C._uv()
+        self.assertIn("needs uv", str(e.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

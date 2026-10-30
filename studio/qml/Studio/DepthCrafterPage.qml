@@ -304,6 +304,18 @@ ChangeFoldersButton {
                         help: page.help("cpu_offload")
                         DcDrop { key: "cpu_offload"; model: page.dc.choices.cpu_offload }
                     }
+                    DcCheck {
+                        key: "use_tensorrt_var"; text: "TensorRT VAE"
+                        // not installed: to Settings > Studio > Models to install it (user, 2026-10-29)
+                        guard: () => Theme.needModel("tensorrt", "TensorRT isn't installed yet",
+                                                     "Install NVIDIA TensorRT here, then tick TensorRT VAE again.")
+                        help: "Runs DepthCrafter's VAE (the encode before the depth and the decode after it) through NVIDIA TensorRT. The depth stays as close to exact as the normal way; the time saved is small at many Inference Steps and a high Overlap (about 8% on a 10-step clip), more at few steps. The first clip at a new size waits a few minutes while its engines are built (kept in trt_engines and reused). Needs TensorRT installed once (Settings > Studio > Models: NVIDIA TensorRT, Install); without it DepthCrafter runs the normal way."
+                    }
+                    DcCheck {
+                        key: "use_tensorrt_unet_var"; text: "   ↳ UNet Too"
+                        shown: !!page.st.use_tensorrt_var
+                        help: "Runs the UNet (most of DepthCrafter's time) through TensorRT as well: about 1.8 to 2 times as fast overall. The first clip at a new size or Window Size waits about 20 minutes while its engine is built (about 3 GB of disk); a shorter clip uses the same engine. The depth is not bit-identical: about 1.7 10-bit codes from exact on average, mostly the whole frame a code or two brighter, against the VAE's quarter code."
+                    }
                 }
 
                 Section {

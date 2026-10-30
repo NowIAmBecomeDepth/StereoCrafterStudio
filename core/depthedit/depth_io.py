@@ -36,6 +36,8 @@ from typing import Callable, Iterator, Optional, Tuple
 
 import numpy as np
 
+from core.common.frame_pipe import popen_frames
+
 logger = logging.getLogger(__name__)
 
 #: Every depth frame is decoded to this, whatever it was stored as.
@@ -197,7 +199,7 @@ def iter_codes(info: ClipInfo, stop: Optional[threading.Event] = None) -> Iterat
     """Yield each frame's Y plane as (H, W) uint16 10-bit codes, in order."""
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", info.path,
            "-an", "-sn", "-dn", *_range_filter(info), "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "pipe:1"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_NO_WINDOW)
+    proc = popen_frames(cmd)        # a 1 MB pipe: twice the 4 KB default's throughput
     fw, fh = info.file_size or (info.width, info.height)
     resize = (fw, fh) != (info.width, info.height)
     if resize:
@@ -262,7 +264,7 @@ def iter_rgb(path: str, width: int, height: int, stop: Optional[threading.Event]
     """
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", path, "-an", "-sn", "-dn",
            "-vf", f"scale={width}:{height}:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW)
+    proc = popen_frames(cmd, stderr=subprocess.DEVNULL)
     frame_bytes = width * height * 3
     try:
         while True:

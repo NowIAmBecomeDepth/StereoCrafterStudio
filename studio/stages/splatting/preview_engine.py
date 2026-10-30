@@ -3239,6 +3239,8 @@ class SplattingPreviewEngine:
         if self.multi_map_var.get():
             # Multi-Map mode: store sidecars in 'sidecars' subfolder
             base_folder = self.input_depth_maps_var.get()
+            if base_folder and os.path.isfile(base_folder):  # v2: one map picked -- its folder (see gen PATCHES)
+                base_folder = os.path.dirname(base_folder)
             sidecar_folder = os.path.join(base_folder, "sidecars")
             # Create the sidecars folder if it doesn't exist
             os.makedirs(sidecar_folder, exist_ok=True)
@@ -4086,7 +4088,7 @@ class SplattingPreviewEngine:
             left_eye_tensor_resized = left_eye_tensor.cuda()  # Use original res
 
         # --- OPTIMIZATION: Early exit for non-processed views ---
-        if preview_source == "Original (Left Eye)":
+        if preview_source == "Original (Left Eye)" and not getattr(self, "_pick_only", False):  # v2: the picker
             left_np = (
                 left_eye_tensor_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255
             ).astype(np.uint8)
@@ -4395,6 +4397,10 @@ class SplattingPreviewEngine:
         logger.debug(
             f"Final normalized depth shape: {depth_normalized.shape}, range: [{depth_normalized.min():.2f}, {depth_normalized.max():.2f}]"
         )
+
+        if getattr(self, "_pick_only", False):  # v2: the Convergence picker wants this depth only (see gen PATCHES)
+            self._pick_depth = depth_normalized
+            return None
 
         # Subtitle mask: pin masked pixels to the convergence anchor, the same
         # anchor-relative lerp the renderer applies (render_processor step 3.6).

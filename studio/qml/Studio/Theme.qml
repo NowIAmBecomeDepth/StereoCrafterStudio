@@ -193,6 +193,17 @@ Item {
     signal toastRequested(string kind, string title, string message)
     function toast(kind, title, message) { toastRequested(kind, title, message) }
 
+    // ---- Settings > Studio > Models, opened at one row ---------------------
+    // (user, 2026-10-29: a TensorRT box ticked without TensorRT goes there to install it)
+    signal modelsRequested(string key)
+    // true when model `key` is here; else says so, opens the Models window at its row, and false
+    function needModel(key, title, message) {
+        if (typeof Models === "undefined" || !Models || Models.installed(key)) return true
+        toast("info", title, message)
+        modelsRequested(key)
+        return false
+    }
+
     // Segoe Fluent Icons code points.
     readonly property var icon: ({
         play: "", pause: "", stop: "", settings: "", check: "",

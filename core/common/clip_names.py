@@ -20,6 +20,17 @@ _OWN = re.compile(r"(?:_\d+_(?:" + "|".join(WIDTH_WORDS) + r")|_(?:" + "|".join(
                   re.IGNORECASE)
 
 
+_DIGITS = re.compile(r"(\d+)")
+
+
+def natural_key(name: str) -> tuple:
+    """Sort key for names in number order: clip_110 < clip_1009 < clip_1100 (a tester, 2026-10-29:
+    a plain sort put clip_1100 after clip_110). Case-blind; the plain name breaks ties. The split
+    puts text at the even places and numbers at the odd ones, so two keys compare like with like."""
+    parts = _DIGITS.split(name.lower())
+    return (tuple(int(p) if i % 2 else p for i, p in enumerate(parts)), name)
+
+
 def is_own_file(stem: str, name: str) -> bool:
     """True when file `name` (a basename) is clip `stem`'s own: ``stem`` then ``.ext``, or a
     stage's word (``_<width>`` first for splats, inpainted and merged outputs). Case-blind."""

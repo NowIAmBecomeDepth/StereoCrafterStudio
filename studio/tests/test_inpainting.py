@@ -90,6 +90,265 @@ class JoinChunksTest(unittest.TestCase):
         self.assertNotIn("torch.cat(results", src)
 
 
+class MaskBlurSlicesTest(unittest.TestCase):
+    """A user's measurements (2026-10-29): the mask blur ran over the whole clip at once on the CPU, and a
+    778-frame 1840x768 clip asked for 70-103 GB, failed, and was skipped -- hard-edged masks. Now a slice
+    of frames at a time (on the GPU when there is one), the same blur."""
+
+    def setUp(self):
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        self.E, self.torch, self.mock = E, torch, mock
+        self.eng = object.__new__(E.InpaintingEngine)
+        g = torch.Generator().manual_seed(7)
+        self.mask = (torch.rand((40, 1, 32, 48), generator=g) > 0.6).float()
+
+    def blur(self, slice_values, cuda):
+        """_apply_gaussian_blur with the slice size and the GPU as given, and the frames each conv2d saw."""
+        seen = []
+        real = self.torch.nn.functional
+
+        class F:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def conv2d(self, x, *a, **k):
+                seen.append(int(x.shape[0]))
+                return real.conv2d(x, *a, **k)
+        with self.mock.patch.object(self.E, "F", F()), \
+                self.mock.patch.object(self.E, "_BLUR_SLICE_VALUES", slice_values, create=True), \
+                self.mock.patch.object(self.E.torch.cuda, "is_available", lambda: cuda):
+            out = self.eng._apply_gaussian_blur(self.mask, 9)
+        return out, seen
+
+    def test_a_slice_at_a_time_the_same_blur(self):
+        whole, _ = self.blur(1 << 40, cuda=False)            # the whole clip in one go, as v1 did
+        per_frame = self.mask[0].numel()
+        sliced, seen = self.blur(per_frame * 8, cuda=False)
+        self.assertTrue(seen and max(seen) <= 8, f"conv2d saw {max(seen)} frames at once (slices of 8)")
+        self.assertTrue(self.torch.equal(sliced, whole), "slicing changed the blur")
+        self.assertGreater(float((whole - self.mask).abs().max()), 0.1, "nothing was blurred")
+
+    @unittest.skipUnless(__import__("torch").cuda.is_available(), "no GPU")
+    def test_on_the_gpu_the_same_blur_back_on_the_cpu(self):
+        cpu, _ = self.blur(1 << 40, cuda=False)
+        gpu, seen = self.blur(self.mask[0].numel() * 8, cuda=True)
+        self.assertEqual((gpu.device.type, gpu.dtype), ("cpu", self.torch.float32))
+        self.assertTrue(max(seen) <= 8)
+        self.assertLess(float((gpu - cpu).abs().max()), 1e-6, "the GPU blur differs past float rounding")
+
+
+class DecodedFramesTest(unittest.TestCase):
+    """A user's measurements (2026-10-29): each decoded chunk went to the CPU as floats, through 25 PIL
+    images and back (~0.5 s a chunk, the GPU idle). _decoded_to_frames rounds on the GPU and moves 8-bit
+    frames: the same numbers as v1's PIL round trip."""
+
+    def test_the_same_frames_as_the_pil_round_trip(self):
+        import numpy as np
+        import torch
+        from diffusers.image_processor import VaeImageProcessor
+        from pipelines.stereo_video_inpainting import tensor2vid
+        from studio.stages.inpainting import engine as E
+        proc = VaeImageProcessor()
+        g = torch.Generator().manual_seed(3)
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        # [1, C, T, H, W] in -1.2..1.2 (clamped ends too), and the exact half-levels the rounding decides
+        decoded = (torch.rand((1, 3, 5, 24, 40), generator=g) * 2.4 - 1.2)
+        halves = (torch.arange(256).float() + 0.5) / 255 * 2 - 1
+        decoded[0, :, 0, 0, :] = halves[:40]
+        for dtype in (torch.float32, torch.float16):
+            d = decoded.to(dev, dtype)
+            pil = tensor2vid(d, proc, output_type="pil")[0]
+            want = torch.stack([torch.tensor(np.array(img)).permute(2, 0, 1).float() / 255.0 for img in pil])
+            got = E._decoded_to_frames(d, proc)
+            self.assertEqual((got.device.type, got.dtype, tuple(got.shape)), ("cpu", torch.float32, tuple(want.shape)))
+            self.assertTrue(torch.equal(got, want), f"{dtype}: differs by {float((got - want).abs().max())}")
+
+    def test_the_engine_uses_it(self):
+        import inspect
+        from studio.stages.inpainting import engine as E
+        src = inspect.getsource(E.InpaintingEngine.process_single_video)
+        self.assertIn("_decoded_to_frames(decoded_frames", src)
+        self.assertNotIn('output_type="pil"', src)
+
+
+class ChunkCheckpointInBackgroundTest(unittest.TestCase):
+    """A user's measurements (2026-10-29): each chunk's resume file (~730 MB) was written while the GPU
+    waited, ~1.45 s a chunk. Now on a thread: the save returns at once, the file is the same, and a
+    reader waits for it."""
+
+    def test_saved_in_the_background_the_same_file(self):
+        import time
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = object.__new__(E.InpaintingEngine)
+        gate = threading.Event()
+        real_save = torch.save
+
+        def slow_save(obj, path, *a, **k):
+            gate.wait(3)                                    # a big file on a slow disk
+            return real_save(obj, path, *a, **k)
+        cur = torch.rand((6, 3, 8, 10))
+        app = cur[:4].clone()
+        want_cur, want_app = cur.clone(), app.clone()
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(E.torch, "save", slow_save):
+            path = os.path.join(d, "clip.chunk_00000.pt")
+            t0 = time.monotonic()
+            eng._save_chunk_checkpoint(path, {"v": 1}, 0, cur, app)
+            took = time.monotonic() - t0
+            cur.mul_(0)                                      # the chunk loop goes on with its tensors
+            app.mul_(0)
+            gate.set()
+            got = eng._load_chunk_checkpoint(path, {"v": 1}, 0, 4)     # waits for the write
+            self.assertLess(took, 1.0, f"the save held the job for {took:.2f} s")
+            self.assertIsNotNone(got, "the checkpoint wasn't there to load")
+            self.assertTrue(torch.equal(got["current_chunk_generated"], want_cur))
+            self.assertTrue(torch.equal(got["append_frames"], want_app), "the file took the later changes")
+            self.assertFalse(os.path.exists(path + ".tmp"))
+            eng._save_chunk_checkpoint(path, {"v": 1}, 0, want_cur, want_app)
+            E._wait_checkpoint_writes()                      # nothing in flight when the folder goes
+
+    def test_the_job_ends_once_the_last_one_is_on_disk(self):
+        """A Stop after this chunk returns while its checkpoint is still being written: the job's end
+        (processing_done, every way out of the batch) waits for it."""
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        eng = object.__new__(E.InpaintingEngine)
+        eng.pipeline, eng._job_started, eng.hooks = None, None, Hooks()
+        eng.processed_count = E._Counter(lambda: None)
+        eng.total_videos = E._Counter(lambda: None)
+        eng.outcome = None
+        eng._report_progress = lambda: None
+        gate = threading.Event()
+        real_save = torch.save
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(E.torch, "save", lambda obj, p, *a, **k: (gate.wait(0.5), real_save(obj, p))):
+            path = os.path.join(d, "clip.chunk_00000.pt")
+            eng._save_chunk_checkpoint(path, {"v": 1}, 0, torch.zeros(2, 3, 4, 4), torch.zeros(2, 3, 4, 4))
+            self.assertFalse(os.path.exists(path), "the write didn't wait for the stand-in disk")
+            eng.processing_done(stopped=True)
+            self.assertTrue(os.path.exists(path), "the job ended before its last checkpoint was on disk")
+
+
+@unittest.skipUnless(__import__("torch").cuda.is_available(), "no GPU")
+class MaskChainOnTheGpuTest(unittest.TestCase):
+    """A user's measurements (2026-10-29): the mask chain greyed each frame with cv2 in a Python loop and
+    ran the rest over the whole clip on the CPU -- twice a clip, and again for every Hi-Res chunk. Now
+    32 frames at a time on the GPU, cv2's own grey formula: the same masks."""
+
+    SETTINGS = [(0.0, 0.0, 0, 0, 0), (0.1, 0.0, 5, 9, 15), (0.05, 0.5, 3, 0, 7), (0.0, 0.3, 0, 11, 0),
+                (0.2, 0.0, 7, 0, 0)]
+
+    def setUp(self):
+        import torch
+        from unittest import mock
+        from studio.stages.inpainting import engine as E
+        self.E, self.torch, self.mock = E, torch, mock
+        self.eng = object.__new__(E.InpaintingEngine)
+        self.eng._setting = lambda k: False
+        g = torch.Generator().manual_seed(11)
+        m = torch.zeros((70, 3, 48, 64), dtype=torch.uint8)            # over two 32-frame slices
+        for t in range(70):                                             # coloured blobs, mask-like
+            x, y = int(torch.randint(0, 50, (1,), generator=g)), int(torch.randint(0, 34, (1,), generator=g))
+            m[t, :, y:y + 14, x:x + 14] = torch.randint(0, 256, (3, 1, 1), generator=g, dtype=torch.uint8)
+        m += torch.randint(0, 40, m.shape, generator=g, dtype=torch.uint8)
+        self.mask = m
+
+    def chain(self, frames, s, gpu):
+        calls = []
+        real = self.E.cv2.cvtColor
+        with self.mock.patch.object(self.E.gpu_ops, "gpu_available", lambda: gpu), \
+                self.mock.patch.object(self.E.cv2, "cvtColor", lambda *a: (calls.append(1), real(*a))[1]):
+            out = self.eng._process_mask_frames(frames, s[0], s[1], s[2], s[3], s[4], "clip.mp4",
+                                                debug_prefix=None, save_debug=False)
+        return out, len(calls)
+
+    def test_the_grey_formula_is_this_opencvs(self):
+        self.assertIsNotNone(self.E._gray_formula(), "cv2's grey isn't a known formula here: the chain stays on the CPU")
+
+    def test_the_same_masks_on_the_gpu(self):
+        for frames in (self.mask, self.mask.float(), self.mask.float() / 255.0):
+            for s in self.SETTINGS:
+                cpu, cpu_calls = self.chain(frames, s, gpu=False)
+                gpu, gpu_calls = self.chain(frames, s, gpu=True)
+                label = f"{frames.dtype} max {float(frames.max()):.0f}, settings {s}"
+                self.assertEqual(cpu_calls, 70)
+                self.assertEqual(gpu_calls, 0, f"{label}: greyed frame by frame with cv2 (not on the GPU)")
+                self.assertEqual((gpu.device.type, gpu.dtype, tuple(gpu.shape)), ("cpu", self.torch.float32, (70, 1, 48, 64)))
+                if s[4] == 0:
+                    self.assertTrue(self.torch.equal(gpu, cpu), f"{label}: differs")
+                else:
+                    # the blur on the GPU: the CPU's within float rounding (a post threshold can't flip on it here)
+                    self.assertLess(float((gpu - cpu).abs().max()), 1e-6 if s[1] == 0 else 1e-9, label)
+
+    def test_a_gpu_chunk_stays_on_the_gpu(self):
+        out, _ = self.chain(self.mask.to("cuda").float(), self.SETTINGS[1], gpu=True)
+        self.assertEqual(out.device.type, "cuda")
+
+
+class Uint16FramesTest(unittest.TestCase):
+    """The Hi-Res frames for the encoder made where they are (2026-10-29): v1's PNG numbers exactly."""
+
+    def test_the_png_paths_numbers(self):
+        import numpy as np
+        import torch
+        from studio.stages.inpainting import engine as E
+        g = torch.Generator().manual_seed(5)
+        frames = torch.rand((3, 3, 20, 30), generator=g) * 1.4 - 0.2      # past both ends too
+        frames[0, 0, 0, :5] = torch.tensor([0.0, 1.0, 0.5, 1 / 65535, 65534.5 / 65535])
+        want = np.stack([(np.clip(f.permute(1, 2, 0).numpy(), 0.0, 1.0) * 65535.0).astype(np.uint16) for f in frames])
+        devices = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+        for dev in devices:
+            got = E._frames_to_uint16(frames.to(dev))
+            self.assertEqual((got.dtype, got.shape), (np.uint16, want.shape))
+            self.assertTrue(np.array_equal(got, want), dev)
+
+
+class DecodeParkingTest(unittest.TestCase):
+    """CPU Offload none (a user, 2026-10-29): the UNet and CLIP went to RAM and back around every chunk's
+    decode -- 0.93 s and 3 GB each way on a 32 GB card -- for 16 GB cards, where the decode didn't fit
+    beside them. Now only when it doesn't: asked of the free VRAM (Windows spills rather than failing)."""
+
+    def run_decode(self, free_gb):
+        import types
+        import torch
+        from unittest import mock
+        from pipelines import stereo_video_inpainting as P
+        moves = []
+
+        class Mod:
+            device = torch.device("cuda")
+
+            def to(self, dev):
+                moves.append(str(dev))
+        fake = types.SimpleNamespace(park_idle_for_decode="auto", _parked_last=None, unet=Mod(), image_encoder=Mod(),
+                                     vae=types.SimpleNamespace(device=torch.device("cuda")),
+                                     _decode_latents=lambda l, n, c: "frames")
+        latents = torch.zeros((1, 25, 4, 96, 230))                  # 1840x768
+        with mock.patch.object(P.torch.cuda, "is_available", lambda: True), \
+                mock.patch.object(P.torch.cuda, "mem_get_info", lambda d=None: (free_gb * 2**30, 32 * 2**30)), \
+                mock.patch.object(P.torch.cuda, "memory_reserved", lambda d=None: 0), \
+                mock.patch.object(P.torch.cuda, "memory_allocated", lambda d=None: 0), \
+                mock.patch.object(P.torch.cuda, "empty_cache", lambda: None):
+            out = P.StableVideoDiffusionInpaintingPipeline.decode_latents(fake, latents, 25, 2)
+        self.assertEqual(out, "frames")
+        return moves
+
+    def test_room_for_the_decode_nothing_moves(self):
+        self.assertEqual(self.run_decode(free_gb=20), [], "parked with 20 GB free for an 11 GB decode")
+
+    def test_short_of_room_they_are_parked_and_put_back(self):
+        self.assertEqual(self.run_decode(free_gb=8), ["cpu", "cpu", "cuda", "cuda"])
+
+    def test_offload_none_asks(self):
+        import inspect
+        from pipelines import stereo_video_inpainting as P
+        self.assertIn('park_idle_for_decode = "auto"', inspect.getsource(P.load_inpainting_pipeline))
+
+
 class RetiredSettingsTest(unittest.TestCase):
     """Post-Inpainting Blend left Studio (user, 2026-10-11: Merging blends the
     fill in, with more control). A config, preset or older Studio that saved it
@@ -417,6 +676,25 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn("codec", rs)
         self.assertEqual(eng.app_config["codec"], S.DEFAULTS["codec"])
 
+    def test_tensorrt_box_turns_it_on_and_compile_off(self):
+        """TensorRT (a user's patch, 2026-10-29): on for the loaded pipeline, Torch Compile skipped --
+        unless TensorRT can't run here, when Torch Compile stays as set; the engines released at the end."""
+        from unittest import mock
+        E, seen = self.E, []
+        with mock.patch.object(E, "enable_tensorrt", lambda *a: seen.append(("on",) + a)), \
+                mock.patch.object(E, "release_tensorrt", lambda p: seen.append(("released", p))), \
+                mock.patch.object(E, "trt_unavailable_reason", lambda: ""):
+            self.clip("shot-0006_640_splatted4.mp4")
+            self.run_batch(use_tensorrt=True, use_compile=True)
+            with mock.patch.object(E, "trt_unavailable_reason", lambda: "'tensorrt' is not installed"):
+                self.clip("shot-0007_640_splatted4.mp4")
+                self.run_batch(use_tensorrt=True, use_compile=True)
+            self.clip("shot-0008_640_splatted4.mp4")
+            self.run_batch(use_tensorrt=False, use_compile=True)
+        self.assertEqual([kw["use_compile"] for kw in self.loads], [False, True, True])
+        self.assertEqual(seen[0], ("on", "PIPELINE", 25, True, "model"))
+        self.assertEqual([s[0] for s in seen], ["on", "released", "on", "released", "released"])
+
 
 class ResumeTests(unittest.TestCase):
     """The per-clip resume path (audit 2026-09-28 #6 / #7), torch work stubbed:
@@ -546,13 +824,15 @@ class StopTests(unittest.TestCase):
             def decode_latents(latents, num_frames, decode_chunk_size):
                 return latents
 
-        saved = {k: getattr(E, k) for k in ("spatial_tiled_process", "tensor2vid")}
+        # the decode's frames: _decoded_to_frames since 2026-10-29 (it was tensor2vid's PIL images)
+        saved = {k: getattr(E, k) for k in ("spatial_tiled_process", "_decoded_to_frames")}
         self.addCleanup(lambda: [setattr(E, k, v) for k, v in saved.items()])
         E.spatial_tiled_process = tiled
-        E.tensor2vid = lambda d, proc, output_type="pil": [[Image.new("RGB", (8, 8))] * d.shape[1]]
+        E._decoded_to_frames = lambda d, proc: torch.zeros(d.shape[1], 3, 8, 8)
         result = eng.process_single_video(pipeline=Pipe(), input_video_path=str(root / "clip_splatted2.mp4"),
                                           save_dir=str(root), frames_chunk=6, overlap=2, num_inference_steps=5,
                                           stop_event=stop)
+        E._wait_checkpoint_writes()     # as the job's end does (processing_done): written in the background
         chunks = sorted(p.name for p in (root / "_inpaint_resume").glob("*.chunk_*.pt"))
         return result, steps, chunks
 

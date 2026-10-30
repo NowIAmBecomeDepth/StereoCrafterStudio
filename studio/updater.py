@@ -100,12 +100,12 @@ def current_branch(repo: Path) -> str:
 
 #: Trailer lines a commit message ends with -- not part of what changed.
 _TRAILERS = ("co-authored-by:", "signed-off-by:", "reviewed-by:")
-CHANGELOG_CHARS = 600
 
 
 def changelog_text(body: str) -> str:
     """A commit message's body as the dialog's changelog shows it: the trailers dropped, lines
-    joined back into paragraphs (git wraps them), bullets kept, cut at CHANGELOG_CHARS."""
+    joined back into paragraphs (git wraps them), bullets kept. Never cut (user, 2026-10-29: the
+    600-character cap is gone; the dialog wraps each note and scrolls the list)."""
     paras, cur = [], []
     for raw in str(body or "").replace("\r", "").split("\n"):
         line = raw.strip()
@@ -119,8 +119,7 @@ def changelog_text(body: str) -> str:
             cur.append(line)
     if cur:
         paras.append(" ".join(cur))
-    text = "\n".join(p for p in paras if p)
-    return text if len(text) <= CHANGELOG_CHARS else text[:CHANGELOG_CHARS - 3].rstrip() + "..."
+    return "\n".join(p for p in paras if p)
 
 
 MAX_FILES = 500
@@ -319,8 +318,12 @@ def helper_script(repo: Path, pid: int, sha: str, launch: str, result_path: Path
         "  $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source",
         "  if (-not $uv) { $cand = Join-Path $env:USERPROFILE '.local\\bin\\uv.exe'; if (Test-Path $cand) { $uv = $cand } }",
         "  if ($uv) {",
-        "    Log 'uv sync'",
-        "    & $uv sync 2>&1 | ForEach-Object { Log $_ }",
+        # Inpainting's TensorRT is an extra (2026-10-29): a plain sync would take it out again
+        "    $uvArgs = @('sync')",
+        "    if (Test-Path -LiteralPath (Join-Path $repo '.venv\\Lib\\site-packages\\tensorrt')) "
+        "{ $uvArgs += @('--extra', 'tensorrt') }",
+        "    Log ('uv ' + ($uvArgs -join ' '))",
+        "    & $uv @uvArgs 2>&1 | ForEach-Object { Log $_ }",
         "    if ($LASTEXITCODE -ne 0) { $uvNote = ' Updating the Python packages failed: run uv sync in the Studio folder.' }",
         "  } else { $uvNote = ' New Python packages are needed: run uv sync in the Studio folder (uv was not found).' }",
         "}",

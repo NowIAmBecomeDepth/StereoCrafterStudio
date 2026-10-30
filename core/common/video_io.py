@@ -27,6 +27,10 @@ from core.common.encoding_utils import build_encoder_args, get_encoding_config_f
 #: console of its own) each one flashed one (audit 2026-09-28, minor).
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+#: Raw-frame decodes read through a 1 MB pipe: the 4 KB default halved FFmpeg's throughput
+#: (Merging's three 16-bit reads took 7.6 s where Decord took 1.8, 2026-10-27).
+from core.common.frame_pipe import popen_frames as _popen_frames  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # Raw/All only below WARNING (see unified_gui/console_window.py). The full
@@ -190,11 +194,72 @@ def _stop_pipe_process(proc) -> None:
             pass
 
 
+#: Planar YUV the reader takes from FFmpeg as it is and converts itself (_yuv_to_rgb255):
+#: 8-bit (yuvj: full range) and 9-16-bit little-endian.
+_NATIVE_YUV = re.compile(r"^yuv(j?)(420|422|444)p(?:(9|10|12|14|16)le)?$")
+#: Codecs handed to NVDEC (-hwaccel cuda) -- the ones it decodes at 10 bits; FFmpeg
+#: decodes in software where the card can't (4:2:2 before Blackwell, ...).
+_NVDEC_CODECS = ("hevc", "av1", "vp9")
+_YUV_K = {"bt709": (0.2126, 0.0722), "bt601": (0.299, 0.114), "bt2020": (0.2627, 0.0593)}
+
+
+def _yuv_to_rgb255(raw, w: int, h: int, sub_x: int, sub_y: int, bits: int, in_range: str, in_matrix: str,
+                   device, as_uint8: bool = False) -> np.ndarray:
+    """One planar YUV frame (little-endian, ``bits`` deep) as RGB float16 on the 0..255 scale
+    (``as_uint8``: rounded to uint8, for the 8-bit reader).
+
+    The exact BT.601/709/2020 maths (FFmpeg's rgb48 conversion ran up to 1.0 of 255 dark: white
+    at 254.0); chroma brought to full size linearly, sited as MPEG-2/H.264/HEVC put it --
+    horizontally on the even luma samples, vertically between rows. ``raw`` must be writable."""
+    import torch.nn.functional as F
+    cw, ch = -(-w // sub_x), -(-h // sub_y)
+    bps = 1 if bits <= 8 else 2
+    planes = [torch.frombuffer(raw, dtype=torch.uint8 if bps == 1 else torch.int16, count=n, offset=o).view(r, c)
+              for n, o, r, c in ((w * h, 0, h, w), (cw * ch, w * h * bps, ch, cw),
+                                 (cw * ch, (w * h + cw * ch) * bps, ch, cw))]
+    y, u, v = (p.to(device, non_blocking=True).float() for p in planes)
+
+    def full(c):
+        c = c[None, None]
+        if sub_y == 2:
+            c = F.interpolate(c, size=(h, c.shape[3]), mode="bilinear", align_corners=False)
+        if sub_x == 2:
+            nxt = torch.cat([c[..., 1:], c[..., -1:]], dim=3)
+            c = torch.stack([c, (c + nxt) * 0.5], dim=4).flatten(3)[..., :w]
+        return c[0, 0]
+
+    u, v = full(u), full(v)
+    s = float(1 << (bits - 8))
+    if in_range == "pc":
+        m = float((1 << bits) - 1)
+        y, u, v = y / m, (u - 128 * s) / m, (v - 128 * s) / m
+    else:
+        y, u, v = (y - 16 * s) / (219 * s), (u - 128 * s) / (224 * s), (v - 128 * s) / (224 * s)
+    kr, kb = _YUV_K.get(in_matrix, _YUV_K["bt709"])
+    r = y + 2 * (1 - kr) * v
+    b = y + 2 * (1 - kb) * u
+    g = (y - kr * r - kb * b) / (1 - kr - kb)
+    rgb = torch.stack([r, g, b], dim=2).clamp_(0, 1) * 255
+    if as_uint8:
+        return rgb.add_(0.5).to(torch.uint8).cpu().numpy()
+    return rgb.half().cpu().numpy()
+
+
 class FFmpegRGBPipeReader:
     """
     Sequential RGB frame reader backed by an FFmpeg pipe (rawvideo).
     Designed for render-time usage where get_batch() is called with
     increasing frame indices (typically contiguous batches).
+
+    bit16: decode as rgb48 and hand back float16 frames on the SAME 0..255
+    scale as the 8-bit ones, so a 10-bit source keeps its precision through
+    code written for Decord's uint8 (``.float() / 255.0``). See open_rgb_reader.
+
+    yuv_src: the source's stream info, given when the frames are read at its own size.
+    The reader then takes planar YUV as it is -- NVDEC decoding where it can -- and
+    converts it in torch, on the GPU when there is one: half the bytes through the
+    pipe, no swscale, and exact (2026-10-27: Merging's three 16-bit reads 5.4 s -> 3.7;
+    8-bit sources too, as uint8).
     """
 
     def __init__(
@@ -206,6 +271,8 @@ class FFmpegRGBPipeReader:
         total_frames: int,
         in_range: str = "tv",
         in_matrix: str = "bt709",
+        bit16: bool = False,
+        yuv_src: Optional[dict] = None,
     ):
         self.video_path = video_path
         self.width = int(width)
@@ -216,8 +283,28 @@ class FFmpegRGBPipeReader:
         self.in_matrix = in_matrix
         self._proc = None
         self._next_frame = 0
-        self._frame_size = self.width * self.height * 3
+        self.bit16 = bool(bit16)
+        self._pix_fmt = "rgb48le" if self.bit16 else "rgb24"
+        self._frame_size = self.width * self.height * (6 if self.bit16 else 3)
         self._force_fallback = False  # set True if strict scale params fail
+        self._yuv = None              # (pix_fmt, sub_x, sub_y, bits) for a native-YUV read
+        self._device = "cpu"
+        self._nvdec = False
+        m = _NATIVE_YUV.match(str((yuv_src or {}).get("pix_fmt") or ""))
+        bits = int(m.group(3) or 8) if m else 0
+        # 8-bit into uint8 frames, deeper into float16; only with CUDA -- on the CPU the
+        # conversion takes 30 ms a 1080p frame, where FFmpeg's own is quicker
+        if m and (bits > 8) == self.bit16 and torch.cuda.is_available():
+            sub = {"420": (2, 2), "422": (2, 1), "444": (1, 1)}[m.group(2)]
+            self._yuv = (m.group(0), sub[0], sub[1], bits)
+            if m.group(1):                    # yuvj: full range whatever the tags say
+                self.in_range = "pc"
+            cw, ch = -(-self.width // sub[0]), -(-self.height // sub[1])
+            self._pix_fmt = m.group(0)
+            self._frame_size = (self.width * self.height + 2 * cw * ch) * (2 if bits > 8 else 1)
+            self._device = "cuda"
+            # H.264 left to the CPU: NVDEC's frames cost a repack, and 8-bit decodes fast anyway
+            self._nvdec = str(yuv_src.get("codec_name") or "") in _NVDEC_CODECS
 
     def __len__(self):
         return self.total_frames if self.total_frames >= 0 else 0
@@ -228,9 +315,19 @@ class FFmpegRGBPipeReader:
     def _build_cmd(self, start_frame: int = 0):
         # Start from the requested frame index. For render, this is usually 0.
         # Use -ss time seek as a best-effort fast start for non-zero start_frame.
+        if self._force_fallback and self._yuv:   # a failed native read: FFmpeg's RGB instead
+            self._yuv, self._nvdec = None, False
+            self._pix_fmt = "rgb48le" if self.bit16 else "rgb24"
+            self._frame_size = self.width * self.height * (6 if self.bit16 else 3)
         args = ["ffmpeg", "-v", "error", "-nostdin"]
+        if self._nvdec:
+            args += ["-hwaccel", "cuda"]
         if start_frame and self.fps:
             start_time = start_frame / self.fps
+            if self.bit16:
+                # Half a frame early: the seek lands on the first frame AT or after
+                # it, and a time rounded up past frame n's own lands on n + 1.
+                start_time = (start_frame - 0.5) / self.fps
             args += ["-ss", f"{start_time:.6f}"]
         args += ["-i", self.video_path, "-an", "-sn", "-dn"]
 
@@ -238,18 +335,33 @@ class FFmpegRGBPipeReader:
             f"scale={self.width}:{self.height}:flags=bicubic:"
             f"in_range={self.in_range}:out_range={self.in_range}:"
             f"in_color_matrix={self.in_matrix}:out_color_matrix={self.in_matrix},"
-            "format=rgb24"
+            f"format={self._pix_fmt}"
         )
-        vf_fallback = f"scale={self.width}:{self.height}:flags=bicubic,format=rgb24"
+        vf_fallback = f"scale={self.width}:{self.height}:flags=bicubic,format={self._pix_fmt}"
         vf = vf_fallback if self._force_fallback else vf_strict
-        args += ["-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-vsync", "0", "-"]
+        if self._yuv:
+            args += ["-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-vsync", "0", "-"]
+            return args
+        args += ["-vf", vf, "-f", "rawvideo", "-pix_fmt", self._pix_fmt, "-vsync", "0", "-"]
         return args
+
+    def _frame(self, raw: bytes) -> np.ndarray:
+        if self._yuv:
+            _, sub_x, sub_y, bits = self._yuv
+            return _yuv_to_rgb255(raw, self.width, self.height, sub_x, sub_y, bits, self.in_range,
+                                  self.in_matrix, self._device, as_uint8=not self.bit16)
+        if not self.bit16:
+            return np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
+        u16 = np.frombuffer(raw, dtype=np.uint16).reshape(self.height, self.width, 3)
+        # torch's threaded casts: 4 ms a 1080p frame where NumPy's took 26 (Merging read three
+        # clips this way at half its old speed); the values are the same
+        return torch.from_numpy(u16).to(torch.float32).mul_(255.0 / 65535.0).to(torch.float16).numpy()
 
     def _ensure_process(self, start_frame: int):
         if self._proc is not None:
             return
         cmd = self._build_cmd(start_frame=start_frame)
-        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_NO_WINDOW)
+        self._proc = _popen_frames(cmd)
         # Nothing reads this pipe otherwise, and a full one deadlocks the
         # decode against our own blocking stdout read.
         self._stderr = _StderrDrain(self._proc, f"ffmpeg rgb decode {os.path.basename(self.video_path)}")
@@ -273,8 +385,9 @@ class FFmpegRGBPipeReader:
         self.close()
 
     def get_batch(self, indices):
+        dtype = np.float16 if self.bit16 else np.uint8
         if not indices:
-            return _NumpyBatch(np.empty((0, self.height, self.width, 3), dtype=np.uint8))
+            return _NumpyBatch(np.empty((0, self.height, self.width, 3), dtype=dtype))
 
         try:
             # Expect indices to be increasing most of the time; if not, restart.
@@ -298,7 +411,7 @@ class FFmpegRGBPipeReader:
                 self._next_frame += 1
 
             # Read frames for requested indices
-            out = np.empty((len(indices), self.height, self.width, 3), dtype=np.uint8)
+            out = np.empty((len(indices), self.height, self.width, 3), dtype=dtype)
             for j, idx in enumerate(indices):
                 idx = int(idx)
                 if idx < self._next_frame:
@@ -317,15 +430,14 @@ class FFmpegRGBPipeReader:
                         raise EOFError("FFmpegRGBPipeReader reached EOF while skipping gap frames.")
                     self._next_frame += 1
 
-                raw = self._proc.stdout.read(self._frame_size)
-                if not raw or len(raw) < self._frame_size:
+                raw = bytearray(self._frame_size)     # writable: torch takes the 16-bit frame as is
+                if self._proc.stdout.readinto(raw) < self._frame_size:
                     if not self._force_fallback:
                         self._force_fallback = True
                         self._restart(start_frame=min_idx)
                         return self.get_batch(indices)
                     raise EOFError("FFmpegRGBPipeReader reached EOF while reading a frame.")
-                frame = np.frombuffer(raw, dtype=np.uint8).reshape(self.height, self.width, 3)
-                out[j] = frame
+                out[j] = self._frame(raw)
                 self._next_frame += 1
 
             return _NumpyBatch(out)
@@ -341,6 +453,82 @@ class FFmpegRGBPipeReader:
                     pass
                 return self.get_batch(indices)
             raise
+
+
+def as_uint8(frames: np.ndarray) -> np.ndarray:
+    """Frames on the 0..255 scale as uint8: a bit16 reader's float16 rounded, uint8 as is.
+    For what needs 8-bit pictures (OpenCV detection), never for the picture itself."""
+    if frames.dtype == np.uint8:
+        return frames
+    return np.clip(frames.astype(np.float32) + 0.5, 0, 255).astype(np.uint8)
+
+
+class Uint8Frames:
+    """A reader's frames as uint8 (as_uint8), the Decord shape kept: len, get_avg_fps, get_batch."""
+
+    def __init__(self, reader):
+        self._inner = reader
+
+    def __len__(self):
+        return len(self._inner)
+
+    def get_avg_fps(self):
+        return self._inner.get_avg_fps()
+
+    def get_batch(self, indices):
+        return _NumpyBatch(as_uint8(self._inner.get_batch(indices).asnumpy()))
+
+
+def _frame_count(video_path: str) -> int:
+    """The video stream's frame count: the container's, else counted packets."""
+    for entry in ("stream=nb_frames", "stream=nb_read_packets"):
+        cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", entry, "-of", "csv=p=0"]
+        if entry.endswith("packets"):
+            cmd.insert(1, "-count_packets")
+        try:
+            out = subprocess.run(cmd + [video_path], capture_output=True, text=True, timeout=120,
+                                 creationflags=_NO_WINDOW).stdout.strip().split(",")[0]
+            if out.isdigit() and int(out) > 0:
+                return int(out)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return 0
+
+
+def open_rgb_reader(video_path: str) -> "FFmpegRGBPipeReader":
+    """A Decord-shaped colour reader (len, get_avg_fps, get_batch(...).asnumpy())
+    decoded by FFmpeg at the file's own bit depth: above 8 bits it hands back
+    float16 on the 0..255 scale (FFmpegRGBPipeReader bit16), so ``/ 255.0``
+    still gives 0..1 -- with the 10 bits kept. Decord decodes everything to
+    8 bits, and about 6 codes (of 1023) darker than FFmpeg's BT.709 (user,
+    2026-10-27: Merging's eyes banded and dark)."""
+    info = get_video_stream_info(video_path) or {}
+    w, h = int(info.get("width") or 0), int(info.get("height") or 0)
+    if w <= 0 or h <= 0:
+        raise ValueError(f"Could not read the video size of {video_path}")
+    fps = 0.0
+    fr = str(info.get("r_frame_rate") or "0/0")
+    if "/" in fr:
+        num, den = fr.split("/")
+        fps = float(num) / float(den) if float(den) > 0 else 0.0
+    cr = str(info.get("color_range") or "").lower()
+    cs = str(info.get("color_space") or "").lower()
+    in_range = "pc" if ("full" in cr or cr == "pc") else "tv"
+    in_matrix = "bt2020" if "2020" in cs else ("bt601" if ("601" in cs or "170m" in cs or "470bg" in cs) else "bt709")
+    bits = _pix_fmt_bits(str(info.get("pix_fmt") or ""))
+    return FFmpegRGBPipeReader(video_path, w, h, fps, _frame_count(video_path), in_range=in_range,
+                               in_matrix=in_matrix, bit16=bits > 8, yuv_src=info)
+
+
+def _pix_fmt_bits(pix_fmt: str) -> int:
+    """Bits per component of an FFmpeg pix_fmt name (8 when it says none)."""
+    p = pix_fmt.lower()
+    if p in ("p010le", "p010be", "p016le", "p016be"):
+        return 10 if "010" in p else 16
+    if p.startswith(("rgb48", "bgr48", "rgba64", "bgra64", "gray16", "y210", "v210")):
+        return 16 if "16" in p or "48" in p or "64" in p else 10
+    m = re.search(r"p(9|10|12|14|16)(le|be)$", p) or re.search(r"(9|10|12|14|16)(le|be)$", p)
+    return int(m.group(1)) if m else 8
 
 
 class FFmpegRGBSingleFrameReader:
@@ -544,7 +732,7 @@ class FFmpegDepthPipeReader:
             "rawvideo",
             "pipe:1",
         ]
-        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_NO_WINDOW)
+        self._proc = _popen_frames(cmd)
         self._stderr = _StderrDrain(self._proc, "ffmpeg depth decode")
         self._next_index = 0
         self._msb_shift = None
@@ -698,8 +886,13 @@ def read_video_frames(
     strict_ffmpeg_decode: bool = False,
     dataset: str = "open",
     is_depth: bool = False,
+    high_bit_source: bool = False,
 ) -> Tuple[Any, float, int, int, int, int, Optional[dict], int]:
-    """Initialize a VideoReader for chunked reading, with optional high-bit depth support."""
+    """Initialize a VideoReader for chunked reading, with optional high-bit depth support.
+
+    high_bit_source: a colour source above 8 bits is read by FFmpeg at 16 bits
+    (FFmpegRGBPipeReader bit16: float16 on the 0..255 scale) instead of Decord's
+    8-bit RGB (user, 2026-10-27: Splatting's warped eye lost the source's 10 bits)."""
     try:
         process_length = int(process_length) if process_length not in (None, "", "N/A") else -1
     except (ValueError, TypeError):
@@ -743,6 +936,8 @@ def read_video_frames(
     h_reader = pre_res_height if set_pre_res and pre_res_height > 0 else original_height
     w_reader = pre_res_width if set_pre_res and pre_res_width > 0 else original_width
 
+    source_bits = 8 if is_depth else _pix_fmt_bits(str((video_stream_info or {}).get("pix_fmt", "")))
+
     # Choose reader implementation
     if is_depth and bit_depth > 8:
         logger.info(f"==> Using high-bit depth path (FFmpegDepthPipeReader) for {bit_depth}-bit source.")
@@ -754,7 +949,7 @@ def read_video_frames(
             num_frames=total_frames_available,
             pix_fmt=str(video_stream_info.get("pix_fmt", "")),
         )
-    elif strict_ffmpeg_decode:
+    elif strict_ffmpeg_decode or (high_bit_source and source_bits > 8):
         in_range, in_matrix = "tv", "bt709"
         try:
             cr = str((video_stream_info or {}).get("color_range") or "").lower()
@@ -775,7 +970,15 @@ def read_video_frames(
             total_frames=total_frames_available,
             in_range=in_range,
             in_matrix=in_matrix,
+            bit16=high_bit_source and source_bits > 8,
+            # at the source's own size: its YUV as it is, converted in torch
+            yuv_src=video_stream_info if (w_reader, h_reader) == (original_width, original_height) else None,
         )
+        if video_reader.bit16 or video_reader._yuv:
+            logger.info(f"==> {source_bits}-bit source: read by FFmpeg"
+                        + (" at 16 bits" if video_reader.bit16 else "")
+                        + (f" ({video_reader._pix_fmt}{', NVDEC' if video_reader._nvdec else ''}, "
+                           f"converted on the {video_reader._device.upper()})." if video_reader._yuv else "."))
     else:
         video_reader = VideoReader(video_path, ctx=cpu(0), width=w_reader, height=h_reader)
         # Wrap in ResizingDepthReader if Decord didn't resize or if we need specific parity
@@ -841,8 +1044,9 @@ def get_video_stream_info(video_path: str) -> Optional[dict]:
             "v:0",
             "-show_entries",
             "stream=width,height,codec_name,profile,pix_fmt,color_range,color_primaries,color_transfer,color_space,r_frame_rate",
-            "-show_entries",
-            "side_data=mastering_display_metadata,max_content_light_level",
+            # No side_data= entry (2026-10-27): it made ffprobe decode every frame of the
+            # clip -- 3.5 s for 72 frames of 1080p HEVC, minutes for a film -- and only
+            # the stream entry below was ever read.
             "-of",
             "json",
             video_path,
@@ -913,51 +1117,17 @@ def read_video_frames_decord(
     return frames, fps, oh, ow, frames.shape[1], frames.shape[2], info
 
 
-def encode_frames_to_mp4(
-    temp_png_dir: str,
+def build_encode_cmd(
+    input_args: list,
     final_output_mp4_path: str,
-    fps: float,
-    total_output_frames: int,
     video_stream_info: Optional[dict],
-    stop_event: Optional[threading.Event] = None,
-    sidecar_json_data: Optional[dict] = None,
     user_output_crf: Optional[int] = None,
-    output_sidecar_ext: str = ".json",
     encoding_options: Optional[dict] = None,
-) -> bool:
-    """Encode a directory of PNG frames to an MP4 video using FFmpeg.
-
-    Args:
-        temp_png_dir: Directory containing PNG frames named %05d.png
-        final_output_mp4_path: Path to the output MP4 file
-        fps: Output video frame rate
-        total_output_frames: Total number of frames to encode
-        video_stream_info: Source video stream info for matching color space
-        stop_event: Optional threading event to cancel encoding
-        sidecar_json_data: Optional data to save to a JSON sidecar file
-        user_output_crf: Optional override for CRF (quality) setting
-        output_sidecar_ext: Extension for the sidecar file
-
-    Returns:
-        True if encoding succeeded, False otherwise
-    """
-    if total_output_frames == 0:
-        logger.warning(f"No frames to encode for {os.path.basename(final_output_mp4_path)}. Skipping.")
-        if os.path.exists(temp_png_dir):
-            shutil.rmtree(temp_png_dir)
-        return False
-
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-framerate",
-        str(fps),
-        "-i",
-        os.path.join(temp_png_dir, "%05d.png"),
-    ]
+) -> tuple:
+    """(ffmpeg command, the .part path it writes): encode_frames_to_mp4's command, its input given
+    by `input_args` -- a PNG sequence there, raw frames on stdin for RawFrameEncoder (2026-10-29), the
+    rest the same."""
+    ffmpeg_cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"] + list(input_args)
 
     # Determine codec, pixel format, and CRF
     output_codec, output_pix_fmt, crf, output_profile = "libx264", "yuv420p", "23", "main"
@@ -1087,6 +1257,47 @@ def encode_frames_to_mp4(
     encode_path = part_path(final_output_mp4_path)
     ffmpeg_cmd.extend(ffmpeg_output_args(encode_path))
     ffmpeg_cmd = with_color_tags(ffmpeg_cmd)     # primaries / transfer into the file (core.common.color_tags)
+    return ffmpeg_cmd, encode_path
+
+
+def encode_frames_to_mp4(
+    temp_png_dir: str,
+    final_output_mp4_path: str,
+    fps: float,
+    total_output_frames: int,
+    video_stream_info: Optional[dict],
+    stop_event: Optional[threading.Event] = None,
+    sidecar_json_data: Optional[dict] = None,
+    user_output_crf: Optional[int] = None,
+    output_sidecar_ext: str = ".json",
+    encoding_options: Optional[dict] = None,
+) -> bool:
+    """Encode a directory of PNG frames to an MP4 video using FFmpeg.
+
+    Args:
+        temp_png_dir: Directory containing PNG frames named %05d.png
+        final_output_mp4_path: Path to the output MP4 file
+        fps: Output video frame rate
+        total_output_frames: Total number of frames to encode
+        video_stream_info: Source video stream info for matching color space
+        stop_event: Optional threading event to cancel encoding
+        sidecar_json_data: Optional data to save to a JSON sidecar file
+        user_output_crf: Optional override for CRF (quality) setting
+        output_sidecar_ext: Extension for the sidecar file
+
+    Returns:
+        True if encoding succeeded, False otherwise
+    """
+    if total_output_frames == 0:
+        logger.warning(f"No frames to encode for {os.path.basename(final_output_mp4_path)}. Skipping.")
+        if os.path.exists(temp_png_dir):
+            shutil.rmtree(temp_png_dir)
+        return False
+
+    ffmpeg_cmd, encode_path = build_encode_cmd(
+        ["-framerate", str(fps), "-i", os.path.join(temp_png_dir, "%05d.png")],
+        final_output_mp4_path, video_stream_info, user_output_crf, encoding_options,
+    )
 
     process = None
     try:
@@ -1126,6 +1337,68 @@ def encode_frames_to_mp4(
         from core.common.atomic_json import write_json_atomic  # whole or not at all
         write_json_atomic(path, sidecar_json_data, indent=4)
     return True
+
+class RawFrameEncoder:
+    """ffmpeg encoding 16-bit RGB frames written to its stdin: the command encode_frames_to_mp4 builds for
+    a PNG sequence (build_encode_cmd), the frames never on disk. A user's Inpainting patch (2026-10-29):
+    a 778-frame Hi-Res finalize spent 4.2 min writing 16-bit PNGs and reading them back. PNG is lossless,
+    so ffmpeg gets the same samples either way. Encoded under <final>.part: finish() puts it in place,
+    abort() throws it away -- as the PNG encode does."""
+
+    def __init__(self, width: int, height: int, final_output_path: str, fps: float,
+                 video_stream_info: Optional[dict] = None, user_output_crf: Optional[int] = None,
+                 encoding_options: Optional[dict] = None):
+        self.width, self.height = int(width), int(height)
+        self.final_output_path = final_output_path
+        self.frames = 0
+        input_args = ["-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", f"{self.width}x{self.height}",
+                      "-framerate", str(fps), "-i", "pipe:0"]
+        self.cmd, self.encode_path = build_encode_cmd(input_args, final_output_path, video_stream_info,
+                                                      user_output_crf, encoding_options)
+        from core.common.frame_pipe import popen_frames_in
+        self._proc = popen_frames_in(self.cmd)
+        self._drain = _StderrDrain(self._proc, f"ffmpeg encode {os.path.basename(final_output_path)}")
+
+    def write(self, frame: np.ndarray) -> None:
+        """One [H, W, 3] uint16 RGB frame."""
+        if frame.shape != (self.height, self.width, 3) or frame.dtype != np.uint16:
+            raise ValueError(f"expected a {self.height}x{self.width}x3 uint16 frame, got {frame.shape} {frame.dtype}")
+        a = np.ascontiguousarray(frame, dtype="<u2")
+        try:
+            self._proc.stdin.write(memoryview(a).cast("B"))
+        except OSError:                  # ffmpeg gave up: say why
+            self._drain.log_if(True)
+            raise
+        self.frames += 1
+
+    def finish(self, stop_event: Optional[threading.Event] = None) -> bool:
+        """Close the input and wait for ffmpeg; True once the file is in place under its own name."""
+        try:
+            self._proc.stdin.close()
+        except OSError:
+            pass
+        while self._proc.poll() is None:
+            if stop_event is not None and stop_event.is_set():
+                self.abort()
+                return False
+            time.sleep(0.05)
+        if self._proc.returncode != 0 or self.frames == 0:
+            self._drain.log_if(self._proc.returncode != 0)
+            discard(self.encode_path)
+            return False
+        if not publish(self.encode_path, self.final_output_path):
+            discard(self.encode_path)
+            return False
+        return True
+
+    def abort(self) -> None:
+        """Stop ffmpeg and throw away what it wrote."""
+        try:
+            self._proc.stdin.close()
+        except OSError:
+            pass
+        reap(self._proc)
+        discard(self.encode_path)
 
 
 def start_ffmpeg_pipe_process(

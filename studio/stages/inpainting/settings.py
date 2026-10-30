@@ -53,6 +53,9 @@ DEFAULTS: Dict[str, Any] = {
     # torch.compile the UNet + VAE decoder (Torch Compile on the page): ~13% faster
     # chunks with Sage, after a one-time warm-up of minutes -- for long runs.
     "use_compile": False,
+    # TensorRT (the box beside Process Length, a user's patch 2026-10-29): the UNet and VAE as TensorRT
+    # FP16 engines, built once per size into trt_engines/. Installed from Settings > Studio > Models; not bit-exact.
+    "use_tensorrt": False,
     # Settings > Inpainting > Guidance Scale. 1.0 skips the unconditional UNet
     # pass (v1 used 1.01): ~30% faster chunks, same picture (2026-10-09).
     "guidance_scale": "1.0",
@@ -98,6 +101,7 @@ RESET_VALUES: Dict[str, Any] = {
     "offload_type": "model",
     "use_sageattention": True,
     "use_compile": False,
+    "use_tensorrt": False,
     "guidance_scale": "1.0",
     "inpaint_mask_initial_threshold": "0.3",
     "inpaint_mask_post_threshold": "0.3",

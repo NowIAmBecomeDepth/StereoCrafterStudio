@@ -111,6 +111,80 @@ class EncodeTest(unittest.TestCase):
         self.assertEqual(p.get("codec_name"), "h264")
 
 
+class RawFrameEncoderTest(unittest.TestCase):
+    """Inpainting V1's Hi-Res frames straight to ffmpeg (a user's patch, 2026-10-29): not written as 16-bit
+    PNGs and read back. The same command but its input, and the same video out."""
+
+    @classmethod
+    def setUpClass(cls):
+        import numpy as np
+        cls.tmp = tempfile.mkdtemp()
+        rng = np.random.default_rng(2)
+        ramp = np.linspace(0, 65535, 320)[None, :, None] * np.ones((176, 1, 3))
+        cls.frames = [np.clip(ramp + rng.normal(0, 4000, ramp.shape) + i * 900, 0, 65535).astype(np.uint16)
+                      for i in range(8)]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def decoded(self, path):
+        out = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo", "-"], capture_output=True)
+        self.assertEqual(out.returncode, 0)
+        return out.stdout
+
+    def both(self, name, options):
+        import cv2
+        from core.common.video_io import RawFrameEncoder, encode_frames_to_mp4
+        info = {"pix_fmt": "yuv420p", "codec_name": "h264"}
+        d = tempfile.mkdtemp(dir=self.tmp)
+        for i, f in enumerate(self.frames):
+            cv2.imwrite(os.path.join(d, f"{i:05d}.png"), cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+        png = os.path.join(self.tmp, "png_" + name)
+        self.assertTrue(encode_frames_to_mp4(d, png, 24, len(self.frames), info, user_output_crf=23,
+                                             encoding_options=options))
+        raw = os.path.join(self.tmp, "raw_" + name)
+        enc = RawFrameEncoder(320, 176, raw, 24, info, 23, options)
+        for f in self.frames:
+            enc.write(f)
+        self.assertTrue(enc.finish())
+        self.assertFalse(os.path.exists(enc.encode_path), "the .part was left")
+        return png, raw
+
+    def test_the_same_video_as_the_png_route(self):
+        cases = [("x264.mp4", {"codec": "H.264", "encoder": "Force CPU", "encoding_quality": "Fast"}),
+                 ("x265_10.mp4", {**TEN, "encoder": "Force CPU"})]
+        if nvenc_available():
+            cases.append(("nvenc.mp4", {"codec": "H.264", "encoder": "NVENC", "encoding_quality": "Fast"}))
+        for name, options in cases:
+            png, raw = self.both(name, options)
+            self.assertEqual(probe(png), probe(raw), name)
+            self.assertEqual(self.decoded(png), self.decoded(raw), f"{name}: the frames differ")
+
+    def test_the_same_command_but_the_input(self):
+        from core.common.video_io import build_encode_cmd
+        opts = {**TEN, "encoder": "Force CPU"}
+        png, _ = build_encode_cmd(["-framerate", "24", "-i", "x/%05d.png"], "out.mp4", None, 23, opts)
+        raw, _ = build_encode_cmd(["-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", "320x176", "-framerate", "24",
+                                   "-i", "pipe:0"], "out.mp4", None, 23, opts)
+        self.assertEqual(png[:5], ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"])
+        self.assertEqual(png[png.index("x/%05d.png") + 1:], raw[raw.index("pipe:0") + 1:])
+
+    def test_abort_leaves_nothing(self):
+        from core.common.video_io import RawFrameEncoder
+        out = os.path.join(self.tmp, "stopped.mp4")
+        enc = RawFrameEncoder(320, 176, out, 24, None, 23, {"codec": "H.264", "encoder": "Force CPU"})
+        enc.write(self.frames[0])
+        enc.abort()
+        self.assertFalse(os.path.exists(out) or os.path.exists(enc.encode_path))
+        enc = RawFrameEncoder(320, 176, out, 24)
+        try:
+            with self.assertRaises(ValueError):
+                enc.write(self.frames[0][:, :100])            # a frame of the wrong size
+        finally:
+            enc.abort()
+
+
 class DefaultOffTest(unittest.TestCase):
     def test_a_setting_saved_before_it_worked_goes_off_once(self):
         from studio.stages.inpainting import settings as S

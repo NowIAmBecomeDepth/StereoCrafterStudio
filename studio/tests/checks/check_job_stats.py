@@ -18,7 +18,7 @@ from studio.legacy import install; install()
 import studio.settings_store as ss; ss.CONFIG_DIR = tmp / "config"
 import core.ui.job_handoff as jh; jh._RECORD_PATH = str(tmp / "last_jobs.json")
 import _fixtures
-from PySide6.QtCore import QCoreApplication, QEventLoop, QMetaObject, QObject, Q_ARG, qInstallMessageHandler
+from PySide6.QtCore import QCoreApplication, QEventLoop, QMetaObject, QObject, QPointF, Q_ARG, qInstallMessageHandler
 warns = []
 qInstallMessageHandler(lambda t, ctx, m: warns.append(m) if (".qml" in m or "qml" in m.lower()) else None)
 from PySide6.QtGui import QGuiApplication
@@ -270,16 +270,16 @@ ab.setProperty("busy", False); pump(0.05)
 check("...and the chunk's frames under the iteration counter", shown(ipp, "jobRangeText") == "Frames 30–55",
       shown(ipp, "jobRangeText"))
 # the ETA (user, 2026-10-09): unknown before a step; on the first clip without the render
-check("Inpainting ETA: N/A before the first step", shown(ipp, "jobEtaText") == "ETA N/A", shown(ipp, "jobEtaText"))
+check("Inpainting ETA: N/A before the first step", shown(ipp, "jobEtaText") == "Clip ETA N/A", shown(ipp, "jobEtaText"))
 S._on_per_chunk(10, 10); S._on_bar("1/10 [00:30<04:30, 30.00s/it]"); pump(0.1)
-check("...and after it: the first step of a pass carries its setup", shown(ipp, "jobEtaText") == "ETA N/A",
+check("...and after it: the first step of a pass carries its setup", shown(ipp, "jobEtaText") == "Clip ETA N/A",
       shown(ipp, "jobEtaText"))
 S._on_bar("2/10 [00:60<04:00, 30.00s/it]"); pump(0.1)
 check("...then the chunks left from the steps' s/it, '+ render' on the first clip",   # 8 x 30 s + 1 chunk x 300 s
-      shown(ipp, "jobEtaText") == "ETA 9 min + render", shown(ipp, "jobEtaText"))
+      shown(ipp, "jobEtaText") == "Clip ETA 9 min + render", shown(ipp, "jobEtaText"))
 S._eta_tail_per_frame = 1.5; S._on_bar("3/10 [00:90<03:30, 30.00s/it]"); pump(0.1)   # 7 x 30 + 300 + 60 frames x 1.5 s
 _eta = shown(ipp, "jobEtaText")
-check("...and a finish time once the render is known", _eta.startswith("ETA 10 min · ") and len(_eta) > 13, _eta)
+check("...and a finish time once the render is known", _eta.startswith("Clip ETA 10 min · ") and len(_eta) > 13, _eta)
 # its batch's ETA on the Progress heading's right end (user, 2026-10-24: under the bar a long status
 # line -- "Hi-res blend: 0 / 20 frames rendered" -- ran into it)
 S.batch_begin("inpainting", [("D:/in/A_640_splatted4.mp4", 60), ("D:/in/B_640_splatted4.mp4", 60)])
@@ -302,14 +302,14 @@ S.begin("depthcrafter"); pump(0.05)
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 0), Q_ARG("QVariant", True)); pump(1.0)
 S.dc_event("clip"); S.dc_event("plan", {"frames": 100, "steps": 4, "window": 120, "overlap": 100, "key": "640x384"})
 pump(0.1)
-check("DepthCrafter ETA: N/A before a step", shown(dcp, "jobEtaText") == "ETA N/A", shown(dcp, "jobEtaText"))
+check("DepthCrafter ETA: N/A before a step", shown(dcp, "jobEtaText") == "Clip ETA N/A", shown(dcp, "jobEtaText"))
 S._on_bar("Window 1/1:  25%|#   | 1/4 [00:90<04:30, 90.00s/it]")
 S._on_bar("Window 1/1:  50%|##  | 2/4 [02:30<02:00, 60.00s/it]"); pump(0.1)
 check("...then the steps left x r, '+ encode/decode' while the size has no timed clip",   # 2 steps x 60 s
-      shown(dcp, "jobEtaText") == "ETA 2 min + encode/decode", shown(dcp, "jobEtaText"))
+      shown(dcp, "jobEtaText") == "Clip ETA 2 min + encode/decode", shown(dcp, "jobEtaText"))
 S._dc.rates["tail"]["640x384"] = 0.6; S._on_bar("Window 1/1:  75%|### | 3/4 [03:30<01:00, 60.00s/it]"); pump(0.1)
 _eta = shown(dcp, "jobEtaText")                                  # 1 step x 60 s + 100 frames x 0.6 s
-check("...and a finish time once its tail is known", _eta.startswith("ETA 2 min · ") and len(_eta) > 13, _eta)
+check("...and a finish time once its tail is known", _eta.startswith("Clip ETA 2 min · ") and len(_eta) > 13, _eta)
 check("...not on Inpainting's page", not any(c.objectName() == "jobEtaText" and c.isVisible() for c in walk(ipp, [])))
 # the batch's ETA beside it (user, 2026-10-21): the clip's 2 min + 200 frames after it at the
 # 1.2 s a frame this clip projects (its 120 s / 100 frames)
@@ -320,8 +320,14 @@ _b = shown(dcp, "batchEtaText")
 check("...with clips after this one, the whole batch's beside the clip's", _b.startswith("Batch 6 min · "), _b)
 _be = [c for c in walk(dcp, []) if c.objectName() == "batchEtaText"][0]
 _je = [c for c in walk(dcp, []) if c.objectName() == "jobEtaText"][0]
-check("...left of the clip's, on its line", _be.property("x") + _be.property("width") < _je.property("x")
-      and _be.property("y") == _je.property("y"), f"{_be.property('x')}+{_be.property('width')} / {_je.property('x')}")
+_cp = [c for c in walk(dcp, []) if c.objectName() == "clipPercent"][0]
+_tt = [c for c in walk(dcp, []) if c.objectName() == "tipTicker"][0]
+_bp, _cpp = _be.mapToScene(QPointF(0, 0)), _cp.mapToScene(QPointF(0, 0))
+_tr = _tt.mapToScene(QPointF(_tt.property("width"), 0)).x()
+# user 2026-10-27: above the percentage at the tip line's end, not beside the clip's (it crowded the status)
+check("...above the percentage, right-aligned with it, clear of the tip", _bp.y() + _be.property("height") <= _cpp.y()
+      and abs(_bp.x() + _be.property("width") - (_cpp.x() + _cp.property("width"))) < 1 and _tr < _bp.x(),
+      f"batch {_bp.x()},{_bp.y()} w{_be.property('width')} / percent {_cpp.x()},{_cpp.y()} / tip ends {_tr}")
 S.batch_clip("depthcrafter", "B"); pump(0.1)
 check("...and gone on the last clip", not _be.isVisible())
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 2), Q_ARG("QVariant", True)); pump(1.0)   # back, as before

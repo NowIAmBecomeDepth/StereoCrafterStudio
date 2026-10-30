@@ -20,7 +20,10 @@ What is kept the same as the CPU version:
 * GaussianBlur(sigma 0): cv2.getGaussianKernel's own coefficients,
   reflect-101 border (torch "reflect"), rounded back to uint16.
 
-Hole Shift regions go through the CPU function unchanged.
+Hole Shift regions (Dilate Regions) run here too since 2026-10-27 (user): the dilate and
+blur on the GPU, then dilate_regions.apply_regional_shift moves each region's depth as
+the CPU function does (per frame, OpenCV) -- before, a batch with a region fell back to
+the CPU for all of it.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from core.common import dilate_regions as _dilreg
 from core.splatting import depth_processing as _dp
 
 
@@ -149,12 +153,10 @@ def process_depth_batch_gpu(batch_depth_numpy_raw: np.ndarray, depth_gamma: floa
     kwargs = dict(locals())
     if not torch.cuda.is_available():
         return _dp.process_depth_batch_cpu(**kwargs)
-    idxs = list(frame_indices) if frame_indices is not None else None
-    if dilate_regions is not None and getattr(dilate_regions, "enabled", False) and idxs and any(
-            dilate_regions.active_at(int(f)) for f in idxs):
-        return _dp.process_depth_batch_cpu(**kwargs)
-
     raw = batch_depth_numpy_raw
+    idxs = list(frame_indices) if frame_indices is not None else list(range(raw.shape[0]))
+    has_regions = bool(dilate_regions is not None and getattr(dilate_regions, "enabled", False)
+                       and any(dilate_regions.active_at(int(f)) for f in idxs))
     if raw.ndim == 4 and raw.shape[-1] == 3:
         depth = raw.mean(axis=-1)
     else:
@@ -173,7 +175,7 @@ def process_depth_batch_gpu(batch_depth_numpy_raw: np.ndarray, depth_gamma: floa
     dx, dy = map_val(depth_dilate_size_x) * res_scale, map_val(depth_dilate_size_y) * res_scale
     bx, by = depth_blur_size_x * res_scale, depth_blur_size_y * res_scale
     dl, bl = float(depth_dilate_left) * res_scale, float(depth_blur_left) * res_scale
-    if not (abs(dl) > 1e-5 or bl > 0 or abs(dx) > 1e-5 or abs(dy) > 1e-5 or bx > 0 or by > 0):
+    if not (abs(dl) > 1e-5 or bl > 0 or abs(dx) > 1e-5 or abs(dy) > 1e-5 or bx > 0 or by > 0 or has_regions):
         return depth
 
     t = torch.from_numpy(depth).unsqueeze(1).cuda()
@@ -198,7 +200,11 @@ def process_depth_batch_gpu(batch_depth_numpy_raw: np.ndarray, depth_gamma: floa
         else:
             blurred = bh if bh is not None else (bv if bv is not None else t)
         t = t * (1.0 - alpha) + blurred * alpha
-    if abs(dx) > 1e-5 or abs(dy) > 1e-5:
+    if has_regions:      # the global dilate here, then each region's shift (as the CPU function)
+        t = _dilreg.apply_regional_shift(t, dx, dy, dilate_regions, idxs,
+                                         lambda tt, kx, ky: gpu_dilate(tt, kx, ky, max_raw_value),
+                                         res_scale=res_scale)
+    elif abs(dx) > 1e-5 or abs(dy) > 1e-5:
         t = gpu_dilate(t, dx, dy, max_raw_value)
     if bx > 0 or by > 0:
         t = gpu_blur(t, bx, by, max_raw_value)

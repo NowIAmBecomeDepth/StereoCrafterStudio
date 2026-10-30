@@ -25,12 +25,18 @@ logger = logging.getLogger("studio.clip_queue")
 VIDEO_GLOBS = ("*.mp4", "*.avi", "*.mov", "*.mkv")
 SIDECAR_EXT = ".fssidecar"
 
-from core.common.clip_names import is_own_file  # noqa: E402
+from core.common.clip_names import is_own_file, natural_key  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Splatting: source clips that have a depth map (v2 preview_engine, 2A / 2B)
 # ---------------------------------------------------------------------------
+
+def _by_number(path: str) -> tuple:
+    """Every stage's list in number order, clip_110 before clip_1009 (user, 2026-10-29: as
+    DepthCrafter's already was); each batch runs in the same order."""
+    return natural_key(os.path.basename(path))
+
 
 def _fuzzy_depth(folder: str, base_name: str) -> Optional[str]:
     best, best_len = None, 0
@@ -66,8 +72,8 @@ def splat_pairs(values: dict) -> List[Tuple[str, str]]:
     if not os.path.isdir(source) or not os.path.isdir(depth):
         return []
     from core.common.submask_files import is_subtitle_mask      # Detect Text's masks are not clips
-    videos = sorted(p for ext in VIDEO_GLOBS for p in glob.glob(os.path.join(source, ext))
-                    if not is_subtitle_mask(p))
+    videos = sorted((p for ext in VIDEO_GLOBS for p in glob.glob(os.path.join(source, ext))
+                     if not is_subtitle_mask(p)), key=_by_number)
     out: List[Tuple[str, str]] = []
     if values.get("multi_map"):
         try:
@@ -399,7 +405,8 @@ def merge_clips(values: dict) -> List[str]:
     if os.path.isfile(inpainted):
         videos = [inpainted]
     elif os.path.isdir(inpainted):
-        videos = sorted(p for ext in ("*.mp4", "*.mov", "*.mkv") for p in glob.glob(os.path.join(inpainted, ext)))
+        videos = sorted((p for ext in ("*.mp4", "*.mov", "*.mkv") for p in glob.glob(os.path.join(inpainted, ext))),
+                        key=_by_number)
     else:
         return []
     mask = str(values.get("mask_folder") or "")
@@ -501,7 +508,7 @@ def dc_clips(values: dict) -> List[str]:
         specs, _single = discover_sources(str(values.get("input_dir_or_file_var") or ""))
     except InputError:
         return []
-    return sorted((s["path"] for s in specs), key=lambda p: os.path.basename(p).lower())
+    return sorted((s["path"] for s in specs), key=_by_number)
 
 
 def inpaint_clips(values: dict) -> List[str]:
@@ -514,7 +521,7 @@ def inpaint_clips(values: dict) -> List[str]:
         return []
     # .mkv too: Splatting's Container may be MKV (user, 2026-10-25), as the engine's own glob
     return sorted(glob.glob(os.path.join(folder, "*.mp4")) + glob.glob(os.path.join(folder, "*.mov"))
-                  + glob.glob(os.path.join(folder, "*.mkv")))
+                  + glob.glob(os.path.join(folder, "*.mkv")), key=_by_number)
 
 
 #: Inpainting V2's input types (its engine's VIDEO_EXTENSIONS).
@@ -529,7 +536,8 @@ def inpaint_v2_clips(values: dict) -> List[str]:
         return [folder]
     if not os.path.isdir(folder):
         return []
-    return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.lower().endswith(INPAINT_V2_EXTS)]
+    return [os.path.join(folder, n) for n in sorted(os.listdir(folder), key=natural_key)
+            if n.lower().endswith(INPAINT_V2_EXTS)]
 
 
 def dc_finished_moves(paths: List[str]) -> List[Tuple[str, str]]:
@@ -741,6 +749,18 @@ class ClipQueue(QObject):
             return
         self.checkedChanged.emit()
 
+    @Slot("QVariantList", bool)
+    def setCheckedMany(self, paths, on: bool) -> None:
+        """Shift+click (a tester, 2026-10-29): a run of rows ticked or unticked at once, one change."""
+        keys = {self._key(str(p)) for p in paths or []}
+        before = set(self._checked)
+        if on:
+            self._checked |= keys
+        else:
+            self._checked -= keys
+        if self._checked != before:
+            self.checkedChanged.emit()
+
     @Slot()
     def checkAll(self) -> None:
         self._checked = {self._key(p) for p in self._paths}
@@ -915,17 +935,15 @@ class ClipQueue(QObject):
             self.changed.emit()
 
     def hold(self, on: bool) -> None:
-        """A job is running: keep the list as it is. A rescan asked for
-        meanwhile (a folder or chapter changed) happens when it is let go
-        (audit 2026-09-28 #28: it used to be lost)."""
+        """A job is running: keep the list as it is. When it is let go the
+        folders are read again -- the clips the batch moved to finished leave
+        the list, as DepthCrafter's always did (a tester, 2026-10-29: Splatting's
+        and Merging's list didn't update after a job; audit #28 had kept the
+        finished job's rows until something asked)."""
         was, self._hold = self._hold, bool(on)
         if was and not self._hold:
-            if self._stale:
-                self._stale = self._fx_stale = False
-                self._timer.start()
-            elif self._fx_stale:
-                self._fx_stale = False
-                self.refreshFx()
+            self._stale = self._fx_stale = False
+            self._timer.start()
 
     def _start(self) -> None:
         if self._running:

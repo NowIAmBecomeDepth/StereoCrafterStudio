@@ -167,6 +167,20 @@ Item {
         target: page.pv
         function onAutoConvRunning(on) { page.autoConvRunning = on }
     }
+    // Convergence picked off the picture (user, 2026-10-29: "click on the area you want the
+    // convergence to be clean on"): the pick button arms it, the next click on the picture reads the
+    // depth there and the Convergence dial takes it, for the whole clip -- keyframed, the keyframe
+    // takes it as a turn of the dial would. Auto-Converge goes Off: it would put its own value back.
+    property bool pickingConv: false
+    Connections {
+        target: page.pv
+        function onConvergencePicked(v) {
+            if (String(page.st.auto_convergence_mode) !== "Off") page.st.auto_convergence_mode = "Off"
+            if ((page.pv.keyed || {}).zero_disparity_anchor !== undefined) page.keyEdit("zero_disparity_anchor", v)
+            else convDial.write(v)
+        }
+        function onChanged() { if (!page.pv.loaded) page.pickingConv = false }
+    }
 
     // ---- v1's preview keys (video_previewer: arrows, Ctrl+arrows, Up/Down,
     // Space, Shift+Space). Not while typing in a field.
@@ -1018,10 +1032,18 @@ ChangeFoldersButton {
                                     // One click flips, a double-click zooms (user, 2026-09-27): the flip
                                     // waits out the double-click time, so a double-click never flips first.
                                     onTapped: (ev) => {
+                                        if (page.pickingConv) {      // the Convergence picker armed: the click is its
+                                            page.pickingConv = false
+                                            flipDelay.stop()
+                                            if (shown.width > 0 && shown.height > 0)
+                                                previewPanel.pv.pickConvergence(ev.position.x / shown.width, ev.position.y / shown.height)
+                                            return
+                                        }
                                         if (flipDelay.running) { flipDelay.stop(); zoomAnchor.toggleAt(ev.position.x, ev.position.y) }
                                         else flipDelay.restart()
                                     }
                                 }
+                                HoverHandler { enabled: page.pickingConv; cursorShape: Qt.CrossCursor }
                                 Timer {
                                     id: flipDelay
                                     objectName: "flipDelay"
@@ -1342,7 +1364,20 @@ ChangeFoldersButton {
                         // Disparity, Gamma, Convergence, then the estimate (user, 2026-09-27)
                         SpDial { key: "max_disp"; label: page.bn["splat.depth_strength"] || "Disparity:"; from: 0; to: 100; step: 1; decimals: 0; defaultValue: 30; help: page.help("max_disp") }
                         SpDial { key: "depth_gamma"; label: "Gamma:"; from: 0.1; to: 3.0; step: 0.05; decimals: 2; defaultValue: 1.0; fillFrom: 1.0; help: page.help("depth_gamma") }
-                        SpDial { key: "zero_disparity_anchor"; label: "Convergence:"; from: 0; to: 1; step: 0.01; decimals: 2; defaultValue: 0.5; fillFrom: 0.5; help: page.help("convergence_point") }
+                        SpDial { id: convDial; key: "zero_disparity_anchor"; label: "Convergence:"; from: 0; to: 1; step: 0.01; decimals: 2; defaultValue: 0.5; fillFrom: 0.5; help: page.help("convergence_point") }
+                        AccentButton {
+                            objectName: "pickConvButton"
+                            iconGlyph: ""; implicitWidth: 30; implicitHeight: 28
+                            kind: page.pickingConv ? "filled" : "outline"
+                            Layout.alignment: Qt.AlignTop
+                            Layout.topMargin: 9
+                            enabled: page.pv.loaded && !page.pv.wiggling
+                            onClicked: page.pickingConv = !page.pickingConv
+                            HoverTip { tip: "Pick Convergence: click this, then click the picture on what should sit on the screen "
+                                            + "-- a face, a building, anything that stays put. Its depth becomes the clip's "
+                                            + "Convergence, so it looks clean with no doubling. Turns Auto-Converge Off. Click "
+                                            + "this again to cancel." }
+                        }
                         // one dial for more pop in front of the screen, the rest
                         // of the scene left where it is (user, 2026-10-01)
                         SpDial { objectName: "popOutDial"; key: "pop_amount"; label: "Pop-Out:"; from: 0; to: 60; step: 0.5; decimals: 1; defaultValue: 0; help: page.help("pop_amount") }

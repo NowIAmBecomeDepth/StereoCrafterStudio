@@ -424,7 +424,10 @@ def effective_depth_folder(values: Dict[str, Any]) -> str:
 def sidecar_folder(values: Dict[str, Any], create: bool = True) -> str:
     """v1 _get_sidecar_base_folder: Multi-Map keeps sidecars in <depth>/sidecars."""
     if values.get("multi_map"):
-        folder = os.path.join(values.get("input_depth_maps", ""), "sidecars")
+        base = values.get("input_depth_maps", "")
+        if base and os.path.isfile(base):    # one map picked: its folder (the user's [WinError 3], 2026-10-26)
+            base = os.path.dirname(base)
+        folder = os.path.join(base, "sidecars")
         if create:
             os.makedirs(folder, exist_ok=True)
         return folder

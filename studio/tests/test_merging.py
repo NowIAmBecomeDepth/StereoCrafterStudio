@@ -677,6 +677,99 @@ class EngineTest(unittest.TestCase):
         made = [os.path.basename(p) for p in glob.glob(str(out / "**" / "*.mp4"), recursive=True)]
         self.assertTrue(made and all("shotM" in m for m in made), f"the .mkv clip was not merged: {made}")
 
+    # user, 2026-10-27: "my merging outputs have been missing real 10 bit info". Decord read every
+    # input as 8-bit RGB, about 6 codes (of 1023) darker than FFmpeg's BT.709. A 10-bit grey ramp
+    # rising 1 code every 8 px, merged as a dual-eye passthrough (no grain, no colour transfer: the
+    # read and the write are all between them), comes out with its 1-code steps and its level.
+    def test_grain_match_measures_its_frames_in_frame_order(self):
+        """user 2026-10-27, "why does grain match feel slow?": it rendered its picks best-fill
+        first, back and forth through the clip, and every jump back restarted the FFmpeg readers
+        (49 restarts, 24 s of a clip's 30). In frame order they only run forward; the answer, a
+        median, is the same."""
+        import numpy as np
+        from studio.stages.merging import engine as E
+        eng = E.MergingEngine.__new__(E.MergingEngine)
+        n = 40
+        cover = {fi: 0.02 + ((fi * 7) % n) / 1000.0 for fi in range(n)}   # best fill all over the clip
+
+        class _Splat:
+            def get_batch(self, idx):
+                return type("B", (), {"asnumpy": lambda s: np.full((1, 4, 4, 3), idx[0], np.uint8)})()
+
+        order = []
+        eng._grain_mask_coverage = lambda f_np, ctx: cover[int(f_np[0, 0, 0])]
+        eng._render_grain_frame = lambda ctx, fi, params, grained=True: order.append(fi) or {"x": fi}
+        eng._grain_match_stats = lambda res, **k: {"ok": True, "amount": res["x"] / 1000.0, "master_fallback": False,
+                                                   "master_sigma": 0.0, "fill_sigma_raw": 0.0, "gain": 0.5}
+        amount, info = eng._automatch_grain_for_clip(
+            {"splat_reader": _Splat()}, n, {"grain_size": 1.0, "grain_luma_falloff": 0.0, "grain_chroma": 0.0},
+            "clip", n_samples=24)
+        self.assertEqual(len(order), 24)
+        self.assertEqual(order, sorted(order), "the picks jump back and forth through the clip")
+
+    @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
+    def test_grain_match_measures_on_the_gpu_and_agrees_with_the_cpu(self):
+        """user 2026-10-27: Grain Match's measuring ran on the CPU even with Use GPU on (17 -> 10 s a
+        clip on CUDA). Same frame, same seeded probe: the GPU's Amount is the CPU's."""
+        from unittest import mock
+        import torch
+        from studio.stages.merging import engine as E
+        eng = E.MergingEngine.__new__(E.MergingEngine)
+        g = torch.Generator().manual_seed(7)
+        h, w = 180, 320
+        base = torch.linspace(0.3, 0.6, w).expand(3, h, w).clone()
+        master = (base + 0.02 * torch.randn(3, h, w, generator=g)).clamp(0, 1)
+        blended = (base + 0.004 * torch.randn(3, h, w, generator=g)).clamp(0, 1)
+        mask = torch.zeros(1, h, w)
+        mask[:, 40:140, 100:220] = 1.0
+        res = {"blended": blended, "mask": mask, "original_left": master}
+        kw = dict(grain_size=0.5, luma_falloff=0.34, chroma=0.11)
+        devices = []
+        real = E.measure_grain_sigma
+        with mock.patch.object(E, "measure_grain_sigma",
+                               side_effect=lambda f, *a, **k: devices.append(f.device.type) or real(f, *a, **k)):
+            gpu = eng._grain_match_stats(dict(res), **kw)
+        with mock.patch("torch.cuda.is_available", return_value=False):
+            cpu = eng._grain_match_stats(dict(res), **kw)
+        self.assertTrue(devices and set(devices) == {"cuda"}, f"measured on {set(devices)}")
+        self.assertTrue(gpu["ok"] and cpu["ok"] and cpu["amount"] > 0)
+        self.assertAlmostEqual(gpu["amount"], cpu["amount"], delta=cpu["amount"] * 1e-3)
+
+    def test_a_10_bit_clip_keeps_its_10_bits_and_its_level(self):
+        import numpy as np
+        inp, out = self.tmp / "inpainted", self.tmp / "merged"
+        inp.mkdir()
+        clip = inp / "shotT_640_inpainted_dual_sbs.mp4"
+        w, h, n = 640, 360, 6
+        ramp = (300 + np.arange(w // 2) // 8).astype(np.uint16)          # 300..339, 1 code per 8 px
+        y = np.tile(np.concatenate([ramp, ramp]), (h, 1))
+        frame = np.concatenate([y.ravel(), np.full(w * h * 2, 512, np.uint16)]).tobytes()
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv444p10le",
+                        "-s", f"{w}x{h}", "-r", "24", "-i", "-", "-c:v", "libx265", "-x265-params",
+                        "lossless=1:log-level=error", "-pix_fmt", "yuv444p10le", "-color_range", "tv",
+                        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", str(clip)],
+                       input=frame * n, check=True)
+        self.values.update({"inpainted_folder": str(inp), "original_folder": str(self.tmp / "orig"),
+                            "mask_folder": str(self.tmp / "mask"), "output_folder": str(out),
+                            "encoding_encoder": "Force CPU", "codec": "H.265", "bit_depth": "10-bit (Main10)",
+                            "pix_fmt": "Auto", "output_crf": "4", "batch_chunk_size": "8", "resume": False,
+                            "split_lr": False, "output_format": "Full SBS (Left-Right)", "grain_enable": False,
+                            "enable_color_transfer": False, "use_gpu": False})
+        self.eng.start_processing()
+        self._run()
+        made = glob.glob(str(out / "**" / "*.mp4"), recursive=True)
+        self.assertEqual(len(made), 1, made)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", made[0], "-frames:v", "1", "-vf", "format=yuv444p10le",
+                              "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+        W = len(raw) // (h * 3 * 2)
+        got = np.frombuffer(raw, np.uint16)[:W * h].reshape(h, W).astype(np.float64)
+        prof = got[h // 4: 3 * h // 4, 16: W // 2 - 16].mean(axis=0)     # one eye, rows averaged: no codec noise
+        want = ramp[16 * W // w: (W // 2 - 16) * w // W].astype(np.float64)
+        self.assertEqual(W, w, "the SBS width")
+        self.assertLess(abs(prof.mean() - want.mean()), 1.5, f"darker or lighter by {prof.mean() - want.mean():.2f} codes")
+        steps = np.abs(np.diff(np.round(prof)))
+        self.assertLessEqual(steps.max(), 1.0, f"steps of {steps.max():.0f} codes: an 8-bit read (4 codes a step)")
+
     def test_single_file_in_the_inpainted_field(self):
         """v1's Select File: the batch takes a single clip in the folder field."""
         inp, out, clip = self._dual_sbs_fixture()

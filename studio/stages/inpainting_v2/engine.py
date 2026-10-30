@@ -1766,9 +1766,10 @@ class WanInpaintRunner:
         if os.path.isfile(input_path):
             return [input_path]
         if os.path.isdir(input_path):
+            from core.common.clip_names import natural_key  # v2: clips in number order, as Upcoming Jobs lists them (user, 2026-10-29)
             return [
                 os.path.join(input_path, name)
-                for name in sorted(os.listdir(input_path))
+                for name in sorted(os.listdir(input_path), key=natural_key)  # v2: in number order
                 if name.lower().endswith(VIDEO_EXTENSIONS)
             ]
         return []

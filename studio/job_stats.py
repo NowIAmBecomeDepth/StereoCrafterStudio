@@ -946,26 +946,30 @@ class InpaintingChunks:
                 except Exception:
                     pass
 
-        orig_encode = getattr(engine_module, "encode_frames_to_mp4", None)
-
-        def encode_frames_to_mp4(*a, **kw):
-            try:
-                stats.phase_event("encode")
-            except Exception:
-                pass
-            ok = orig_encode(*a, **kw)
-            try:
-                if ok:
-                    me._tail_done()
-            except Exception:
-                logger.debug("Could not time the clip's render", exc_info=True)
-            return ok
+        def timed_encode(orig_encode):
+            def encode(*a, **kw):
+                try:
+                    stats.phase_event("encode")
+                except Exception:
+                    pass
+                ok = orig_encode(*a, **kw)
+                try:
+                    if ok:
+                        me._tail_done()
+                except Exception:
+                    logger.debug("Could not time the clip's render", exc_info=True)
+                return ok
+            return encode
 
         E.spatial_tiled_process = spatial_tiled_process
         E.InpaintingEngine.process_single_video = process_single_video
-        if orig_encode is not None:
-            E.encode_frames_to_mp4 = encode_frames_to_mp4
-        self._saved_encode = orig_encode
+        # the PNG encode, and the streamed Hi-Res frames' (finish_streamed_encode, 2026-10-29): either ends the tail
+        self._saved_encodes = {}
+        for name in ("encode_frames_to_mp4", "finish_streamed_encode"):
+            orig = getattr(engine_module, name, None)
+            if orig is not None:
+                self._saved_encodes[name] = orig
+                setattr(E, name, timed_encode(orig))
         # The engine logs to "inpainting.v2" (and a child that propagates to it).
         eng_log = getattr(engine_module, "logger", None)
         if isinstance(eng_log, logging.Logger):
@@ -1081,8 +1085,8 @@ class InpaintingChunks:
             self._handler = None
         if self._saved is not None:
             self._E.spatial_tiled_process, self._E.InpaintingEngine.process_single_video = self._saved
-            if getattr(self, "_saved_encode", None) is not None:
-                self._E.encode_frames_to_mp4 = self._saved_encode
+            for name, orig in getattr(self, "_saved_encodes", {}).items():
+                setattr(self._E, name, orig)
 
 
 class InpaintingV2Chunks:
