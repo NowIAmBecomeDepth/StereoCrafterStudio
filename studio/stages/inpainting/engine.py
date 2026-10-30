@@ -1479,6 +1479,9 @@ class InpaintingEngine:
             hires_video_path = hires_data["hires_video_path"]
 
             housekeeping_log.info(f"Starting Hi-Res Blending at {hires_W}x{hires_H}...")
+            _trt = getattr(self.pipeline, "tensorrt", None)
+            if _trt is not None:  # v2: TensorRT's working memory back to the card for the blend
+                _trt.scratch.release()
             housekeeping_log.info(f"Hi-Res blend mask source: {blend_mask_source}")
             self._log_resource_snapshot(
                 stage="hires_blend_start",

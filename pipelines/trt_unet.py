@@ -35,6 +35,16 @@ _REPO = Path(__file__).resolve().parents[1]
 ENGINE_DIR = Path(os.environ.get("STEREOCRAFTER_TRT_ENGINES") or _REPO / "trt_engines")
 WORKSPACE_BYTES = 8 << 30
 _BUILD_LOCK = threading.Lock()
+#: Below this much free GPU memory a run makes room (an 8 GB card, 2026-10-30): the Scratch shrinks to the
+#: engine asking, and the UNet engine is unloaded for the decode, reloaded for the next chunk (~2 s).
+LOW_VRAM = 2 << 30
+SHRINK_SPARE = 512 << 20
+
+
+def free_vram() -> int:
+    """What the card has free, PyTorch's cached but unused memory counted in."""
+    free, _ = torch.cuda.mem_get_info()
+    return free + torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
 
 
 def unavailable_reason() -> str:
@@ -185,7 +195,11 @@ class Scratch:
     def get(self, size: int) -> int:
         """The address of at least `size` bytes. Freeing a smaller one is safe: the caller's stream has
         waited for every engine call before it, and only that stream reuses it."""
-        if self.buffer is None or self.buffer.numel() < size:
+        held = 0 if self.buffer is None else self.buffer.numel()
+        # A card short of memory gets the decoder's 2.8 GB back while the UNet asks 1.2: kept, the
+        # denoise on an 8 GB card spilled into shared memory (2026-10-30). Room to spare: kept as it is.
+        shrink = held - size > SHRINK_SPARE and free_vram() < LOW_VRAM
+        if held < size or shrink:
             self.buffer = None
             # what PyTorch cached meanwhile goes back too: a chunk's odd last frame decodes in PyTorch,
             # and its 4 GB stayed cached beside the next chunk's engines (0.26 GB left on 10.5)
@@ -223,6 +237,8 @@ class Engine:
             self.scratch = int(self.engine.device_memory_size_v2)
         else:
             self.context = self.engine.create_execution_context()
+        if self.context is None:   # Thomas's Patch 5 (2026-10-30): said plainly; the caller falls back to PyTorch
+            raise RuntimeError(f"no execution context for {Path(path).name} (out of GPU memory?)")
         names = [self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)]
         self.inputs = [n for n in names if self.engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT]
         self.outputs = [n for n in names if self.engine.get_tensor_mode(n) == trt.TensorIOMode.OUTPUT]
@@ -338,7 +354,11 @@ class TensorRT:
         self.use_sageattention, self.offload_type = bool(use_sageattention), offload_type
         self.nets = {"unet": _Net("UNet steps"), "vaeenc": _Net("VAE encodes"), "vaedec": _Net("VAE decodes")}
         self.scratch = Scratch()
-        self._checked_decoder = False
+        # The first decode's side-by-side with PyTorch is off (Thomas's Patch 5, 2026-10-30): both decodes held
+        # at once spiked VRAM -- out of memory on a fuller card -- and the difference is measured already
+        # (HANDOFF: the in-hole mean 0.38 of 255)
+        self._checked_decoder = True
+        self._said_unload = False
 
     # ---- the networks, through TensorRT where they fit --------------------------------------------------
 
@@ -392,7 +412,7 @@ class TensorRT:
             except Exception as e:
                 self._fail("unet", e)
         self.nets["unet"].torch_calls += 1
-        self.scratch.release()  # PyTorch needs the room (DC's UNet buffer is 7.7 GB)
+        self._torch_unet_room()
         self._unpark_torch_unet()
         return self.pipe.unet(sample, timestep, encoder_hidden_states=encoder_hidden_states,
                               added_time_ids=added_time_ids, return_dict=return_dict, **kw)
@@ -405,9 +425,31 @@ class TensorRT:
                                   lambda name: self._build_decoder(name, z))
         return self._decode_with(engine, z, num_frames, return_dict)
 
+    def _torch_unet_room(self):
+        """A step the engine can't take (a clip's shorter last chunk) brings the PyTorch UNet onto the GPU:
+        the engine's 2.8 GB goes first, loaded again by the next full chunk (~2 s). Both at once filled a
+        12 GB card on a 41-frame clip's 21-frame chunk: 24.5 s a step instead of 0.6 (2026-10-30)."""
+        self.nets["unet"].engines.clear()
+        self.scratch.release()  # PyTorch needs the room (DC's UNet buffer is 7.7 GB)
+
+    def _room_for_decode(self, engine):
+        """The UNet engine (2.8 GB) waits idle through the decode: on a card without room for both it is
+        unloaded here and loaded again by the next chunk's first step (~2 s). An 8 GB card filled to the
+        last MB and spilled into shared memory, chunk times doubling (2026-10-30)."""
+        unet = self.nets["unet"]
+        held = 0 if self.scratch.buffer is None else self.scratch.buffer.numel()
+        if unet.engines and free_vram() + held < getattr(engine, "scratch", 0) + LOW_VRAM:
+            unet.engines.clear()
+            self.scratch.release()
+            if not self._said_unload:
+                self._said_unload = True
+                self.log.info("TensorRT: not enough GPU memory for the UNet engine beside the decode; it is "
+                              "unloaded for each decode and loaded again after (a few seconds a chunk).")
+
     def _decode_with(self, engine, z, num_frames, return_dict):
         if engine is not None:
             try:
+                self._room_for_decode(engine)
                 out = engine(z)
                 self.nets["vaedec"].trt_calls += 1
                 if not self._checked_decoder:
@@ -445,6 +487,10 @@ class TensorRT:
     def _encode_with(self, engine, x, return_dict):
         if engine is not None:
             try:
+                # CLIP is done before the encode: off the GPU now, not at the first step, beside the
+                # UNet engine still loaded from the last tile (8 GB card, 2026-10-30)
+                if not self.nets["unet"].off and getattr(self, "trt_unet", True):
+                    self._park_torch_unet()
                 moments = engine(x)
                 self.nets["vaeenc"].trt_calls += 1
                 from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
@@ -592,7 +638,7 @@ class DepthCrafterTensorRT(TensorRT):
             except Exception as e:
                 self._fail("unet", e)
         self.nets["unet"].torch_calls += 1
-        self.scratch.release()  # PyTorch needs the room (DC's UNet buffer is 7.7 GB)
+        self._torch_unet_room()
         self._unpark_torch_unet()
         return self.pipe.unet(sample, timestep, encoder_hidden_states=encoder_hidden_states,
                               added_time_ids=added_time_ids, return_dict=return_dict, **kw)

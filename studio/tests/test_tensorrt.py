@@ -184,6 +184,62 @@ class DispatchTest(unittest.TestCase):
         self.assertEqual(moves, ["cpu", "cuda"])
 
 
+class SmallCardTest(unittest.TestCase):
+    """An 8 GB card (2026-10-30): the UNet engine, the decoder's working memory and PyTorch's share didn't
+    fit together and the card spilled into shared memory, chunk times doubling."""
+
+    def decoder(self):
+        return types.SimpleNamespace(scratch=3 << 30)
+
+    def test_the_unet_engine_is_unloaded_for_the_decode_when_theres_no_room(self):
+        rt, _ = trt()
+        rt.nets["unet"].engines = {"k": object()}
+        with mock.patch.object(T, "free_vram", lambda: 1 << 30), self.assertLogs(T.log, "INFO") as logs:
+            rt._room_for_decode(self.decoder())
+            rt.nets["unet"].engines = {"k": object()}       # loaded again by the next chunk
+            rt._room_for_decode(self.decoder())
+        self.assertEqual(rt.nets["unet"].engines, {})
+        self.assertEqual(len(logs.records), 1, "said once a run")
+
+    def test_a_pytorch_step_unloads_the_unet_engine_first(self):
+        """A 41-frame clip's 21-frame chunk ran the PyTorch UNet beside the loaded engine: a 12 GB card
+        full, 24.5 s a step (2026-10-30)."""
+        rt, pipe = trt()
+        rt.nets["unet"].engines = {"k": object()}
+        ehs, ids = torch.zeros(1, 1, 1024, dtype=torch.float16), torch.zeros(1, 3, dtype=torch.float16)
+        rt.unet(sample(21), torch.tensor(3.0), encoder_hidden_states=ehs, added_time_ids=ids, return_dict=False)
+        self.assertEqual(rt.nets["unet"].engines, {})
+        self.assertEqual(pipe.unet.calls, [(1, 21, 8, 4, 6)])
+
+    def test_with_room_it_stays_loaded(self):
+        rt, _ = trt()
+        rt.nets["unet"].engines = {"k": object()}
+        with mock.patch.object(T, "free_vram", lambda: 6 << 30):
+            rt._room_for_decode(self.decoder())
+        self.assertEqual(len(rt.nets["unet"].engines), 1)
+
+    def test_the_encode_moves_the_pytorch_unet_off_only_while_the_engine_denoises(self):
+        for off, want in ((False, ["cpu"]), (True, [])):
+            rt, pipe = trt("none")
+            rt.nets["unet"].off = off
+            moves = []
+            pipe.unet.device = torch.device("cuda")
+            pipe.unet.to = lambda dev, m=moves: m.append(dev)
+            with mock.patch.object(torch.cuda, "empty_cache", lambda: None):
+                rt._encode_with(lambda x: torch.zeros(2, 8, 4, 4), torch.zeros(2, 3, 32, 32), True)
+            self.assertEqual(moves, want, f"UNet engine off: {off}")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs the GPU")
+    def test_the_working_memory_shrinks_only_when_the_card_is_short(self):
+        for free, want in ((8 << 30, 256 << 20), (1 << 30, 16 << 20)):
+            s = T.Scratch()
+            s.get(256 << 20)
+            with mock.patch.object(T, "SHRINK_SPARE", 64 << 20), mock.patch.object(T, "free_vram", lambda f=free: f):
+                s.get(16 << 20)
+            self.assertEqual(s.buffer.numel(), want, f"{free >> 30} GB free")
+            s.release()
+
+
 @unittest.skipUnless(torch.cuda.is_available(), "needs the GPU")
 class ScratchTest(unittest.TestCase):
     """One working buffer for every engine of a run (2026-10-29: a buffer per call, marked used on
