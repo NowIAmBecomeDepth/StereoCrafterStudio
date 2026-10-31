@@ -274,7 +274,9 @@ def _reader(path: str, w: int, h: int, pix_fmt: str, scale: Optional[Tuple[int, 
     """Frames of `path` as arrays: rgb24 (uint8) or rgb48le (uint16)."""
     vf = ["-vf", f"scale={scale[0]}:{scale[1]}:flags=area"] if scale else []
     ow, oh = scale or (w, h)
-    proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", path, *vf, "-f", "rawvideo", "-pix_fmt", pix_fmt, "-"],
+    from core.common.frame_pipe import keep_coded_size    # ffprobe's size, a container crop or not
+    proc = subprocess.Popen(["ffmpeg", "-v", "error", *keep_coded_size(), "-i", path, *vf, "-f", "rawvideo",
+                             "-pix_fmt", pix_fmt, "-"],
                             stdout=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     dtype, ch = (np.uint16, 6) if pix_fmt == "rgb48le" else (np.uint8, 3)
     size = ow * oh * ch

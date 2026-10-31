@@ -376,5 +376,77 @@ class NativeYuvReadTest(unittest.TestCase):
             self.assertEqual((f.shape, str(f.dtype)), ((2, 32, 64, 3), "float16"))
 
 
+
+def _with_container_crop(src: Path, dest: Path, crop_right: int) -> None:
+    """`src` (an MP4, moov after mdat) with a container crop: a 'clap' box in its video sample entry,
+    `crop_right` columns off the right -- what a 4070 SUPER user's cutting tool wrote (2026-10-30)."""
+    import struct
+    buf = bytearray(src.read_bytes())
+    assert buf.find(b"moov") > buf.find(b"mdat"), "chunk offsets stay valid"
+    parents, s, e = [], 0, len(buf)
+    for kind in (b"moov", b"trak", b"mdia", b"minf", b"stbl", b"stsd"):
+        while struct.unpack(">4s", buf[s + 4:s + 8])[0] != kind:
+            s += struct.unpack(">I", buf[s:s + 4])[0]
+        parents.append(s)
+        s, e = s + 8, s + struct.unpack(">I", buf[s:s + 4])[0]
+    entry = parents[-1] + 16
+    w, h = struct.unpack(">HH", buf[entry + 32:entry + 36])          # the visual sample entry's size
+    clap = struct.pack(">I4s8i", 40, b"clap", w - crop_right, 1, h, 1, -crop_right, 2, 0, 1)
+    end = entry + struct.unpack(">I", buf[entry:entry + 4])[0]
+    buf[end:end] = clap
+    for off in parents + [entry]:
+        buf[off:off + 4] = struct.pack(">I", struct.unpack(">I", buf[off:off + 4])[0] + len(clap))
+    dest.write_bytes(bytes(buf))
+
+
+class ContainerCropTest(unittest.TestCase):
+    """A clip whose container crops it (2026-10-30: a user's 2580-wide original with a 2-pixel 'clap'
+    crop): FFmpeg 7.1+ applied it, ffprobe still said 2580, and Merging read 2578-wide rows as 2580 --
+    the left eye sheared and green. Read with -apply_cropping codec, it is the same clip as without."""
+
+    def setUp(self):
+        if subprocess.run(["ffmpeg", "-v", "error", "-apply_cropping", "codec", "-f", "lavfi", "-i",
+                           "color=s=16x16:d=0.04", "-f", "null", "-"], capture_output=True).returncode:
+            self.skipTest("this FFmpeg applies no container crop (no -apply_cropping)")
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.plain, self.crop = Path(tmp.name) / "plain.mp4", Path(tmp.name) / "crop.mp4"
+        make_clip(self.plain, size="128x64", frames=6)
+        _with_container_crop(self.plain, self.crop, 2)
+        info = V.get_video_stream_info(str(self.crop))
+        self.assertEqual((info["width"], info["height"]), (128, 64), "ffprobe: the uncropped size")
+
+    def frames(self, path, fallback=False):
+        r = V.open_rgb_reader(str(path))
+        r._force_fallback = fallback
+        try:
+            return r.get_batch(list(range(6))).asnumpy()
+        finally:
+            r.close()
+
+    def test_the_rgb_read_is_the_uncropped_clip(self):
+        import numpy as np
+        want = self.frames(self.plain, fallback=True)
+        got = self.frames(self.crop, fallback=True)
+        self.assertEqual(got.shape, (6, 64, 128, 3))
+        self.assertTrue(np.array_equal(got, want), "the crop stretched back by FFmpeg's scale")
+
+    @unittest.skipUnless(_cuda(), "the native-YUV read is for CUDA machines")
+    def test_the_native_yuv_read_is_the_uncropped_clip(self):
+        import numpy as np
+        want = self.frames(self.plain)
+        got = self.frames(self.crop)
+        self.assertEqual(got.shape, (6, 64, 128, 3))
+        self.assertTrue(np.array_equal(got, want), "rows read at the wrong width: sheared and green")
+
+    def test_erases_read_is_the_uncropped_clip(self):
+        import numpy as np
+        from core.removal import erase as E
+        want = np.stack(list(E._reader(str(self.plain), 128, 64, "rgb24")))
+        got = np.stack(list(E._reader(str(self.crop), 128, 64, "rgb24")))
+        self.assertEqual(got.shape, want.shape)
+        self.assertTrue(np.array_equal(got, want))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,7 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 #: Raw-frame decodes read through a 1 MB pipe: the 4 KB default halved FFmpeg's throughput
 #: (Merging's three 16-bit reads took 7.6 s where Decord took 1.8, 2026-10-27).
 from core.common.frame_pipe import popen_frames as _popen_frames  # noqa: E402
+from core.common.frame_pipe import keep_coded_size  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +320,7 @@ class FFmpegRGBPipeReader:
             self._yuv, self._nvdec = None, False
             self._pix_fmt = "rgb48le" if self.bit16 else "rgb24"
             self._frame_size = self.width * self.height * (6 if self.bit16 else 3)
-        args = ["ffmpeg", "-v", "error", "-nostdin"]
+        args = ["ffmpeg", "-v", "error", "-nostdin", *keep_coded_size()]   # ffprobe's size, a container crop or not
         if self._nvdec:
             args += ["-hwaccel", "cuda"]
         if start_frame and self.fps:
