@@ -313,6 +313,49 @@ class MaskSideTest(unittest.TestCase):
         self.assertNotIn("VideoReader(", scan)
 
 
+class ChunkFitTest(unittest.TestCase):
+    """user 2026-11-01: a 12 GB card merged "super slow" -- a fixed Batch Chunk
+    Size outgrew the card at a big frame and Windows paged it into shared
+    memory. With Use GPU on, a clip's chunk is cut to what the card has free."""
+
+    GB = 2 ** 30
+
+    def fit(self, chunk, h, w, free, reserved=0, allocated=0):
+        from unittest import mock
+        from studio.stages.merging import engine as E
+        with mock.patch("torch.cuda.mem_get_info", return_value=(free, 12 * self.GB)), \
+                mock.patch("torch.cuda.memory_reserved", return_value=reserved), \
+                mock.patch("torch.cuda.memory_allocated", return_value=allocated):
+            return E._chunk_that_fits(chunk, h, w)
+
+    def test_a_4k_eye_on_a_12_gb_card_takes_fewer_frames(self):
+        n = self.fit(20, 2160, 3840, free=11 * self.GB)
+        self.assertEqual(n, 7)                                   # 10 GiB / 1.36 GiB a frame
+        self.assertLessEqual(n * 2160 * 3840 * 176, 10 * self.GB)
+
+    def test_what_fits_is_never_raised_past_what_was_asked(self):
+        self.assertEqual(self.fit(20, 1080, 1920, free=22 * self.GB), 20)
+
+    def test_torch_s_own_cache_counts_as_free(self):
+        self.assertEqual(self.fit(20, 2160, 3840, free=3 * self.GB, reserved=8 * self.GB, allocated=0), 7)
+
+    def test_a_full_card_still_takes_one_frame(self):
+        self.assertEqual(self.fit(20, 2160, 3840, free=self.GB // 2), 1)
+
+    def test_the_switch_is_on_by_default_and_reaches_the_batch(self):
+        self.assertIs(S.normalise({})["chunk_fit_vram"], True)
+        self.assertIs(S.current_settings(S.normalise({"chunk_fit_vram": False}))["chunk_fit_vram"], False)
+
+    def test_the_merge_loop_uses_it_with_use_gpu_on(self):
+        import inspect
+        from studio.stages.merging.engine import MergingEngine
+        src = inspect.getsource(MergingEngine.run_batch_process)
+        self.assertIn("_chunk_that_fits(chunk_size, hires_H, hires_W)", src)
+        cut = src.index("_chunk_that_fits(chunk_size")
+        self.assertIn("final_chunk = original_left = blended_right_eye", src[cut - 600:cut],
+                      "the last clip's frames still held when this one measures")
+
+
 class _Hooks:
     """The controller's side, without Qt: posts run on the test's thread."""
 
@@ -706,6 +749,67 @@ class EngineTest(unittest.TestCase):
             "clip", n_samples=24)
         self.assertEqual(len(order), 24)
         self.assertEqual(order, sorted(order), "the picks jump back and forth through the clip")
+
+    @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
+    def test_a_chunk_cut_to_fit_the_card_merges_what_its_size_would(self):
+        """user 2026-11-01 (ChunkFitTest): a card with room for 3 frames merges a chunk of 8 as chunks
+        of 3 -- every frame, the same file as a Batch Chunk Size of 3 writes, and the cut logged."""
+        from unittest import mock
+        import torch
+        sys.path.insert(0, str(REPO / "studio" / "tests" / "checks"))
+        import _fixtures
+        fix = _fixtures.copy("merge", self.tmp / "fix")
+        clip = str(fix / "inpainted" / "mA_320_inpainted_right_eye.mp4")
+        E, real = self.E, self.E._chunk_that_fits
+        asked = []
+
+        def three_fit(chunk, h, w):           # the card's free memory: 1 GB spare + 3 frames and a bit
+            asked.append((chunk, h, w))
+            with mock.patch("torch.cuda.mem_get_info", return_value=(2 ** 30 + h * w * E.CHUNK_BYTES_PER_PIXEL * 3 + 99, 0)), \
+                    mock.patch("torch.cuda.memory_reserved", return_value=0), \
+                    mock.patch("torch.cuda.memory_allocated", return_value=0):
+                return real(chunk, h, w)
+
+        def merge(chunk, out, fit=True):
+            settings = S.current_settings(S.normalise({
+                "inpainted_folder": str(fix / "inpainted"), "original_folder": str(fix / "orig"),
+                "mask_folder": str(fix / "mask"), "output_folder": str(out), "output_format": "Full SBS (Left-Right)",
+                "encoding_encoder": "Force CPU", "codec": "H.264", "use_gpu": True, "resume": False,
+                "split_lr": False, "dnxhr_fullres_split": False, "grain_enable": False,
+                "enable_color_transfer": False, "batch_chunk_size": str(chunk), "chunk_fit_vram": fit}))
+            self.eng.stop_event.clear()
+            self.eng.run_batch_process(settings, single_video_path=clip)
+            while self.hooks.pump():
+                pass
+            made = sorted(out.glob("*.mp4"))
+            self.assertEqual(len(made), 1, made)
+            return made[0]
+
+        with mock.patch.object(E, "_chunk_that_fits", side_effect=three_fit), \
+                self.assertLogs(E.logger, "INFO") as logs:
+            cut = merge(8, self.tmp / "cut")
+        self.assertEqual(asked[0][0], 8)
+        self.assertTrue(any("Batch Chunk Size 8 -> 3 frames" in m for m in logs.output), logs.output)
+        whole = merge(3, self.tmp / "three")
+
+        def frames(path):
+            return subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24",
+                                   "-"], capture_output=True, check=True).stdout
+        n_in = len(__import__("core.common.video_io", fromlist=["x"]).open_rgb_reader(clip))
+        self.assertGreater(n_in, 3, "the fixture must span more than one cut chunk")
+        a, b = frames(cut), frames(whole)
+        self.assertEqual(len(a), len(b))
+        self.assertEqual(len(a) // (len(a) // n_in), n_in, "frames lost")
+        self.assertEqual(a, b, "a cut chunk merged differently from that chunk size")
+
+        # Fit Chunk to GPU Memory off: the chunk asked for, uncut, on the same card
+        asked.clear()
+        with mock.patch.object(E, "_chunk_that_fits", side_effect=three_fit), \
+                self.assertLogs(E.logger, "INFO") as logs:
+            merge(8, self.tmp / "off", fit=False)
+        self.assertEqual(asked, [], "measured with the switch off")
+        self.assertFalse(any("Batch Chunk Size" in m for m in logs.output), logs.output)
+        torch.cuda.empty_cache()
 
     @unittest.skipUnless(__import__("torch").cuda.is_available(), "needs CUDA")
     def test_grain_match_measures_on_the_gpu_and_agrees_with_the_cpu(self):

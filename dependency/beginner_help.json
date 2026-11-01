@@ -152,6 +152,7 @@
     "add_borders": "Applies the edge borders saved for each clip in Splatting, which hide messy bits along the edges of the picture.",
     "resume": "When on, finished videos are moved into a 'finished' folder and skipped next time, so an interrupted batch picks up where it stopped.",
     "batch_chunk_size": "How many frames are held in memory at once. Lower it if you run out of memory on long videos.",
+    "chunk_fit_vram": "Keeps each batch of frames small enough for your graphics card. Without it, a card that runs out of memory slows Merging to a crawl.\nAt 1920x1080 an eye: 16 GB and 12 GB cards keep all 20 frames, an 8 GB card takes 17, at the same speed. Turn it off to try your own number.",
     "start_blending": "Merges every video found in the folders with the current settings.",
     "stop_blending": "Stops once the current piece of video is finished.",
     "process_current_clip": "Merges only the clip showing in the preview. Good for testing settings before running the whole batch.",

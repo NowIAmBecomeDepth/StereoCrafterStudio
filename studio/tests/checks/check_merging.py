@@ -79,6 +79,13 @@ check("non-Full-SBS hides Split + Delete (values kept)", not check_by_key("split
       and not check_by_key("delete_sbs_after_split").isVisible() and st.property("split_lr") is True)
 st.setProperty("grain_enable", False); pump(0.6)
 check("grain off hides Auto-match", not check_by_key("grain_automatch").isVisible())
+st.setProperty("use_gpu", True); pump(0.4)
+fit = check_by_key("chunk_fit_vram")
+check("Use GPU shows Fit Chunk to GPU Memory, on, with its test results",
+      fit is not None and fit.isVisible() and st.property("chunk_fit_vram") is True
+      and "12 GB card" in str(fit.property("help")))
+st.setProperty("use_gpu", False); pump(0.4)
+check("Use GPU off hides Fit Chunk to GPU Memory", not fit.isVisible())
 
 # ---- encoding quick-pick
 mg.applyEncodingPreset("10-bit"); pump(0.3)

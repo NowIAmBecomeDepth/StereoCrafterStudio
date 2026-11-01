@@ -431,6 +431,18 @@ def _fill_fx_slice(frames: int, h: int, w: int) -> int:
     return max(1, min(frames, int(min(1.5 * 2 ** 30, free * 0.25) // per_frame)))
 
 
+CHUNK_BYTES_PER_PIXEL = 176  # an eye pixel at a chunk's peak, reserved (10.30 GiB / 24 x 2580x1080)
+
+
+def _chunk_that_fits(chunk: int, h: int, w: int) -> int:
+    """Frames a Merging chunk may hold on the GPU: Batch Chunk Size, cut to
+    the card's free memory (CHUNK_BYTES_PER_PIXEL an eye pixel, 1 GiB spare)."""
+    free, _total = torch.cuda.mem_get_info()
+    free += torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+    fits = int((free - 2 ** 30) // (h * w * CHUNK_BYTES_PER_PIXEL))
+    return max(1, min(chunk, fits))
+
+
 def fill_fx_on_gpu(settings: dict) -> bool:
     return bool(settings.get("grain_gpu", True)) and torch.cuda.is_available()
 
@@ -1257,6 +1269,7 @@ class MergingEngine:
                 "dnxhr_fullres_split": self.dnxhr_fullres_split_var.get(),
                 "dnxhr_profile": self.dnxhr_profile_var.get(),
                 "output_container": self.output_container_var.get(),  # v2: MP4 / MKV (user, 2026-10-25)
+                "chunk_fit_vram": self.chunk_fit_vram_var.get(),  # v2: Fit Chunk to GPU Memory (2026-11-01)
                 # Mask params
                 "mask_binarize_threshold": float(self.mask_binarize_threshold_var.get()),
                 "mask_dilate_kernel_size": int(self.mask_dilate_kernel_size_var.get()),
@@ -2284,6 +2297,15 @@ class MergingEngine:
                 _mg_writer = None  # v2: O3 -- this clip's encoder writer thread
                 # 4. Loop through chunks
                 chunk_size = settings.get("batch_chunk_size", 32)
+                # v2: the last clip's GPU frames let go before this one measures (see gen PATCHES)
+                final_chunk = original_left = blended_right_eye = inpainted = mask = warped_original = None
+                processed_mask = inpainted_tensor_full = splatted_tensor = mask_raw = None
+                if (settings["use_gpu"] and settings.get("chunk_fit_vram", True)
+                        and torch.cuda.is_available()):  # v2: cut to what the card has free
+                    _asked, chunk_size = chunk_size, _chunk_that_fits(chunk_size, hires_H, hires_W)
+                    if chunk_size < _asked:
+                        logger.info(f"Batch Chunk Size {_asked} -> {chunk_size} frames: what fits in the "
+                                    f"GPU's free memory at {hires_W}x{hires_H} an eye.")
                 for frame_start in range(0, num_frames, chunk_size):
                     if self.stop_event.is_set():
                         break

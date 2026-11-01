@@ -1330,6 +1330,13 @@ Item {
                         Caption { text: "Batch Chunk Size:" }
                         MBox { key: "batch_chunk_size"; boxWidth: 55; HoverTip { tip: page.help("batch_chunk_size") } }
                     }
+                    MCheck {
+                        objectName: "chunkFitVram"
+                        Layout.columnSpan: page.wide ? 2 : 1
+                        key: "chunk_fit_vram"; text: "Fit Chunk to GPU Memory"
+                        shown: !!page.st.use_gpu
+                        help: page.help("chunk_fit_vram")
+                    }
                     }
                 }
                 JobQueue {

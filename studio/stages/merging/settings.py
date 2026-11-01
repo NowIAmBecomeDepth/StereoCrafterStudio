@@ -75,6 +75,7 @@ INTS: Dict[str, int] = {
 }
 BOOLS: Dict[str, bool] = {
     "use_gpu": False,
+    "chunk_fit_vram": True,  # Fit Chunk to GPU Memory (2026-11-01)
     "pad_to_16_9": False,
     "add_borders": True,
     "resume": False,
@@ -239,6 +240,7 @@ def current_settings(values: Dict[str, Any]) -> Dict[str, Any]:
         "nvenc_temporal_aq": v["nvenc_temporal_aq"], "nvenc_aq_strength": v["nvenc_aq_strength"],
         "color_tags": v["color_tags"], "dnxhr_fullres_split": v["dnxhr_fullres_split"],
         "dnxhr_profile": v["dnxhr_profile"], "output_container": v.get("output_container", "MP4"),
+        "chunk_fit_vram": v.get("chunk_fit_vram", True),
         "mask_binarize_threshold": float(v["mask_binarize_threshold"]),
         "mask_dilate_kernel_size": int(v["mask_dilate_kernel_size"]),
         "mask_blur_kernel_size": int(v["mask_blur_kernel_size"]),
