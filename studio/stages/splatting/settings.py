@@ -525,6 +525,12 @@ def job_fields(values: Dict[str, Any]) -> Dict[str, str]:
               "splat_out": splat_out}
     if splat_out:
         base = str(splat_out).replace("\\", "/").rstrip("/")
+        # an M2S run's splats are in m2s/ (core.splatting.m2s_backends.output_subfolder, 2026-10-30): the next
+        # stages' Import points there
+        from core.splatting.m2s_backends import output_subfolder
+        sub = output_subfolder(values.get("splat_backend", "SC"))
+        if sub:
+            base = f"{base}/{sub}"
         fields["hires"] = f"{base}/hires"
         fields["lowres"] = f"{base}/lowres"
     return fields

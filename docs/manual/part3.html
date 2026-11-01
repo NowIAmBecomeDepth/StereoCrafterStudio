@@ -221,6 +221,12 @@
      <b>next</b> frames (this one included), or back over the <b>previous</b> ones. Use it when the start of a
      shot is already right and only the rest needs tracking again, or the other way round. The thin line
      under the buttons shows how far tracking has got.</p>
+  <p><b>TensorRT.</b> When Studio has NVIDIA TensorRT (Settings &gt; Studio &gt; Models), SAM 3 tracks through
+     it -- about a fifth faster for clicks and boxes, about a third faster for a text search, any number of
+     objects. The first track on a new card builds its engines: about a minute, once, while the line waits,
+     and the first text search about a minute more for the text search's own. Masks
+     can differ from tracking without it by a pixel along their edges -- as much as SAM 3 changes them
+     itself for the smallest rounding difference. It takes about 2 GB more of the card while SAM 3 is loaded.</p>
   <div class="tip"><b>If the mask drifts</b><span>Go to a frame where it's wrong, fix it there with Add or
      Remove clicks, and track again -- with Start Here, only from that frame on. SAM 3 uses every frame you've
      corrected, not just the first.</span></div>
@@ -472,6 +478,13 @@
   <p><b>Setting up ROSE.</b> ROSE runs in its own environment, in <code>weights/ROSE</code>, because it needs
      older libraries than Studio. Until it's there, the panel offers <span class="btn">Set Up ROSE</span>,
      which fetches ROSE and about <b>3.7 GB</b> of model files (it needs git and uv). Static doesn't need it.</p>
+  <p><b>ROSE and TensorRT.</b> When Studio has NVIDIA TensorRT (Settings &gt; Studio &gt; Models),
+     <span class="btn">Set Up ROSE</span> gives ROSE TensorRT too, and Erase and Edge Fill then run ROSE
+     through it -- about 15% faster, the same fill to the eye. The first run at a new kind of size (480p or
+     720p, wide, tall or square) builds a TensorRT engine for it first: about five minutes once, and 3 GB in
+     <code>trt_engines/rose</code>; the progress line says so while it builds. A size it doesn't cover, or a
+     card without the room for the engine beside ROSE, runs as before. If ROSE was set up before it took
+     TensorRT, the Erase panel offers <span class="btn">Add TensorRT</span> (about 2 GB of packages).</p>
   <p><b>Putting it back at its own depth.</b> Once a clip is erased, <span class="set">Put back</span> lays
      what came off back into the finished 3D, at a depth of its own, in <a href="part2.html#merging">Merging</a>:</p>
   <ul>

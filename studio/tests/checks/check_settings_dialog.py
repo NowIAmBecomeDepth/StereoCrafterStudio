@@ -194,8 +194,11 @@ QMetaObject.invokeMethod(dlg, "open"); pump(0.5)
 dlg.setProperty("current", 0); pump(0.4)       # the stage: first
 rows = named("settingsItem")
 texts = [r.property("text") for r in rows]
-check("Inpainting section: its File / Options / Help items", "Use SageAttention" in texts and "Encoding Settings" in texts
+_sage_v1 = [t for t in texts if t.startswith("Use SageAttention") and not t.endswith("(for V2)")]   # Theme.sageName (f35c5f3)
+check("Inpainting section: its File / Help items", len(_sage_v1) == 1
       and "Load Settings" in texts and "About" in texts, str(texts))
+# user, 2026-10-30: Encoding Options out of Settings, a button on the Inpainting tab itself
+check("...and no Encoding Settings any more", not any("Encoding" in t for t in texts), str(texts))
 byname = {r.property("text"): r for r in rows}
 ghosts = [g.property("text") for g in walk(byname["Reset to Default"], []) if g.objectName() == "settingsGhost" and g.isVisible()]
 check("...an action with nothing to open is a ghost button with its own name (no 'Run')",
@@ -204,7 +207,7 @@ check("...an action with nothing to open is a ghost button with its own name (no
 check("...with a tooltip where the name alone is not enough", "finished" in byname["Restore Finished"].property("tip")
       and byname["About"].property("tip") == "", byname["Restore Finished"].property("tip"))
 ip_st = objs["Inpainting"].property("settings")
-sage = [r for r in rows if r.property("text") == "Use SageAttention"][0]
+sage = [r for r in rows if r.property("text") == _sage_v1[0]][0]
 before = bool(ip_st.value("use_sageattention")) if hasattr(ip_st, "value") else None
 QMetaObject.invokeMethod(sage, "flipped", Q_ARG(bool, not before)); pump(0.3)
 after = bool(ip_st.value("use_sageattention"))
@@ -232,15 +235,13 @@ check("every stage's link goes to a section that is in the manual",
       all(("id=\"" + win.manualAt(i).split("#")[1] + "\"") in (REPO / "docs" / "manual" / win.manualAt(i).split("#")[0]).read_text(encoding="utf-8")
           for i in range(4)), [win.manualAt(i) for i in range(5)])
 dlg.setProperty("current", 0); pump(0.3)        # the stage
-enc = [r for r in rows if r.property("text") == "Encoding Settings"][0]
-QMetaObject.invokeMethod(enc, "run"); pump(0.6)
+about = [r for r in rows if r.property("text") == "About"][0]
+QMetaObject.invokeMethod(about, "run"); pump(0.6)
 check("...any other a button that closes Settings, then acts", dlg.property("opened") is False)
-enc_dlg = [c for c in walk(win.contentItem(), []) if c.metaObject().className().startswith("EncodingDialog")]
-check("...(Encoding Settings opened)", any(d.property("visible") for d in enc_dlg) or any(
-      o.property("opened") for o in win.findChildren(QObject) if o.metaObject().className().startswith("EncodingDialog")))
-for o in win.findChildren(QObject):
-    if o.metaObject().className().startswith("EncodingDialog"):
-        QMetaObject.invokeMethod(o, "close")
+_prompts = [o for o in win.findChildren(QObject) if o.metaObject().className().startswith("PromptDialog")]
+check("...(About's prompt opened)", any(o.property("opened") or o.property("visible") for o in _prompts), str(len(_prompts)))
+for o in _prompts:
+    QMetaObject.invokeMethod(o, "close")
 pump(0.3)
 
 # follows the stage showing

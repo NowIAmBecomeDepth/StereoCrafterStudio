@@ -319,6 +319,13 @@ class InpaintingV2Controller(QObject):
         settings_store.save("inpainting_v2", S.normalise(self._values()))
         self.queue.rescan()        # a typed or picked input: its clips (held during a job)
 
+    @Slot("QVariantMap")
+    def takeBack(self, plan) -> None:
+        """Merging's "Rerun in Inpainting V2" (user, 2026-10-31; studio.send_back): the splats
+        back in the input folder, ticked in Upcoming Jobs for Process Selected."""
+        from studio import send_back
+        send_back.take_back(self, self.queue, dict(plan or {}), self._set)
+
     @Slot(str)
     def loadSettingsFrom(self, path: str) -> None:
         """v1 load_settings: every key with a matching variable, v1's types."""
@@ -522,7 +529,7 @@ class InpaintingV2Controller(QObject):
             logger.info("Test render into %s", self._runner_values["output_folder"])
         self._test = False                 # the next Start runs as it is
         runner.only_clips = self._only     # Upcoming Jobs' picks, or None: every clip
-        # Inpainting's Encoding Settings (V1's page, Settings > Inpainting) for V2's files too
+        # Inpainting's Encoding Options (the button at the right of the V1 / V2 tabs) for V2's files too
         # (user, 2026-10-11): codec, bit depth (10-bit = HEVC Main 10), CRF, Enable DNxHR
         self._runner_values["_encoding"] = self._encoding_settings()
         self._start_stats()

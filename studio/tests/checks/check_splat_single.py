@@ -106,6 +106,15 @@ tags = {o.name: warp_of(o) for o in duals}
 want = "M2S" if backend_available() else "SC"
 check(f"Splat Backend M2S: its dual grids record {want}", duals and all(t.get("splat_backend") == want for t in tags.values()),
       str(tags))
+# user, 2026-10-30: an M2S warp's splats in out/m2s/hires and out/m2s/lowres, SC's where they were
+m2s_dir = (FIX / "out" / "m2s")
+if backend_available():
+    check("...in m2s/hires and m2s/lowres", duals and all(o.parent.parent == m2s_dir and o.parent.name in ("hires", "lowres")
+                                                          for o in duals) and (m2s_dir / "hires").is_dir()
+          and (m2s_dir / "lowres").is_dir(), str([str(o.relative_to(FIX / "out")) for o in duals]))
+check("...and the SC render's splats still in hires / lowres",
+      outs and all(o.parent.parent == FIX / "out" and o.parent.name in ("hires", "lowres") for o in outs),
+      str([str(o.relative_to(FIX / "out")) for o in outs]))
 setv("splat_backend", "SC"); ctl._set("dual_output", False); settle(10)
 
 print("STATUS", ctl._status, "busy", ctl._busy, flush=True)

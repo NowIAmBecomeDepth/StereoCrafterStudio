@@ -906,7 +906,7 @@
       through Inpainting and Merging. The files are <b>very large</b>: several GB per minute.</li>
     <li><span class="set">Container</span>: the file type of the H.264 / H.265 results, <b>MP4</b> (the
       default) or <b>MKV</b>. An MKV cut short by a crash or a full disk still plays up to where it stopped.
-      Inpainting and Merging read either, and they have the same choice in their own Encoding Settings.
+      Inpainting and Merging read either, and they have the same choice in their own Encoding Options.
       With Enable DNxHR on, the files are always <code>.mov</code>.</li>
     <li><span class="set">DNxHR Profile</span>: match it to your source. <b>8-bit</b> (SQ / HQ) suits
       1080p Blu-rays and web rips; <b>10-bit</b> (HQX / 444) is for HDR and 10-bit SDR sources, such as
@@ -1084,16 +1084,19 @@
      the clip finishes, but a long clip can need several gigabytes at once. Keep plenty of free space on
      the drive, or the saves fail and you lose the ability to resume.</span></div>
 
+  <h3>Encoding Options</h3>
+  <p>The <b>Encoding Options&hellip;</b> button at the right end of the V1 / V2 tabs sets how the files are
+    saved, for V1 and V2 alike: <b>10-bit (Main10)</b> writes 10-bit HEVC; <b>Enable DNxHR</b>, off by default,
+    writes DNxHR .mov files for an all-DNxHR pipeline; <b>Container</b> picks MP4 or MKV for the other files.
+    The <b>8-bit</b> / <b>10-bit</b> presets at its top set the codec side in one click.</p>
+
   <h3>In Settings</h3>
   <ul>
     <li><b>Use SageAttention 2 (RTX 30 Series and Up)</b>: a faster way to run the AI (<b>Use SageAttention 1
       (RTX 20 Series)</b> once that's installed, Settings &gt; Studio &gt; Models). The one ending
       <b>(for V2)</b> is the same for Inpainting V2, and <b>Load / Save V2 Settings</b>
       keep V2's settings in a file of their own.</li>
-    <li><b>Encoding Settings</b> (how the files are saved, for V1 and V2 alike: <b>10-bit (Main10)</b> writes
-      10-bit HEVC; <b>Enable DNxHR</b>, off by default, writes DNxHR .mov files for an all-DNxHR pipeline;
-      <b>Container</b> picks MP4 or MKV for the other files),
-      <b>Load / Save Settings</b>,
+    <li><b>Load / Save Settings</b>,
       <b>Reset to Default</b>, <b>Restore Finished</b> (moves clips back out of <code>finished</code> to run
       them again) and <b>Enable Debugging</b>.</li>
   </ul>

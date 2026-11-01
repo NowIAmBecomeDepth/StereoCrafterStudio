@@ -94,6 +94,7 @@ class _Run:
         self.jobs = min(owner.jobs, len(self.videos))
         self.events: "queue.Queue" = queue.Queue()
         self.conns: Dict[int, Any] = {}
+        self.connected = 0                           # workers that ever connected (conns drops the finished)
         self.procs: Dict[int, subprocess.Popen] = {}
         self.running: Dict[int, str] = {}           # worker -> its clip
         self.active: set = set()                     # workers given clips
@@ -144,6 +145,7 @@ class _Run:
                 continue
             wid = int(hello[1])
             self.conns[wid] = conn
+            self.connected += 1
             conn.send(("settings", self.settings))
             threading.Thread(target=self._read, args=(wid, conn), daemon=True, name=f"splat-job{wid}").start()
 
@@ -186,7 +188,10 @@ class _Run:
                 if msg is not None:
                     self._on(wid, msg)
                 self._dispatch()
-                if not self.conns and time.monotonic() - began > CONNECT_TIMEOUT_S:
+                # none ever connected: not "none left" -- every finished job leaves conns, so a batch
+                # past the timeout ended on this error as its last job closed (tester, 2026-10-31)
+                if not self.connected and (len(self.gone) >= self.jobs
+                                           or time.monotonic() - began > CONNECT_TIMEOUT_S):
                     raise RuntimeError("High VRAM Mode: no worker started (see the console).")
         except Exception as e:
             logger.error(f"High VRAM Mode: {e}", exc_info=True)

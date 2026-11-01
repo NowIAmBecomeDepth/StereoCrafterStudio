@@ -567,6 +567,14 @@ class SendOnTests(unittest.TestCase):
         self.assertEqual(p["fields"], {"input_folder": low, "hires_blend_folder": os.path.dirname(hi)})
         self.assertNotIn("note", p)
 
+    def test_an_m2s_splat_is_found_in_m2s(self):
+        """An M2S warp's splats are in m2s/lowres and m2s/hires (2026-10-30)."""
+        from studio import send_on
+        low = self.touch("out", "m2s", "lowres", "clip1_640_splatted2.mp4")
+        hi = self.touch("out", "m2s", "hires", "clip1_1920_splatted2.mp4")
+        p = send_on.plan("splatting", "S:/src/clip1.mp4", {"output_splatted": str(self.tmp / "out")}, {})
+        self.assertEqual(p["fields"], {"input_folder": low, "hires_blend_folder": os.path.dirname(hi)})
+
     def test_only_a_hires_splat_is_said(self):
         """bug sweep 2026-10-14c: the Hi-Res splat went in as the Lo-Res input without a word."""
         from studio import send_on

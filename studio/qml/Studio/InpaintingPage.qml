@@ -16,7 +16,8 @@ import "tips.js" as Tips
 //   Post-Processing           | Current Clip Info
 //   [ progress, status, Start / Stop, View Output Folder, menu ]
 //
-// Encoding lives where v1 keeps it, under the menu (Encoding Settings...).
+// Encoding Options sits at the right end of the V1 / V2 tabs (user, 2026-10-30: out of Settings,
+// a thin solid button like Splatting's and Merging's); V1 and V2 share it, M2S has its own.
 Item {
     id: page
     property bool active: false
@@ -133,6 +134,8 @@ Item {
         onAccepted: InpaintingV2.saveSettingsTo(Shell.urlToPath(selectedFile))
     }
     EncodingDialog { id: encodingDlg; ctl: page.ip }
+    // M2S's own (personal/m2svid: InpaintingM2S only where it is)
+    EncodingDialog { id: m2sEncodingDlg; ctl: typeof InpaintingM2S !== "undefined" ? InpaintingM2S : null }
 
     // ---- engine switch: v1's sub-tab strip -----------------------------------
     StageTabBar {
@@ -148,6 +151,29 @@ Item {
                : [names[0], names[1]].concat(page.m2sPage !== "" ? [names[2]] : [])
         currentIndex: page.engine
         onActivated: (i) => page.engine = i
+    }
+
+    // Encoding Options (user, 2026-10-30): out of Settings, at the right end of the engine tabs --
+    // Splatting's and Merging's solid accent button, thinner to sit in this row
+    AccentButton {
+        id: encodingButton
+        objectName: "encodingButton"
+        // not "m2s": that's the M2S page Loader's id, which a name here would read instead
+        readonly property bool forM2s: page.engine === 2 && m2sEncodingDlg.ctl !== null
+        text: "Encoding Options…"
+        iconGlyph: Theme.icon.video
+        height: 24
+        font.pixelSize: Theme.buttonSize - 1
+        anchors.verticalCenter: engineSwitch.verticalCenter
+        anchors.right: parent.right
+        anchors.rightMargin: 18
+        onClicked: (encodingButton.forM2s ? m2sEncodingDlg : encodingDlg).open()
+        HoverTip {
+            tip: encodingButton.forM2s
+                 ? "How M2S writes its right eyes: codec, encoder, quality, CRF, NVENC and DNxHR options."
+                 : "How the inpainted clips are saved, for V1 and V2 alike: codec, encoder, quality, CRF, "
+                   + "Container, and the NVENC / DNxHR options. The 8-bit / 10-bit presets set the codec side in one click."
+        }
     }
 
     // ---- V1 ------------------------------------------------------------------
@@ -397,11 +423,13 @@ ChangeFoldersButton {
             countText: page.ip.progressCount || ""
             rowActions: [{ id: "run", text: "Inpaint This Clip Now" }, { id: "test", text: "Test Render" },
                          { id: "finished", text: "Move to Finished" },
+                         { id: "rerun", text: "Rerun in Splatting", back: true },
                          { id: "send", text: "Send to Merging", whenDone: true }]
             onRowAction: (id, path) => {
                 if (id === "run") page.ip.startClip(path)
                 else if (id === "test") page.ip.testClip(path)          // into Test Renders (user, 2026-10-15)
                 else if (id === "finished") page.ip.jobClips.moveToFinished(path)
+                else if (id === "rerun") sendBack(path, "splatting", Splatting, 1, -1)    // user, 2026-10-31
                 else if (id === "send") sendOn(path, page.ip, "merging", Merging, 3)
             }
         }
@@ -497,7 +525,7 @@ ChangeFoldersButton {
 
     // v1's menus for this stage. Main puts them on the menu bar after the
     // Studio / View / GPU menus while this tab is showing.
-    readonly property var stageMenus: [fileMenu, optionsMenu, helpMenu]
+    readonly property var stageMenus: [fileMenu, helpMenu]
 
     StudioMenu {
         id: fileMenu
@@ -547,12 +575,6 @@ ChangeFoldersButton {
             enabled: !InpaintingV2.busy && !InpaintingV2.loading
             onTriggered: saveV2SettingsDlg.open()
         }
-    }
-
-    StudioMenu {
-        id: optionsMenu
-        title: "Options"
-        MenuItem { text: "Encoding Settings..."; onTriggered: encodingDlg.open() }
     }
 
     StudioMenu {

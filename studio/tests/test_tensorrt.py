@@ -192,30 +192,33 @@ class DispatchTest(unittest.TestCase):
             self.assertEqual(released, [1], "the GPU copy freed even so")
             self.assertEqual([p.name for p in Path(d).iterdir()], [], "no engine, no .part, no ONNX left")
 
-    def test_a_build_short_of_workspace_is_tried_again_with_the_cards_free_memory(self):
-        """A 5090's DepthCrafter UNet at 1024x576, Window 110 needed 10.75 GB for one part: the 8 GB
-        workspace couldn't build it (2026-10-30)."""
+    def test_a_big_card_builds_with_all_it_has_free_a_small_one_starts_at_8_gb(self):
+        """A 5090's DepthCrafter UNet at 1024x576, Window 110 needed 10.75 GB for one part, a tester's
+        11.5 GB: the 8 GB first try failed it. No cap on 16, 24 and 32 GB cards; 8 and 12 GB cards start
+        at 8 GB and try again with all they have free (user, 2026-10-31)."""
         G = 1 << 30
-        for free, want in ((25 * G, [0, 24 * G]), (7 * G, [0])):
+        # (free, total, the first try fails, workspaces asked, built)
+        for free, total, fails, want, built in ((25 * G, 32 * G, False, [24 * G], True),
+                                                (15 * G, 16 * G, False, [14 * G], True),
+                                                (11 * G, 12 * G, True, [8 * G, 10 * G], True),
+                                                (7 * G, 8 * G, True, [6 * G], False)):
             asked = []
 
-            def serialize(path, profile=None, workspace=0, a=asked):
+            def serialize(path, profile=None, workspace=0, a=asked, fails=fails):
                 a.append(workspace)
-                if len(a) == 1:
+                if fails and len(a) == 1:
                     raise RuntimeError("TensorRT could not build the engine (see the lines above)")
                 return b"engine"
             with tempfile.TemporaryDirectory() as d, mock.patch.object(T, "ENGINE_DIR", Path(d)), \
                     mock.patch.object(T, "_serialize", serialize), mock.patch.object(T, "_TRT_OUT", [T.log]), \
-                    mock.patch.object(torch.cuda, "mem_get_info", lambda f=free: (f, 32 * G)):
-                if len(want) == 2:
-                    with self.assertLogs(T.log, "INFO") as logs:
-                        T.build_engine("u.engine", lambda p: p.write_bytes(b"onnx"))
+                    mock.patch.object(torch.cuda, "mem_get_info", lambda f=free, t=total: (f, t)):
+                if built:
+                    T.build_engine("u.engine", lambda p: p.write_bytes(b"onnx"))
                     self.assertEqual((Path(d) / "u.engine").read_bytes(), b"engine")
-                    self.assertIn("24.0 GB workspace", logs.output[0])
                 else:
                     with self.assertRaises(RuntimeError):
                         T.build_engine("u.engine", lambda p: p.write_bytes(b"onnx"))
-            self.assertEqual(asked, want, f"{free // G} GB free")
+            self.assertEqual(asked, want, f"{free // G} GB free of {total // G}")
 
     def test_with_no_offload_the_pytorch_unet_waits_in_ram(self):
         rt, pipe = trt("none")
@@ -356,9 +359,10 @@ class ScratchTest(unittest.TestCase):
 
     def test_the_build_workspace_fits_what_the_card_has_free(self):
         G = 1 << 30
-        for free, want in ((15 * G, 8 * G), (6 * G, 5 * G), (G // 2, G)):
-            with mock.patch.object(torch.cuda, "mem_get_info", lambda f=free: (f, 16 * G)):
-                self.assertEqual(T._workspace_bytes(), want)
+        for free, total, want in ((15 * G, 16 * G, 14 * G), (30 * G, 32 * G, 29 * G), (11 * G, 12 * G, 8 * G),
+                                  (6 * G, 12 * G, 5 * G), (G // 2, 8 * G, G)):
+            with mock.patch.object(torch.cuda, "mem_get_info", lambda f=free, t=total: (f, t)):
+                self.assertEqual(T._workspace_bytes(), want, (free / G, total / G))
 
 
 class NotInstalledTest(unittest.TestCase):
@@ -468,6 +472,27 @@ class DepthCrafterDispatchTest(unittest.TestCase):
                 rt.vae_encode(torch.zeros(n, 3, 32, 32, dtype=torch.float16))
         self.assertEqual((pipe.vae.decodes, pipe.vae.encodes), ([(1, 4, 4, 4)], [(1, 3, 32, 32)]))
         self.assertEqual((rt.nets["vaedec"].trt_calls, rt.nets["vaeenc"].trt_calls), (2, 2))
+
+    def test_a_vae_engine_builds_with_the_pytorch_unet_in_ram(self):
+        """Left on the GPU after the UNet engine failed, a tester's VAE decoder build couldn't find 1.2 GB
+        (2026-10-31): every VAE build moves it to RAM and back after; one already in RAM stays there."""
+        z, x = torch.zeros(4, 4, 4, 4, dtype=torch.float16), torch.zeros(4, 3, 32, 32, dtype=torch.float16)
+        for start in ("cuda", "cpu"):
+            for cls in (T.TensorRT, T.DepthCrafterTensorRT):
+                pipe = types.SimpleNamespace(unet=FakeUNet(), vae=FakeVae(), image_encoder=None)
+                pipe.unet.device = torch.device(start)
+                moves, during = [], []
+                pipe.unet.to = lambda dev, u=pipe.unet, m=moves: (m.append(dev), setattr(u, "device", torch.device(dev)))
+                rt = cls(pipe, 25, True, "none")
+                with mock.patch.object(rt, "_on_gpu", lambda module: (lambda: None)), \
+                        mock.patch.object(torch.cuda, "empty_cache", lambda: None), \
+                        mock.patch.object(T, "build_engine", lambda *a, u=pipe.unet, d=during, **k: d.append(u.device.type)):
+                    rt._build_decoder("d.engine", z)
+                    rt._build_encoder("e.engine", x)
+                label = f"{cls.__name__}, UNet on {start}"
+                self.assertEqual(during, ["cpu", "cpu"], label)
+                self.assertEqual(pipe.unet.device.type, start, label + ": back where it was")
+                self.assertEqual(moves, ["cpu", "cuda"] * 2 if start == "cuda" else [], label)
 
     def test_its_lines_reach_the_stage_log(self):
         dc_log = mock.Mock()

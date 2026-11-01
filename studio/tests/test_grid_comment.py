@@ -82,5 +82,46 @@ class GridCommentTest(unittest.TestCase):
         self.assertEqual(M.parse_grid_comment("Lavf; encoded by someone"), {})
 
 
+
+class M2sFolderTest(unittest.TestCase):
+    """An M2S warp's splats in m2s/hires and m2s/lowres, apart from SC's (user, 2026-10-30): Splatting's
+    tasks, and the record Inpainting's and Merging's Import read. An M2S backend that didn't load warps
+    with SC, and its splats stay with SC's."""
+
+    def tasks(self, backend):
+        from types import SimpleNamespace
+        from core.splatting.batch_processing import BatchProcessor
+        s = SimpleNamespace(enable_full_resolution=True, enable_low_resolution=True, full_res_batch_size=4,
+                            low_res_batch_size=8, low_res_width=640, low_res_height=272, splat_backend=backend)
+        return [t.output_subdir.replace("\\", "/") for t in BatchProcessor.get_defined_tasks(None, s)]
+
+    def test_sc_splats_where_they_were(self):
+        self.assertEqual(M.output_subfolder("SC"), "")
+        self.assertEqual(self.tasks("SC"), ["hires", "lowres"])
+
+    @unittest.skipUnless(M.backend_available(), "the M2S backend (dependency_R) isn't here")
+    def test_m2s_splats_in_m2s(self):
+        for backend in ("M2S", "M2S+Fix"):
+            self.assertEqual(M.output_subfolder(backend), "m2s", backend)
+            self.assertEqual(self.tasks(backend), ["m2s/hires", "m2s/lowres"], backend)
+
+    @unittest.skipUnless(M.backend_available(), "the M2S backend (dependency_R) isn't here")
+    def test_the_next_stages_import_from_m2s(self):
+        from studio.stages.splatting import settings as SS
+        m2s = SS.job_fields({"output_splatted": "D:/ch/splats", "splat_backend": "M2S"})
+        self.assertEqual((m2s["hires"], m2s["lowres"]), ("D:/ch/splats/m2s/hires", "D:/ch/splats/m2s/lowres"))
+        sc = SS.job_fields({"output_splatted": "D:/ch/splats", "splat_backend": "SC"})
+        self.assertEqual((sc["hires"], sc["lowres"]), ("D:/ch/splats/hires", "D:/ch/splats/lowres"))
+
+    def test_an_m2s_backend_that_didnt_load_stays_with_sc(self):
+        saved = M._hybrid_mask
+        M._hybrid_mask = None
+        try:
+            self.assertEqual(M.output_subfolder("M2S"), "")
+            self.assertEqual(self.tasks("M2S+Fix"), ["hires", "lowres"])
+        finally:
+            M._hybrid_mask = saved
+
+
 if __name__ == "__main__":
     unittest.main()

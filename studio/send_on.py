@@ -128,6 +128,9 @@ def plan(kind: str, path: str, values: Dict, chapter: Optional[Dict] = None) -> 
         low = made_from(os.path.join(out, "lowres"), stem, "_splatted")
         hires_dir = os.path.join(out, "hires")
         hi = made_from(hires_dir, stem, "_splatted")
+        if not (low or hi):         # an M2S warp's splats: m2s/lowres and m2s/hires (2026-10-30)
+            low = made_from(os.path.join(out, "m2s", "lowres"), stem, "_splatted")
+            hi = made_from(os.path.join(out, "m2s", "hires"), stem, "_splatted")
         if not (low or hi):
             low = made_from(out, stem, "_splatted")
         if not (low or hi):

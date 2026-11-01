@@ -20,6 +20,8 @@ import torch
 
 from core.depthedit import sam3_backend as S
 
+S.TRACK_TENSORRT = False      # the speed-ups alone, bit for bit (TensorRT: check_sam3_tensorrt)
+
 W, H = 640, 360
 fails = []
 

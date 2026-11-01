@@ -23,6 +23,8 @@ import torch
 
 from core.depthedit import sam3_backend as S
 
+S.TRACK_TENSORRT = False      # SAM 3's own memory and Studio's savings (TensorRT: check_sam3_tensorrt)
+
 FRAMES = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 W, H = 1920, 1038
 fails = []

@@ -236,6 +236,35 @@ data = json.loads(sc[0].read_text()) if sc else {}
 check("sidecar: submask_* + enabled", data.get("submask_enabled") is True and data.get("submask_core") == 100
       and data.get("submask_rect") == list(r), str({k: v for k, v in data.items() if k.startswith("submask")}))
 check("v1's status line", status and status[-1] == f"Subtitle mask saved: {out.name}", status[-1:])
+# Text dials, Pop-Out and Rain turned after Save reach the render (tester, 2026-10-31): Save
+# wrote the sidecar with the dials as they were then, and the render reads the sidecar first --
+# turned later, they moved only the preview. Now they go into the sidecar, nothing else in it changes.
+_TK = ("submask_grow", "submask_soften", "submask_clean", "submask_conv", "pop_out",
+       "rain_mode", "rain_any_direction", "rain_depth", "rain_amount", "rain_layers", "rain_strands",
+       "rain_lights", "rain_pop", "rain_preset", "rain_guard", "rain_particle", "rain_placement",
+       "rain_grow", "rain_reflections", "rain_spread", "rain_spacing", "rain_conv")
+sp._set("submask_grow", 5); sp._set("submask_soften", 2.5); sp._set("submask_conv", -0.3)
+sp._set("pop_amount", 6.0); sp._set("rain_mode", "moving"); sp._set("rain_depth", 0.3); settle()
+_d2 = json.loads(sc[0].read_text()) if sc else {}
+check("Text dials turned after Save go into the clip's sidecar",
+      (_d2.get("submask_grow"), _d2.get("submask_soften"), _d2.get("submask_conv")) == (5.0, 2.5, -0.3),
+      str({k: _d2.get(k) for k in _TK[:4]}))
+check("...and Pop-Out and Rain too",
+      (_d2.get("pop_out"), _d2.get("rain_mode"), _d2.get("rain_depth")) == (6.0, "moving", 0.3),
+      str({k: _d2.get(k) for k in ("pop_out", "rain_mode", "rain_depth")}))
+check("...the rest of the sidecar as it was",
+      {k: v for k, v in _d2.items() if k not in _TK} == {k: v for k, v in data.items() if k not in _TK})
+_vs = sp._ensure_processor()._get_video_specific_settings(str(clip), sp.build_settings(), False)
+check("...and the render's per-clip settings carry them",
+      (_vs.get("submask_grow"), _vs.get("submask_soften"), _vs.get("submask_conv")) == (5.0, 2.5, -0.3),
+      str({k: _vs.get(k) for k in _TK[:4]}))
+check("...Pop-Out and Rain as well (a batch reads Pop-Out from the sidecar only)",
+      (_vs.get("pop_amount"), _vs["rain"]["mode"], _vs["rain"]["depth"]) == (6.0, "moving", 0.3),
+      str((_vs.get("pop_amount"), _vs["rain"]["mode"], _vs["rain"]["depth"])))
+for _k in ("submask_grow", "submask_soften", "submask_conv", "pop_amount"):
+    sp._set(_k, 0)
+sp._set("rain_mode", "off"); sp._set("rain_depth", 0.5)
+settle()
 
 # reopen: settings from the sidecar
 click_item(win, btn); settle()

@@ -175,6 +175,15 @@ Popup {
         accepted()
     }
     onAboutToShow: { cancelNew(); start() }
+    // Settings > Studio > Pick Folders with Windows Explorer (user, 2026-10-31; off by default):
+    // straight to Windows' own dialog, on the folder this picker would open at -- it never shows.
+    // A field that takes a clip too asks which, at the pointer.
+    function open() {
+        if (!Shell.explorerPickers) { visible = true; return }
+        cancelNew(); start()
+        if (allowFiles) explorerMenu.popup()
+        else winFolderDlg.open()
+    }
 
     enter: Transition {
         ParallelAnimation {
@@ -660,6 +669,9 @@ Popup {
         FolderDialog {
             id: winFolderDlg
             objectName: "pickerWindowsFolder"
+            // the app's window, said outright: with this picker unshown (Pick Folders with Windows
+            // Explorer) the dialog found none of its own and never opened (2026-10-31)
+            parentWindow: picker.parent ? picker.parent.Window.window : null
             title: picker.title
             currentFolder: Folders.toUrl(picker.folderNow)
             onAccepted: picker.pick(Folders.toPath(selectedFolder))
@@ -667,6 +679,7 @@ Popup {
         FileDialog {
             id: winFileDlg
             objectName: "pickerWindowsFile"
+            parentWindow: picker.parent ? picker.parent.Window.window : null
             title: picker.title
             currentFolder: Folders.toUrl(picker.folderNow)
             nameFilters: ["Clips (" + (picker.fileTypes.length ? picker.fileTypes : Folders.videoTypes())
@@ -678,6 +691,14 @@ Popup {
             objectName: "pickerWindowsMenu"
             MenuItem { text: "Pick a folder\u2026"; onTriggered: winFolderDlg.open() }
             MenuItem { text: "Pick a clip\u2026"; onTriggered: winFileDlg.open() }
+        }
+        // the same choice with this picker unshown (Pick Folders with Windows Explorer)
+        StudioMenu {
+            id: explorerMenu
+            objectName: "pickerExplorerMenu"
+            parent: Overlay.overlay
+            MenuItem { objectName: "pickerExplorerFolder"; text: "Pick a folder\u2026"; onTriggered: winFolderDlg.open() }
+            MenuItem { objectName: "pickerExplorerClip"; text: "Pick a clip\u2026"; onTriggered: winFileDlg.open() }
         }
         Text {
             text: (picker.allowFiles

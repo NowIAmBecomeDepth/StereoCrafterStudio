@@ -1179,12 +1179,16 @@ Item {
                         ctl: page.mg
                         legendKinds: ["sidecar", "erased"]   // Merging's badges: the sidecar, an object removed (Put Back)
                         // right-click a clip (user, 2026-10-10)
-                        rowActions: [{ id: "merge", text: "Merge This Clip Now" }, { id: "test", text: "Test Render" }, { id: "filledges", text: "Fill Edges" }, { id: "finished", text: "Move to Finished" }]
+                        rowActions: [{ id: "merge", text: "Merge This Clip Now" }, { id: "test", text: "Test Render" }, { id: "filledges", text: "Fill Edges" }, { id: "finished", text: "Move to Finished" },
+                                     { id: "rerun", text: "Rerun in Inpainting", back: true },
+                                     { id: "rerunV2", text: "Rerun in Inpainting V2", back: true }]
                         onRowAction: (id, path) => {
                             if (id === "merge") page.mg.startClip(path)
                             else if (id === "test") page.mg.testClip(path)   // into Test Renders (user, 2026-10-15)
                             else if (id === "filledges") EdgeFill.fillClip(path, String(page.mg.settings.output_folder || ""), String(page.mg.settings.mask_folder || ""))
                             else if (id === "finished") page.pv.jobClips.moveToFinished(path)
+                            else if (id === "rerun") sendBack(path, "inpainting", Inpainting, 2, 0)        // user, 2026-10-31
+                            else if (id === "rerunV2") sendBack(path, "inpainting_v2", InpaintingV2, 2, 1)
                         }
                         busy: page.mg.busy
                         // clipName still names the preview's clip as a job starts: a clip is
@@ -1335,12 +1339,16 @@ Item {
                     ctl: page.mg
                     legendKinds: ["sidecar", "erased"]   // Merging's badges: the sidecar, an object removed (Put Back)
                     // right-click a clip (user, 2026-10-10)
-                    rowActions: [{ id: "merge", text: "Merge This Clip Now" }, { id: "test", text: "Test Render" }, { id: "filledges", text: "Fill Edges" }, { id: "finished", text: "Move to Finished" }]
+                    rowActions: [{ id: "merge", text: "Merge This Clip Now" }, { id: "test", text: "Test Render" }, { id: "filledges", text: "Fill Edges" }, { id: "finished", text: "Move to Finished" },
+                                     { id: "rerun", text: "Rerun in Inpainting", back: true },
+                                     { id: "rerunV2", text: "Rerun in Inpainting V2", back: true }]
                     onRowAction: (id, path) => {
                         if (id === "merge") page.mg.startClip(path)
                         else if (id === "test") page.mg.testClip(path)   // into Test Renders (user, 2026-10-15)
                         else if (id === "filledges") EdgeFill.fillClip(path, String(page.mg.settings.output_folder || ""), String(page.mg.settings.mask_folder || ""))
                         else if (id === "finished") page.pv.jobClips.moveToFinished(path)
+                            else if (id === "rerun") sendBack(path, "inpainting", Inpainting, 2, 0)        // user, 2026-10-31
+                            else if (id === "rerunV2") sendBack(path, "inpainting_v2", InpaintingV2, 2, 1)
                     }
                     busy: page.mg.busy
                     // clipName still names the preview's clip as a job starts: a clip is

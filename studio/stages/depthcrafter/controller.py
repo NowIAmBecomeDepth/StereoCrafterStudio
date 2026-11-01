@@ -846,6 +846,17 @@ class DepthCrafterController(QObject):
         self._probe_input(apply=False)
         self.save()
 
+    @Slot("QVariantMap")
+    def takeBack(self, plan) -> None:
+        """Splatting's "Rerun in DepthCrafter" for one clip or its ticked ones (user, 2026-10-31;
+        studio.send_back): one clip as loadForRerun, several ticked in the list."""
+        from studio import send_back
+
+        def set_field(key, value):
+            self._map.insert(key, value)
+            self._last_good[key] = value
+        send_back.take_back(self, self.queue, dict(plan or {}), set_field)
+
     def _finish_rerun(self, shape: str) -> None:
         source, output = self._rerun
         self._rerun = None

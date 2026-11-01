@@ -23,9 +23,11 @@ class SetupTests(unittest.TestCase):
         self.rose = self.tmp / "weights" / "ROSE"
         self.cmds = []
         self.head = None
+        self.studio_trt = False          # Studio's own TensorRT: off unless a test says
+        self.fail_trt = None             # a TensorRT install that fails: the error it raises
         for name, value in (("ROSE_DIR", self.rose), ("CLONE_MARKER", self.rose / ".studio_clone_ok"),
                             ("_run", self.fake_run), ("_head", lambda git: self.head),
-                            ("missing", lambda: [])):
+                            ("missing", lambda: []), ("tensorrt_wanted", lambda: self.studio_trt)):
             p = mock.patch.object(R, name, value, create=True)
             p.start()
             self.addCleanup(p.stop)
@@ -42,6 +44,8 @@ class SetupTests(unittest.TestCase):
                         "weights/put weights here.txt", "models/put base models here.txt"):
                 (side / rel).parent.mkdir(parents=True, exist_ok=True)
                 (side / rel).write_text("repo")
+        elif self.fail_trt is not None and any(c.startswith("tensorrt") for c in cmd):
+            raise self.fail_trt
         elif cmd[:2] == ["uv", "venv"]:
             R.python().parent.mkdir(parents=True, exist_ok=True)
             R.python().write_text("python")
@@ -78,6 +82,48 @@ class SetupTests(unittest.TestCase):
         R.setup(lambda line: None)
         self.assertNotIn("git clone", " | ".join(self.kinds()))
         self.assertEqual(R.CLONE_MARKER.read_text(), R.ROSE_COMMIT)
+
+
+    # ---- TensorRT for ROSE (2026-10-31) ----------------------------------------------------------------
+
+    def trt_installs(self):
+        return [c for c in self.cmds if any(a.startswith("tensorrt") for a in c)]
+
+    def test_tensorrt_goes_in_only_where_studio_has_it(self):
+        R.setup(lambda line: None)
+        self.assertEqual(self.trt_installs(), [])
+        self.cmds.clear()
+        self.studio_trt = True
+        R.setup(lambda line: None)
+        self.assertEqual(self.trt_installs(), [["uv", "pip", "install", "--python", str(R.python()), *R.TENSORRT]])
+
+    def test_a_failed_tensorrt_install_is_said_not_a_failed_setup(self):
+        self.studio_trt, self.fail_trt = True, RuntimeError("uv failed (exit 2)")
+        said = []
+        R.setup(said.append)                                     # no raise: ROSE runs without it
+        self.assertTrue(any("TensorRT for ROSE didn't install" in s for s in said), said)
+        self.assertIn("ROSE is ready.", said)
+
+    def test_a_stop_during_the_tensorrt_install_still_stops(self):
+        import threading
+        stop = threading.Event()
+        stop.set()
+        self.studio_trt, self.fail_trt = True, RuntimeError("stopped")
+        with self.assertRaises(RuntimeError):
+            R.setup(lambda line: None, stop)
+
+    def test_tensorrt_missing_is_studios_tensorrt_without_roses(self):
+        R.python().parent.mkdir(parents=True)
+        R.python().write_text("python")
+        self.studio_trt = True
+        self.assertTrue(R.tensorrt_missing())
+        pkg = self.rose / ".venv" / "Lib" / "site-packages" / "tensorrt" / "__init__.py"
+        pkg.parent.mkdir(parents=True)
+        pkg.write_text("")
+        self.assertFalse(R.tensorrt_missing())
+        pkg.unlink()
+        self.studio_trt = False
+        self.assertFalse(R.tensorrt_missing())
 
 
 if __name__ == "__main__":

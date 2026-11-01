@@ -444,12 +444,15 @@ class BatchProcessor:
             List of ProcessingTask objects
         """
         tasks = []
+        # an M2S warp's splats in m2s/hires and m2s/lowres, apart from SC's (user, 2026-10-30)
+        from .m2s_backends import output_subfolder
+        sub = output_subfolder(getattr(settings, "splat_backend", "SC"))
 
         if settings.enable_full_resolution:
             tasks.append(
                 ProcessingTask(
                     name="Full-Resolution",
-                    output_subdir="hires",
+                    output_subdir=os.path.join(sub, "hires") if sub else "hires",
                     set_pre_res=False,
                     target_width=-1,
                     target_height=-1,
@@ -462,7 +465,7 @@ class BatchProcessor:
             tasks.append(
                 ProcessingTask(
                     name="Low-Resolution",
-                    output_subdir="lowres",
+                    output_subdir=os.path.join(sub, "lowres") if sub else "lowres",
                     set_pre_res=True,
                     target_width=settings.low_res_width,
                     target_height=settings.low_res_height,

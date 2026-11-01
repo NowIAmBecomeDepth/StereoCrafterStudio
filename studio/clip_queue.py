@@ -592,6 +592,54 @@ def inpaint_finished_moves(values: dict, paths: List[str]) -> List[Tuple[str, st
     return out
 
 
+def archived_rows(kind: str, values: dict) -> Tuple[List[str], List[str]]:
+    """Show Finished (user, 2026-10-31): the clips this stage has finished and Resume moved
+    into the finished levels below its input folder(s) (chapter_paths.finished_chain), found as
+    its own list finds clips -- [(paths)], [(depth maps)] (Splatting's; [] elsewhere). A
+    single file as the input has no archive."""
+    from studio.chapter_paths import finished_chain
+
+    def level(key):
+        v = str(values.get(key) or "")
+        return v if v and os.path.isdir(v) else ""
+    paths: List[str] = []
+    depths: List[str] = []
+    seen = set()
+
+    def add(p, d=""):
+        k = os.path.normcase(os.path.abspath(p))
+        if k not in seen:
+            seen.add(k)
+            paths.append(p)
+            depths.append(d)
+    if kind == "splatting":
+        src, dep = level("input_source_clips"), level("input_depth_maps")
+        if not src or not dep:
+            return [], []
+        dep_levels = finished_chain(dep)            # its map may be live still, or archived too
+        for lv in finished_chain(src)[1:]:
+            for d in dep_levels:
+                for v, m in splat_pairs(dict(values, input_source_clips=lv, input_depth_maps=d)):
+                    add(v, m)
+        return paths, depths
+    if kind in ("inpainting", "inpainting_v2"):
+        lister = inpaint_clips if kind == "inpainting" else inpaint_v2_clips
+        src = level("input_folder")
+        for lv in finished_chain(src)[1:] if src else []:
+            for v in lister(dict(values, input_folder=lv)):
+                add(v)
+        return paths, []
+    if kind == "merging":
+        src, mask = level("inpainted_folder"), level("mask_folder")
+        masks = finished_chain(mask) if mask else [""]
+        for lv in finished_chain(src)[1:] if src else []:
+            for m in masks:
+                for v in merge_clips(dict(values, inpainted_folder=lv, mask_folder=m)):
+                    add(v)
+        return paths, []
+    return [], []
+
+
 def frame_count(path: str, cache: Dict) -> int:
     """A clip's frame count from its header (cv2), cached by path and mtime:
     a rescan only opens new or changed files. 0 when unreadable."""
@@ -675,9 +723,12 @@ class ClipQueue(QObject):
     checkedChanged = Signal()
     #: Move Selected to Finished is done: (moved clips, clips left behind)
     movedToFinished = Signal(int, "QVariantList")
+    #: "Rerun in <stage before>" is done or refused: (target kind, ok, title, text) -- ok opens its page
+    sentBack = Signal(str, bool, str, str)
     _sig_done = Signal(object)
     _sig_frames = Signal(object)
     _sig_moved = Signal(object)
+    _sig_sent = Signal(object)
 
     def __init__(self, kind: str, values_fn: Callable[[], dict], parent=None):
         super().__init__(parent)
@@ -699,9 +750,15 @@ class ClipQueue(QObject):
         self._timer = QTimer(self, singleShot=True, interval=250, timeout=self._start)
         self._checked: set = set()           # normcased paths of the ticked clips
         self._moving = False
+        # Show Finished (user, 2026-10-31): the clips Resume moved into finished/, listed after
+        # the others for "Rerun in <stage before>" only -- never processed or moved from here
+        self._show_finished = False
+        self._archived: set = set()          # normcased paths of those rows
+        self._pending_ticks: Optional[set] = None    # ticks for the next scan (a send from the stage after)
         self._sig_done.connect(self._on_done)
         self._sig_frames.connect(self._on_frames)
         self._sig_moved.connect(self._on_moved)
+        self._sig_sent.connect(self._on_sent)
 
     clips = Property("QVariantList", lambda self: [os.path.basename(p) for p in self._paths], notify=changed)
     clipPaths = Property("QVariantList", lambda self: list(self._paths), notify=changed)
@@ -710,6 +767,28 @@ class ClipQueue(QObject):
     clipFrames = Property("QVariantList", lambda self: list(self._frames), notify=changed)
     #: each clip's aspect-ratio class, "1.85:1" (user, 2026-10-11); "" until read / unreadable
     clipRatios = Property("QVariantList", lambda self: list(self._ratios), notify=changed)
+    #: each row: one Resume moved into finished/ (Show Finished)
+    clipArchived = Property("QVariantList", lambda self: [self._key(p) in self._archived for p in self._paths],
+                            notify=changed)
+
+    def _can_show_finished(self) -> bool:
+        from studio.send_back import PREV
+        return self._kind in PREV
+
+    #: the lists with a stage before them offer Show Finished
+    canShowFinished = Property(bool, _can_show_finished, constant=True)
+    showFinished = Property(bool, lambda self: self._show_finished, notify=changed)
+
+    @Slot(bool)
+    def setShowFinished(self, on: bool) -> None:
+        if bool(on) == self._show_finished:
+            return
+        self._show_finished = bool(on)
+        self.changed.emit()
+        self.rescan()
+
+    def is_archived(self, path: str) -> bool:
+        return self._key(path) in self._archived
 
     # ---- the ticks: Process Selected, Move Selected to Finished (user, 2026-09-30)
 
@@ -725,8 +804,8 @@ class ClipQueue(QObject):
     moving = Property(bool, lambda self: self._moving, notify=checkedChanged)
 
     def checked_paths(self) -> List[str]:
-        """The ticked clips, in the list's order."""
-        return [p for p in self._paths if self._key(p) in self._checked]
+        """The ticked clips, in the list's order -- not Show Finished's rows: a run never takes those."""
+        return [p for p in self._paths if self._key(p) in self._checked and self._key(p) not in self._archived]
 
     def frames_of(self, paths, cap: int = -1) -> List[Tuple[str, int]]:
         """[(path, frames)] for a run's clips: the list's own counts, else the header's; at most
@@ -734,6 +813,8 @@ class ClipQueue(QObject):
         known = {self._key(p): f for p, f in zip(self._paths, self._frames)}
         out = []
         for p in paths:
+            if self._key(p) in self._archived:      # Show Finished's rows: not the run's
+                continue
             n = known.get(self._key(p)) or frame_count(p, self._frames_cache)
             out.append((p, min(n, cap) if cap and cap > 0 else n))
         return out
@@ -856,7 +937,8 @@ class ClipQueue(QObject):
     def _move_to_finished(self, wanted) -> None:
         if self._hold or self._moving:
             return
-        rows = [(p, d) for p, d in zip(self._paths, self._depths or [""] * len(self._paths)) if wanted(p)]
+        rows = [(p, d) for p, d in zip(self._paths, self._depths or [""] * len(self._paths))
+                if wanted(p) and self._key(p) not in self._archived]      # finished already
         if not rows:
             return
         values = dict(self._values_fn())
@@ -914,6 +996,94 @@ class ClipQueue(QObject):
         self._timer.stop()
         self._start()                   # the list again now: the moved clips leave it
 
+    # ---- "Rerun in <stage before>" (user, 2026-10-31; studio.send_back)
+
+    def want_ticks(self, paths) -> None:
+        """The stage after sent these clips back: the list read again, and just these ticked."""
+        self._pending_ticks = {self._key(str(p)) for p in paths or []}
+        self._timer.stop()
+        if self._running:
+            self._again = True
+        elif not self._hold:
+            self._start()
+
+    @Slot(str, "QVariantList", QObject)
+    def sendBack(self, target: str, paths, target_ctl) -> None:
+        """These rows back to the stage before (`target`, its controller `target_ctl`):
+        send_back.plan, its moves off the UI thread once this stage's preview has let go of
+        its files, then the stage before takes the clips (takeBack) and this list is read again."""
+        from studio import send_back
+        title = "Couldn't send them back"
+        if self._hold or self._moving:
+            self.sentBack.emit(target, False, title, "Wait for this stage's job to finish, then try again.")
+            return
+        if target_ctl is None or bool(target_ctl.property("busy")):
+            self.sentBack.emit(target, False, f"{send_back.TITLES.get(target, target)} is busy",
+                               "Wait for its job to finish, then try again.")
+            return
+        try:
+            tv = dict(target_ctl._values())
+            plan = send_back.plan(self._kind, target, [str(p) for p in paths or []], dict(self._values_fn()), tv)
+        except Exception as e:
+            logger.exception("Rerun: no plan for %s", paths)
+            plan = {"error": str(e)}
+        if plan.get("error"):
+            self.sentBack.emit(target, False, title, plan["error"])
+            return
+        self._moving = True
+        self.checkedChanged.emit()
+        owner = self.parent()
+        try:
+            if owner is not None and owner.property("loaded"):
+                shown, idx = list(owner.property("clipPaths") or []), int(owner.property("videoIndex") or 0)
+                plan["shown"] = shown[idx] if 0 <= idx < len(shown) else ""
+        except Exception:
+            plan["shown"] = ""
+
+        def work():
+            try:
+                plan["failed"] = send_back.apply(plan, logger)
+            except Exception as e:
+                logger.exception("Rerun: the moves failed")
+                plan["failed"] = [str(e)]
+            self._sig_sent.emit((plan, target_ctl))
+
+        def go():
+            threading.Thread(target=work, name=f"{self._kind}-send-back", daemon=True).start()
+        if not plan.get("moves") and not plan.get("aside"):
+            self._on_sent((plan, target_ctl))      # Resume off: nothing to move
+            return
+        release = getattr(owner, "release_for_job", None)
+        if release is not None:
+            release(go)
+        else:
+            go()
+
+    def _on_sent(self, out) -> None:
+        plan, target_ctl = out
+        self._moving = False
+        self.checkedChanged.emit()
+        owner = self.parent()
+        if owner is not None and (plan.get("moves") or plan.get("aside")):
+            shown = plan.get("shown") or ""
+            if shown and not os.path.exists(shown):
+                # the clip on screen went back to the stage before: nothing to come back to
+                if hasattr(owner, "_resume_after_job"):
+                    owner._resume_after_job = False
+                if hasattr(owner, "clear"):
+                    owner.clear()
+            if hasattr(owner, "restore_after_job"):
+                owner.restore_after_job()
+        failed = plan.get("failed") or []
+        if failed:
+            self.sentBack.emit(plan["target"], False, "Some files are in use",
+                               ", ".join(failed) + " -- couldn't be moved. Close what has them open, then try again.")
+        else:
+            target_ctl.takeBack(plan)
+            self.sentBack.emit(plan["target"], True, "", "")
+        self._timer.stop()
+        self._start()                   # this list again: what moved leaves or comes back
+
     @Slot()
     def rescan(self) -> None:
         if not self._hold:
@@ -969,7 +1139,20 @@ class ClipQueue(QObject):
         except Exception:
             logger.debug("Clip list scan failed", exc_info=True)
             paths, depths = [], []
-        self._sig_done.emit((paths, depths))
+        archived: List[str] = []
+        if self._show_finished:
+            try:
+                live = {self._key(p) for p in paths}
+                fin, fin_depths = archived_rows(self._kind, values)
+                for i, p in enumerate(fin):
+                    if self._key(p) not in live:
+                        archived.append(p)
+                        paths = paths + [p]
+                        if self._kind == "splatting":
+                            depths = depths + [fin_depths[i] if i < len(fin_depths) else ""]
+            except Exception:
+                logger.debug("Show Finished scan failed", exc_info=True)
+        self._sig_done.emit((paths, depths, archived))
         # then the frame counts: the list shows first, the numbers follow
         frames = [frame_count(p, self._frames_cache) for p in paths]
         ratios = [clip_ratio(p, self._ratio_cache) for p in paths]
@@ -983,7 +1166,12 @@ class ClipQueue(QObject):
             if out[0] != self._paths:
                 self._frames = []           # the new clips' counts follow
                 self._ratios = []           # ...and their shapes
-            self._paths, self._depths = out
+            self._paths, self._depths = out[0], out[1]
+            self._archived = {self._key(p) for p in (out[2] if len(out) > 2 else [])}
+            if self._pending_ticks is not None and not self._again:
+                # a send from the stage after (send_back): its clips ticked, the rest not
+                self._checked = set(self._pending_ticks)
+                self._pending_ticks = None
             self._prune_checked()
             # the badges read here, not on the scan's thread: a sidecar saved
             # while the scan ran must not be overwritten by what it saw first

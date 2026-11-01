@@ -279,17 +279,18 @@ Item {
     // Rerun in DepthCrafter (user, 2026-10-10): the clip in DepthCrafter's input, the
     // folder its depth map lives in as the output, and DepthCrafter's page shown --
     // the settings are the user's to change; Start runs it
+    // Since 2026-10-31 (studio.send_back) through Upcoming Jobs' sendBack: the clip found and
+    // put back where Splatting lists it, even out of finished/, the old maps set aside; ticked
+    // with others, all of them at once (ticked in DepthCrafter's list for Process Selected)
     function rerunInDepthCrafter(path) {
         if (DepthCrafter.busy) { Theme.toast("warning", "DepthCrafter is busy", "Wait for its job to finish, then try again."); return }
-        DepthCrafter.loadForRerun(path, page.sp.depthFolderFor(path))
-        Shell.openStage(0, 0)          // DepthCrafter's own tab
+        splatQueue.sendBack(path, "depthcrafter", DepthCrafter, 0, 0)       // DepthCrafter's own tab
     }
     // ...or through Video Depth Anything (user, 2026-10-25): its tab, the clip loaded. The DepthCrafter
     // map there moves into DepthCrafter/ when the new one lands, and the clip shows here afresh
     function rerunWithVda(path) {
         if (VDA.busy) { Theme.toast("warning", "Video Depth Anything is busy", "Wait for its job to finish, then try again."); return }
-        VDA.loadForRerun(path, page.sp.depthFolderFor(path))
-        Shell.openStage(0, 1)
+        splatQueue.sendBack(path, "vda", VDA, 0, 1)
     }
 
     // Edit Depth Map: this clip's depth map, straight into the Depth Map Editor
@@ -1998,8 +1999,8 @@ No button lit means custom "
                 ctl: page.sp
                 // right-click a clip (user, 2026-10-10)
                 rowActions: [{ id: "splat", text: "Splat This Clip Now" }, { id: "test", text: "Test Render" },
-                             { id: "rerun", text: "Rerun in DepthCrafter" },
-                             { id: "rerunVda", text: "Rerun with Video Depth Anything" },
+                             { id: "rerun", text: "Rerun in DepthCrafter", back: true },
+                             { id: "rerunVda", text: "Rerun with Video Depth Anything", back: true },
                              { id: "send", text: "Send to Inpainting", whenDone: true }]
                 onRowAction: (id, path) => {
                     if (id === "splat") page.sp.startClip(path)

@@ -33,7 +33,6 @@ log = logging.getLogger("inpainting.v2.tensorrt")  # a child of Inpainting's log
 _REPO = Path(__file__).resolve().parents[1]
 #: Where engines live; STEREOCRAFTER_TRT_ENGINES moves them (the tests' temp folder).
 ENGINE_DIR = Path(os.environ.get("STEREOCRAFTER_TRT_ENGINES") or _REPO / "trt_engines")
-WORKSPACE_BYTES = 8 << 30
 _BUILD_LOCK = threading.Lock()
 #: Below this much free GPU memory a run makes room (an 8 GB card, 2026-10-30): the Scratch shrinks to the
 #: engine asking, and the UNet engine is unloaded for the decode, reloaded for the next chunk (~2 s).
@@ -140,16 +139,30 @@ def _torch_dtype(trt, dt):
     return types[dt]
 
 
-def _workspace_bytes(cap: int = WORKSPACE_BYTES) -> int:
-    """`cap` (8 GB), or what the card has free less 1 GB (at least 1 GB): a workspace past the card's free
-    memory spills into shared memory on Windows, or fails the build (a 12 GB card, 2026-10-30)."""
+#: Cards below this (8 and 12 GB) start a build at an 8 GB workspace; 16, 24 and 32 GB cards get what they
+#: have free from the first try (user, 2026-10-31: no cap on the big cards -- the 8 GB first try failed a
+#: DepthCrafter UNet part needing 10.75 / 11.5 GB before the retry).
+SMALL_CARD = 14 << 30
+SMALL_CARD_CAP = 8 << 30
+
+
+def _small_card() -> bool:
+    return torch.cuda.mem_get_info()[1] < SMALL_CARD
+
+
+def _workspace_bytes(capped: bool = True) -> int:
+    """What the card has free less 1 GB (at least 1 GB); on an 8 or 12 GB card no more than 8 GB unless
+    `capped` is False (a bigger workspace there can pick ways that need more memory when the engine
+    runs). The 1 GB kept back: a workspace past the card's free memory spills into shared memory on
+    Windows, or fails the build (a 12 GB card, 2026-10-30)."""
     free, _ = torch.cuda.mem_get_info()
-    return int(min(cap, max(1 << 30, free - (1 << 30))))
+    room = int(max(1 << 30, free - (1 << 30)))
+    return min(room, SMALL_CARD_CAP) if capped and _small_card() else room
 
 
 def _serialize(onnx_path: Path, profile=None, workspace: int = 0) -> bytes:
     """An ONNX file as a TensorRT FP16 engine: strongly typed where TensorRT has no FP16 flag (11), else
-    the flag; a workspace of `workspace` bytes (0: _workspace_bytes(), up to 8 GB) and a timing cache
+    the flag; a workspace of `workspace` bytes (0: _workspace_bytes()) and a timing cache
     shared by every build on this GPU. profile: {input name: (min shape, opt shape, max shape)} for the
     inputs whose size varies (DepthCrafter's window length)."""
     import tensorrt as trt
@@ -203,17 +216,16 @@ def build_engine(name: str, export, release=None, profile=None) -> Path:
                 if release is not None:
                     release()
             torch.cuda.empty_cache()
+            first = _workspace_bytes()
             try:
-                blob = _serialize(onnx_path, profile)
+                blob = _serialize(onnx_path, profile, workspace=first)
             except RuntimeError as e:
-                # A big size can need more than 8 GB for one part of the network (a 5090's DepthCrafter
-                # UNet at 1024x576, Window 110: 10.75 GB, 2026-10-30). Kept at 8 GB first: a bigger
-                # workspace can pick ways that need more memory when the engine runs.
-                more = _workspace_bytes(cap=1 << 62)
-                if "could not build" not in str(e) or more <= WORKSPACE_BYTES:
+                # An 8 or 12 GB card started at 8 GB: tried once more with all it has free when that is more
+                more = _workspace_bytes(capped=False)
+                if "could not build" not in str(e) or more <= first:
                     raise
                 _TRT_OUT[0].info(f"TensorRT: building {name} again with a {more / 2**30:.1f} GB workspace "
-                                 "(8 GB wasn't enough at this size)...")
+                                 f"({first / 2**30:.1f} GB wasn't enough at this size)...")
                 blob = _serialize(onnx_path, profile, workspace=more)
             part = path.with_name(path.name + ".part")
             part.write_bytes(blob)
@@ -286,6 +298,10 @@ class Engine:
 
     def __call__(self, *args: torch.Tensor) -> torch.Tensor:
         """The inputs in the engine's order; its first output."""
+        return next(iter(self.run(*args).values()))
+
+    def run(self, *args: torch.Tensor) -> dict:
+        """The inputs in the engine's order; every output, by name (SAM 3's detector parts have several)."""
         trt, ctx, engine = self._trt, self.context, self.engine
         current = torch.cuda.current_stream()
         feeds = []
@@ -310,7 +326,7 @@ class Engine:
         if not ctx.execute_async_v3(self.stream.cuda_stream):
             raise RuntimeError("TensorRT could not run the engine")
         current.wait_stream(self.stream)
-        return outs[0]
+        return dict(zip(self.outputs, outs))
 
 
 class _UNetExport(torch.nn.Module):
@@ -577,6 +593,22 @@ class TensorRT:
 
     # ---- building ----------------------------------------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _unet_off_gpu(self):
+        """A VAE engine's export and build with the PyTorch UNet (~3 GB) in RAM, back where it was after: left
+        on the GPU after the UNet engine failed, a tester's VAE decoder build couldn't find 1.2 GB (2026-10-31).
+        Once a size: the move is a few seconds each way."""
+        unet = self.pipe.unet
+        moved = getattr(unet, "device", None) is not None and unet.device.type == "cuda"
+        if moved:
+            unet.to("cpu")
+            torch.cuda.empty_cache()
+        try:
+            yield
+        finally:
+            if moved:
+                unet.to("cuda")
+
     def _on_gpu(self, module):
         """Moves module to the GPU for an export; returns how to put it back."""
         before = next(module.parameters()).device
@@ -610,17 +642,19 @@ class TensorRT:
             configure_attention_processors(pipe, use_sageattention=self.use_sageattention)
 
     def _build_decoder(self, name, z):
-        back = self._on_gpu(self.pipe.vae)
-        build_engine(name, lambda p: _export(_DecoderExport(self.pipe.vae, 2).eval(), (z.cuda(),), ["z"], p),
-                     release=back)
+        with self._unet_off_gpu():
+            back = self._on_gpu(self.pipe.vae)
+            build_engine(name, lambda p: _export(_DecoderExport(self.pipe.vae, 2).eval(), (z.cuda(),), ["z"], p),
+                         release=back)
 
     def _build_encoder(self, name, x):
-        back = self._on_gpu(self.pipe.vae)
-        n = torch.export.Dim("n", min=2, max=self.ENC_FRAMES)
-        top = (self.ENC_FRAMES,) + tuple(x.shape[1:])
-        build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p,
-                                             dynamic_shapes=({0: n},)),
-                     release=back, profile={"x": ((2,) + tuple(x.shape[1:]), top, top)})
+        with self._unet_off_gpu():
+            back = self._on_gpu(self.pipe.vae)
+            n = torch.export.Dim("n", min=2, max=self.ENC_FRAMES)
+            top = (self.ENC_FRAMES,) + tuple(x.shape[1:])
+            build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p,
+                                                 dynamic_shapes=({0: n},)),
+                         release=back, profile={"x": ((2,) + tuple(x.shape[1:]), top, top)})
 
     # ---- the end of a run --------------------------------------------------------------------------------
 
@@ -744,18 +778,20 @@ class DepthCrafterTensorRT(TensorRT):
         return {name: ((lo,) + tuple(x.shape[1:]), (hi,) + tuple(x.shape[1:]), (hi,) + tuple(x.shape[1:]))}
 
     def _build_decoder(self, name, z):
-        back = self._on_gpu(self.pipe.vae)
-        n = torch.export.Dim("n", min=self.MIN_FRAMES, max=self.VAE_FRAMES)
-        build_engine(name, lambda p: _export(_DecoderExportAnyLength(self.pipe.vae).eval(), (z.cuda(),), ["z"], p,
-                                             dynamic_shapes=({0: n},)),
-                     release=back, profile=self._vae_profile("z", z))
+        with self._unet_off_gpu():
+            back = self._on_gpu(self.pipe.vae)
+            n = torch.export.Dim("n", min=self.MIN_FRAMES, max=self.VAE_FRAMES)
+            build_engine(name, lambda p: _export(_DecoderExportAnyLength(self.pipe.vae).eval(), (z.cuda(),), ["z"],
+                                                 p, dynamic_shapes=({0: n},)),
+                         release=back, profile=self._vae_profile("z", z))
 
     def _build_encoder(self, name, x):
-        back = self._on_gpu(self.pipe.vae)
-        n = torch.export.Dim("n", min=self.MIN_FRAMES, max=self.VAE_FRAMES)
-        build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p,
-                                             dynamic_shapes=({0: n},)),
-                     release=back, profile=self._vae_profile("x", x))
+        with self._unet_off_gpu():
+            back = self._on_gpu(self.pipe.vae)
+            n = torch.export.Dim("n", min=self.MIN_FRAMES, max=self.VAE_FRAMES)
+            build_engine(name, lambda p: _export(_EncoderExport(self.pipe.vae).eval(), (x.cuda(),), ["x"], p,
+                                                 dynamic_shapes=({0: n},)),
+                         release=back, profile=self._vae_profile("x", x))
 
 
 def kind_label(kind: str) -> str:

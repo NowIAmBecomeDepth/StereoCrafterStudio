@@ -40,6 +40,7 @@ GIT_URL = "https://github.com/Kunbyte-AI/ROSE.git"
 ROSE_COMMIT = "6be41c5420bf331c6d491277d5a6feaf9b3a779a"
 EMBEDS = Path(__file__).resolve().parent / "rose_empty_prompt.npy"
 WORKER = Path(__file__).resolve().parent / "rose_worker.py"
+TRT_MODULE = Path(__file__).resolve().parent / "rose_trt.py"     # optional: the worker runs without it
 
 BASE_REPO = "alibaba-pai/Wan2.1-Fun-1.3B-InP"
 BASE_FILES = ["Wan2.1_VAE.pth", "config.json", "google/umt5-xxl/*"]
@@ -51,6 +52,9 @@ ROSE_FILES = ["config.json", "diffusion_pytorch_model.safetensors"]
 TORCH = ["torch==2.8.0", "torchvision==0.23.0"]
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 EXTRA = ["transformers>=4.46.2,<5", "huggingface_hub"]
+#: TensorRT for ROSE's transformer (rose_trt.py, 2026-10-31): the CUDA 12 build, for its cu128 PyTorch
+#: (the version M2SVid's cu128 Python runs). Installed only where Studio has TensorRT itself.
+TENSORRT = ["tensorrt-cu12==10.16.1.11"]
 
 DOWNLOAD_GB = 3.7
 
@@ -82,6 +86,27 @@ def missing() -> List[str]:
 
 def ready() -> bool:
     return not missing()
+
+
+def tensorrt_wanted() -> bool:
+    """Studio has TensorRT (the "tensorrt" extra): ROSE gets it too."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("tensorrt") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def tensorrt_installed() -> bool:
+    """TensorRT in ROSE's own Python (a file check: no import)."""
+    venv = ROSE_DIR / ".venv"
+    return any(any(venv.glob(g)) for g in ("Lib/site-packages/tensorrt/__init__.py",
+                                           "lib/python*/site-packages/tensorrt/__init__.py"))
+
+
+def tensorrt_missing() -> bool:
+    """Studio has TensorRT and ROSE's Python doesn't (set up before 2026-10-31): Set Up ROSE adds it."""
+    return python().exists() and tensorrt_wanted() and not tensorrt_installed()
 
 
 def _uv() -> Optional[str]:
@@ -172,6 +197,14 @@ def setup(log: Callable[[str], None], stop=None) -> None:
     _run([uv, "pip", "install", "--python", str(python()), *TORCH, "--index-url", TORCH_INDEX], log, stop)
     _run([uv, "pip", "install", "--python", str(python()), "-r", str(ROSE_DIR / "requirements.txt"), *EXTRA],
          log, stop)
+    if tensorrt_wanted():
+        # ROSE runs without it: a failed install is said, not a failed setup (a stop still stops)
+        try:
+            _run([uv, "pip", "install", "--python", str(python()), *TENSORRT], log, stop)
+        except RuntimeError as e:
+            if stop is not None and stop.is_set():
+                raise
+            log(f"TensorRT for ROSE didn't install ({e}); ROSE runs without it.")
     fetch = (
         "from huggingface_hub import snapshot_download as d\n"
         f"d({ROSE_REPO!r}, local_dir='weights/transformer', allow_patterns={ROSE_FILES!r})\n"

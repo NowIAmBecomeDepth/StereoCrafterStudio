@@ -450,6 +450,11 @@ HOST_FRAME_DTYPE = "float16"
 #: 3.1 is another model. False builds the model exactly as upstream does.
 TRACK_SPEEDUPS = True
 
+#: TensorRT for SAM 3's ViT trunk, its tracker's memory attention and its text detector (sam3_trt.py, user
+#: 2026-10-31) where Studio has TensorRT: click tracking 1.23x, text 1.38x, the masks as close to PyTorch's
+#: as SAM 3's own rounding changes move them. Engines built the first time (about a minute, once). SAM 3 only.
+TRACK_TENSORRT = True
+
 #: The detector's outputs that SAM 3 reads back from a frame's detection buffer.
 _DET_KEYS = ("pred_logits", "pred_boxes", "pred_boxes_xyxy", "pred_masks")
 
@@ -596,6 +601,8 @@ class Sam3Engine:
         self._cancel = threading.Event()
         #: Frames prompted since the last reset. See propagate().
         self._prompted: set = set()
+        #: sam3_trt.Sam3TensorRT while SAM 3 is loaded with TensorRT, else None.
+        self.tensorrt = None
 
     # -- model -----------------------------------------------------------
 
@@ -637,12 +644,19 @@ class Sam3Engine:
             if TRACK_SPEEDUPS:
                 _skip_dropped_detections(self._predictor.model)
                 _trunk_weights_bf16(self._predictor.model)
+            if TRACK_TENSORRT:
+                from core.depthedit import sam3_trt
+                self.tensorrt = sam3_trt.enable(self._predictor.model)
         self.version = version
         logger.info("%s loaded.", model_label(version))
 
     def unload(self) -> None:
         """Free the model. Call from the thread that loaded it."""
         self.close_session()
+        if self.tensorrt is not None:
+            logger.info("SAM 3 TensorRT: %s.", self.tensorrt.summary())
+            self.tensorrt.release()
+            self.tensorrt = None
         predictor, self._predictor = self._predictor, None
         version, self.version = self.version, None
         if predictor is not None:

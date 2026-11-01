@@ -35,6 +35,19 @@ from . import settings as S
 
 logger = logging.getLogger("splatting.v2.preview")
 
+#: Per-clip dials the render reads from the clip's sidecar first (page key -> sidecar key):
+#: the Text dials, Pop-Out and Rain. Any sidecar save (Detect Text's Save always makes one)
+#: froze them as they were, so turned afterwards they moved only the preview (tester,
+#: 2026-10-31). Turned on a clip with a sidecar, they go into it. Not Convergence / Disparity:
+#: those are kept for the clip by Update Sidecar, as ever.
+CLIP_DIALS = {"submask_grow": "submask_grow", "submask_soften": "submask_soften",
+              "submask_clean": "submask_clean", "submask_conv": "submask_conv",
+              "pop_amount": "pop_out",
+              **{k: k for k in ("rain_mode", "rain_any_direction", "rain_depth", "rain_amount", "rain_layers",
+                                "rain_strands", "rain_lights", "rain_pop", "rain_preset", "rain_guard",
+                                "rain_particle", "rain_placement", "rain_grow", "rain_reflections",
+                                "rain_spread", "rain_spacing", "rain_conv")}}
+
 #: Settings that never change the picture: no re-render when they move.
 #: (Folders change WHICH clips there are -- that is a reload, not a render.)
 NO_RENDER = set(S.FOLDER_KEYS) | {
@@ -381,6 +394,8 @@ class SplattingPreview(QObject):
             self._drop_play_cache()
         if not self._loaded:
             return
+        if key in CLIP_DIALS:
+            self._submit("dial_sidecar")    # the clip on screen: before any nav queued after
         if key in OVERLAY_KEYS:
             self._overlay_timer.start()
         elif key in S.FOLDER_KEYS or key == "multi_map":
@@ -1000,6 +1015,17 @@ class SplattingPreview(QObject):
             # A keyed dial turned (setKeyValue): only the newest value for a key and setting is worth
             # applying -- a job a notch redrew the frame and saved the sidecar each, the queue crawled
             # behind the hand, and every older result pulled the dial back (user, 2026-10-25)
+            # a dial held (or a Rain preset setting several): one sidecar write for the newest values
+            if kind == "dial_sidecar":
+                kept = deque()
+                for job in self._jobs:
+                    if job is not None and job[0] == "dial_sidecar":
+                        merged = dict(job[2])
+                        merged.update(changes)
+                        changes = merged
+                    else:
+                        kept.append(job)
+                self._jobs = kept
             if kind == "kf_value":
                 kept = deque()
                 for job in self._jobs:
@@ -1104,6 +1130,8 @@ class SplattingPreview(QObject):
         elif kind == "keep_settings":
             # the next load leaves every control as it is (reloadClip): its sidecar sync is skipped
             eng._keep_settings_on_load = True
+        elif kind == "dial_sidecar":
+            self._save_clip_dials(eng)
         elif kind in ("clear", "release"):
             pv._clear_preview_resources()
             pv.video_list = []
@@ -1420,6 +1448,32 @@ class SplattingPreview(QObject):
                 self._sig_editor.emit(name, state)
                 return
         self._editors_stale.add(name)
+
+    @staticmethod
+    def _save_clip_dials(eng) -> None:
+        """CLIP_DIALS as they are now, into the shown clip's sidecar -- those keys
+        only, typed as a full sidecar save types them, the rest of the file as it
+        was. No sidecar: none is made (the render takes the page's values then)."""
+        found = eng._get_current_sidecar_paths_and_data()
+        path = found[0] if found else None
+        if not path or not os.path.isfile(path):
+            return
+        from core.common.atomic_json import read_json
+        try:
+            data = read_json(path)
+        except Exception as e:
+            logger.warning(f"Dials not saved: {os.path.basename(path)} can't be read ({e})")
+            return
+        if not isinstance(data, dict):
+            return
+        mapping = {k: eng.GUI_SIDECAR_VAR_MAP[k] for k in CLIP_DIALS.values()}
+        got = eng.sidecar_manager.capture_from_gui(eng.__dict__, mapping=mapping)
+        new = {k: got[k] for k in mapping if k in got}
+        if all(data.get(k) == v for k, v in new.items()):
+            return
+        data.update(new)
+        if eng.sidecar_manager.save_sidecar_data(path, data):
+            logger.debug(f"Dials saved to {os.path.basename(path)}: {new}")
 
     def _flush_editors(self) -> None:
         stale, self._editors_stale = self._editors_stale, set()

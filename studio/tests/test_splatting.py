@@ -949,6 +949,54 @@ class HighVramModeTest(unittest.TestCase):
             alive = [t.name for t in threading.enumerate() if t.name.startswith("splat-job")]
             self.assertEqual(alive, [], f"{which}: a job's thread outlived the batch")
 
+    def fake_run(self, connect: bool):
+        """A two-clip, two-job _Run with stand-in workers (no processes) on a clock that jumps ten minutes
+        each time it is read, so the batch runs past CONNECT_TIMEOUT_S."""
+        import itertools, queue as _q, types
+        from unittest import mock
+        from core.splatting import parallel as P
+        owner = P.ParallelBatchProcessor(_q.Queue(), threading.Event(), jobs=2)
+        run = P._Run(owner, {"stand-in": True}, ["c0.mp4", "c1.mp4"], 1)
+
+        class Conn:
+            def __init__(self, wid):
+                self.wid = wid
+
+            def send(self, msg):            # a clip is splatted at once; "done" ends the job
+                if msg[0] == "clip":
+                    run.events.put((self.wid, ("ready", {"result": {"done": 1}})))
+                elif msg[0] in ("done", "stop"):
+                    run.events.put((self.wid, ("closed",)))
+
+            def close(self):
+                pass
+
+        def start():
+            run.listener = types.SimpleNamespace(close=lambda: None)
+            for wid in range(run.jobs):
+                if connect:                 # as _accept does
+                    run.conns[wid] = Conn(wid)
+                    run.connected = getattr(run, "connected", 0) + 1
+                    run.events.put((wid, ("ready", {"result": None})))
+                else:                       # died before it connected
+                    run.events.put((wid, ("exited", "no CUDA")))
+        run._start_workers = start
+        clock = itertools.count(0.0, 600.0)
+        with mock.patch.object(P, "time", types.SimpleNamespace(monotonic=lambda: next(clock), sleep=time.sleep)):
+            run.go()
+        return owner.result
+
+    def test_a_long_batch_ends_without_the_no_worker_error(self):
+        """Tester, 2026-10-31: every High VRAM batch longer than the connect timeout ended on "no worker
+        started" -- the check read "no job connected now", and every finished job leaves that list. Here
+        the second job is never needed (no room measured): job 0 splats both clips."""
+        res = self.fake_run(connect=True)
+        self.assertEqual((res["done"], res["failed"], res["error"]), (2, 0, ""), res)
+
+    def test_no_worker_started_still_says_so(self):
+        res = self.fake_run(connect=False)
+        self.assertIn("no worker started", res["error"], res)
+
 
 @unittest.skipUnless(__import__("torch").cuda.is_available(), "the warp runs on the GPU")
 class ReadAheadTest(unittest.TestCase):

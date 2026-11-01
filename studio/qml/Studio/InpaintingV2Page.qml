@@ -218,8 +218,8 @@ Item {
             FieldRow {
                 label: "Output folder:"
                 // how V2 writes (user, 2026-10-11): Inpainting's Encoding Settings, and what 10-bit gives V2
-                help: "Where the inpainted videos are written. They're encoded as Settings > Inpainting > Encoding "
-                      + "Settings say, as V1's are: H.264 / H.265 (.mp4), 10-bit (Main10), or Enable DNxHR (.mov). "
+                help: "Where the inpainted videos are written. They're encoded as Encoding Options (the button at the "
+                      + "right of the V1 / V2 tabs) says, as V1's are: H.264 / H.265 (.mp4), 10-bit (Main10), or Enable DNxHR (.mov). "
                       + "V2's picture is 8-bit (the model's output and the left eye are 8-bit), so a 10-bit file holds no more detail than that -- but it still means no second 8-bit compression on top: 10-bit (Main10) or Enable DNxHR keeps the fill exactly as V2 made it on its way to Merging."
                 labelWidth: 130
                 RowLayout {
@@ -303,11 +303,13 @@ Item {
                 progress: page.wan.busy ? (page.wan.progress || 0) / 100 : 0
                 rowActions: [{ id: "run", text: "Inpaint This Clip Now" }, { id: "test", text: "Test Render" },
                              { id: "finished", text: "Move to Finished" },
+                             { id: "rerun", text: "Rerun in Splatting", back: true },
                              { id: "send", text: "Send to Merging", whenDone: true }]
                 onRowAction: (id, path) => {
                     if (id === "run") page.wan.startClip(path)
                     else if (id === "test") page.wan.testClip(path)     // into Test Renders (user, 2026-10-15)
                     else if (id === "finished") page.wan.jobClips.moveToFinished(path)
+                    else if (id === "rerun") sendBack(path, "splatting", Splatting, 1, -1)    // user, 2026-10-31
                     else if (id === "send") sendOn(path, page.wan, "merging", Merging, 3)
                 }
             }

@@ -108,6 +108,18 @@ def resolve_splat_backend(splat_backend: str) -> Tuple[str, bool]:
     return "M2S", False
 
 
+#: Where an M2S warp's splats go in Splatting's output (user, 2026-10-30): m2s/hires and m2s/lowres, apart
+#: from SC's hires and lowres -- M2SVid's inpainting takes only M2S splats, Inpainting V1's queue SC's.
+M2S_SUBFOLDER = "m2s"
+
+
+def output_subfolder(splat_backend: str) -> str:
+    """"m2s" when a render really warps with M2S (Splat Backend M2S or M2S+Fix, the backend loaded), else
+    "": an M2S backend that didn't load warps with SC, and its splats stay with SC's (as grid_comment says)."""
+    backend, _fix = resolve_splat_backend(splat_backend)
+    return M2S_SUBFOLDER if backend == "M2S" and backend_available() else ""
+
+
 #: How a splatted grid records its warp and mask in the file's comment tag (2026-10-22): a stage that
 #: needs an M2S warp -- M2SVid's inpainting does -- can tell one from an SC splat.
 GRID_COMMENT_PREFIX = "StereoCrafter Splatting"

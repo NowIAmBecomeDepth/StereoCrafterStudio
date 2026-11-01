@@ -507,6 +507,10 @@ class StudioShell(QObject):
     # never use it). The header shows the switch anyway while the mode is on.
     hideBeginnerSwitch = Property(bool, lambda self: bool(self._pref("hide_beginner_switch", False)),
                                   lambda self, v: self._set_pref("hide_beginner_switch", bool(v)), notify=changed)
+    # Settings > Studio > Pick Folders with Windows Explorer (user, 2026-10-31: off by default; some
+    # prefer the basic window): every folder picker opens Windows' own dialog instead of Studio's
+    explorerPickers = Property(bool, lambda self: bool(self._pref("explorer_pickers", False)),
+                               lambda self, v: self._set_pref("explorer_pickers", bool(v)), notify=changed)
     # The tips above each stage's progress bar (Settings > Appearance)
     showTips = Property(bool, lambda self: bool(self._pref("show_tips", True)),
                         lambda self, v: self._set_pref("show_tips", bool(v)), notify=changed)

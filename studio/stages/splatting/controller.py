@@ -490,6 +490,13 @@ class SplattingController(QObject):
                         f"Output: {os.path.normpath(out) if out else '(unchanged)'}\n"
                         "Check the settings, then press Start.")
 
+    @Slot("QVariantMap")
+    def takeBack(self, plan) -> None:
+        """Inpainting's "Rerun in Splatting" (user, 2026-10-31; studio.send_back): the clips
+        back in the input folders, ticked in Upcoming Jobs for Process Selected."""
+        from studio import send_back
+        send_back.take_back(self, self.preview.queue, dict(plan or {}), self._set)
+
     @Slot()
     def resetDefaults(self) -> None:
         """v1 reset_to_defaults: config_manager.reset_to_defaults resets only the

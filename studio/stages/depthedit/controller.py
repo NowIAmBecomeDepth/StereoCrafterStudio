@@ -314,6 +314,7 @@ class DepthEditController(QObject):
         self._erase_stop = threading.Event()
         self._erase = {"task": "", "progress": 0.0, "text": ""}
         self._rose_ready: Optional[bool] = None
+        self._rose_trt_missing: Optional[bool] = None     # Studio has TensorRT, ROSE's Python doesn't
         # Erase from Clip's own settings (user, 2026-10-06), kept between sessions
         self._erase_opts = dict(self.ERASE_DEFAULTS)
         self._erase_opts.update({k: v for k, v in settings_store.load("depthedit_erase").items()
@@ -1845,7 +1846,9 @@ class DepthEditController(QObject):
         erased = bool(clip) and os.path.isfile(clip) and E.source_for(clip) != clip
         if self._rose_ready is None:          # a few file checks: once, not per redraw
             self._rose_ready = rose_env.ready()
-        return {"ready": self._rose_ready, "layers": len(self._erase_layers(eng)), "clip": bool(clip),
+            self._rose_trt_missing = bool(self._rose_ready) and rose_env.tensorrt_missing()
+        return {"ready": self._rose_ready, "trtMissing": bool(self._rose_trt_missing),
+                "layers": len(self._erase_layers(eng)), "clip": bool(clip),
                 "task": self._erase["task"], "progress": self._erase["progress"], "text": self._erase["text"],
                 "erased": erased, "downloadGb": rose_env.DOWNLOAD_GB, "opts": dict(self._erase_opts),
                 "sizes": list(E.SIZES), "windows": [str(w) for w in E.WINDOWS], "methods": list(self.ERASE_METHODS),

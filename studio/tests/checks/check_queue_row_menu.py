@@ -287,8 +287,10 @@ mq = [q for q in find_all(win.contentItem(), lambda c: c.metaObject().className(
 check("Merging: two clips listed", until(lambda: len(rows(mq)) == 2, 30))
 opened, texts = action(mq, "mB", "merge")
 # Fill Edges between them since 2026-10-14 (Extra > Edge Fill fills the clip's merged output)
-check("right-click a clip: Merge This Clip Now, Test Render, Fill Edges and Move to Finished",
-      opened and texts == ["Merge This Clip Now", "Test Render", "Fill Edges", "Move to Finished"], str(texts))
+# ...and the reruns in Inpainting / Inpainting V2 after them since 2026-10-31 (studio.send_back)
+check("right-click a clip: Merge This Clip Now, Test Render, Fill Edges, Move to Finished and the two reruns",
+      opened and texts == ["Merge This Clip Now", "Test Render", "Fill Edges", "Move to Finished",
+                           "Rerun in Inpainting", "Rerun in Inpainting V2"], str(texts))
 run_to_end(mg)
 merged = sorted(os.path.basename(p) for ext in ("mp4", "mov")
                 for p in glob.glob(str(tmp / "merged" / "**" / f"*.{ext}"), recursive=True))

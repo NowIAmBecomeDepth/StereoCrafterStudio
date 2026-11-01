@@ -75,12 +75,40 @@
       <b>Process This Clip Now</b> and <b>Move to Finished</b>. In Splatting:
       <b>Splat This Clip Now</b> (the same as <span class="btn">Single</span>, without loading it first) and
       <b>Rerun in DepthCrafter</b>, which switches to DepthCrafter with that clip as its input and the
-      folder its depth map lives in as the output: change the settings and press
+      depth map folder as the output: change the settings and press
       <span class="btn">Start</span>, and the new map replaces the old one; and <b>Rerun with Video Depth
       Anything</b>, which does the same on DepthCrafter's VDA tab (the DepthCrafter map
       moves into a <code>DepthCrafter</code> folder beside it). In Inpainting:
-      <b>Inpaint This Clip Now</b> and <b>Move to Finished</b>. In Merging:
-      <b>Merge This Clip Now</b> and <b>Move to Finished</b>.</li>
+      <b>Inpaint This Clip Now</b>, <b>Move to Finished</b> and <b>Rerun in Splatting</b>. In Merging:
+      <b>Merge This Clip Now</b>, <b>Move to Finished</b>, <b>Rerun in Inpainting</b> and
+      <b>Rerun in Inpainting V2</b>.</li>
+    <li><b>Rerun in &hellip;</b> sends a clip back to the stage before when you're not happy with what that
+      stage gave it: Splatting to DepthCrafter or Video Depth Anything (a new depth map), Inpainting and
+      Inpainting V2 to Splatting (a new splat), Merging to Inpainting or Inpainting V2 (a new inpainted
+      clip). That stage opens with the clip ticked in its Upcoming Jobs and its output folder set to where
+      this stage reads from: check its settings and press <span class="btn">Process Selected</span>. (One clip
+      sent to DepthCrafter or Video Depth Anything is loaded on its own, as described above: press
+      <span class="btn">Start</span>.) Nothing starts by itself.
+      <ul>
+        <li><b>Several at once:</b> tick the clips, then right-click one of them. The menu says how many,
+          <b>Rerun 3 Selected in Splatting</b>, and sends them all.</li>
+        <li><b>With <span class="set">Resume</span> on</b>, the files the stage before needs may already
+          have been moved into <code>finished</code> folders. They're found there and moved back to where
+          that stage reads them, with their sidecars. The old version of what's being made again (the old
+          depth map, splat or inpainted clip already filed in <code>finished</code>) goes into a
+          <code>replaced</code> folder beside it, so the new one can't be mixed up with it. Files that are
+          still waiting in the input folders are left alone: if you never press
+          <span class="btn">Process Selected</span>, nothing is lost.</li>
+        <li><b>With <span class="set">Resume</span> off</b>, nothing has moved: the rerun simply writes
+          over the old files.</li>
+      </ul></li>
+    <li><span class="btn">Show Finished</span>, at the top of the list in Splatting, Inpainting,
+      Inpainting V2 and Merging: with <span class="set">Resume</span> on, a clip leaves the list once
+      it's finished. Show Finished lists those clips again, after the others, dimmed and marked
+      <i>(finished)</i>, so you can right-click one to rerun it. They're there only for that:
+      <span class="btn">Process Selected</span> and <span class="btn">Move to Finished</span> skip them,
+      and a click doesn't load them into the preview. <span class="btn">Hide Finished</span> puts the
+      list back.</li>
     <li><b>Test Render</b>, in every stage's right-click menu, runs that one clip as "This Clip Now" does
       but into a <code>Test Renders</code> folder inside the stage's output folder, so the real output is
       never overwritten. It moves nothing to <code>finished</code> and isn't passed on to the next stage as

@@ -437,6 +437,13 @@ def _run_worker(job_path: str, n_chunks: int, steps: int, progress: Progress, st
                     bar["open"] = s < steps
             elif parts[0] == "DONE":
                 logger.info(f"ROSE window {parts[1]} of {n_chunks} done ({' '.join(parts[2:])}).")
+            elif parts[0] == "TRT" and parts[1:2] == ["building"]:
+                # the first run on this GPU / TensorRT: an export and a build, minutes, once
+                logger.info("ROSE: building its TensorRT engine -- several minutes, once.")
+                progress(lo + (hi - lo) * (max(chunk, 1) - 1) / n_chunks,
+                         "ROSE: building its TensorRT engine (several minutes, once)")
+            elif parts[0] == "TRT" and parts[1:2] == ["on"]:
+                logger.info("ROSE: TensorRT on.")
             elif parts[0] == "ERROR":
                 error = line[len("ERROR"):].strip()
         if stop.is_set():

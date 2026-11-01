@@ -512,6 +512,15 @@ ApplicationWindow {
             property string tip: "Takes the Beginner Mode switch off the top bar. It comes back while Beginner Mode is on, "
                                  + "so you can always turn the mode off."
         }
+        // off by default (user, 2026-10-31): some prefer the basic Windows window
+        MenuItem {
+            objectName: "explorerPickersItem"
+            text: "Pick Folders with Windows Explorer"
+            checkable: true
+            checked: Shell.explorerPickers
+            onTriggered: Shell.explorerPickers = checked
+            property string tip: "Every Browse opens Windows' own folder or file window instead of Studio's picker."
+        }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
         MenuItem {
             text: "Check for Updates"   // no "…": a ghost button, the name itself clickable (user)

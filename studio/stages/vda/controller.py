@@ -560,6 +560,17 @@ class VdaController(QObject):
                         f"{os.path.basename(source)}\nOutput: {output or '(unchanged)'}\n"
                         "Check the settings, then press Start.")
 
+    @Slot("QVariantMap")
+    def takeBack(self, plan) -> None:
+        """Splatting's "Rerun with Video Depth Anything" for one clip or its ticked ones (user,
+        2026-10-31; studio.send_back): one clip as loadForRerun, several ticked in the list."""
+        from studio import send_back
+
+        def set_field(key, value):
+            self._map.insert(key, value)
+            self._last_good[key] = value
+        send_back.take_back(self, self.queue, dict(plan or {}), set_field)
+
     # ---- Scene Cut import and job handoff ---------------------------------------------------------
 
     @Property(str, notify=sceneCutChanged)

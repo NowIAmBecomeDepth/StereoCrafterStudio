@@ -91,6 +91,9 @@ def centre(item):
     c = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
     return QPoint(int(c.x()), int(c.y()))
 def click(item):
+    # the pointer moves there first, as a hand's would: left where the last step put it, a
+    # row under it showed its hover tip -- drawn over the next row's tick, it took the press
+    QTest.mouseMove(win, centre(item)); pump(0.2)
     QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, centre(item)); pump(0.3)
 def names(q):
     return [str(n) for n in (q.property("src").property("clips") or [])]
@@ -263,8 +266,9 @@ run_to_end(ip)
 check("Process Selected inpaints the ticked clip only", ip_ran == [mB], str(ip_ran))
 ip_ran.clear()
 texts = action(iq, "mA", "run")
-check("right-click: Inpaint This Clip Now, Test Render and Move to Finished",
-      texts == ["Inpaint This Clip Now", "Test Render", "Move to Finished"], str(texts))
+# Rerun in Splatting after them since 2026-10-31 (studio.send_back)
+check("right-click: Inpaint This Clip Now, Test Render, Move to Finished and Rerun in Splatting",
+      texts == ["Inpaint This Clip Now", "Test Render", "Move to Finished", "Rerun in Splatting"], str(texts))
 _m = [o for o in iq.findChildren(QObject) if o.objectName() == "jobQueueRowMenu"][0]
 _ex = [str(o.property("text")) for o in _m.findChildren(QObject) if o.objectName() == "jobQueueExplore"]
 check("...and Open Lo-Res / Hi-Res Splat in Explorer (user, 2026-10-18)",

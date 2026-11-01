@@ -64,6 +64,32 @@ Section {
         nextCtl.loadSent(p)
         Shell.openStage(stageIndex, stageIndex === 2 ? 0 : -1)        // Inpainting: V1, which lists clips
     }
+    // "Rerun in <stage before>" (user, 2026-10-31; studio.send_back): this clip -- or, when it is
+    // ticked with others, every ticked clip -- back to `target` (its controller `targetCtl`): its
+    // files brought back out of finished/, the old copies set aside, the clips ticked there and its
+    // page (`stageIndex`, `tool`) shown once that is done
+    property int backStage: -1
+    property int backTool: -1
+    function backPaths(path) {
+        const i = paths.indexOf(path)
+        return i >= 0 && ticks[i] && picked > 1 ? paths.filter((_p, k) => !!ticks[k]) : [path]
+    }
+    function sendBack(path, target, targetCtl, stageIndex, tool) {
+        if (targetCtl.busy) { Theme.toast("warning", "Busy", "Wait for that stage's job to finish, then try again."); return }
+        backStage = stageIndex; backTool = tool
+        queue.src.sendBack(target, backPaths(path), targetCtl)
+    }
+    Connections {
+        target: queue.src
+        ignoreUnknownSignals: true
+        function onSentBack(target, ok, title, text) {
+            if (!ok) { Theme.toast("warning", title, text); return }
+            if (queue.backStage >= 0) Shell.openStage(queue.backStage, queue.backTool)
+        }
+    }
+    // Show Finished's rows (studio.clip_queue.archived_rows): dimmed, for a rerun only
+    readonly property var archived: src && src.clipArchived !== undefined ? src.clipArchived : []
+    readonly property int archivedCount: archived.filter(a => !!a).length
     // the ticks (user, 2026-09-30): Process Selected, Move Selected to Finished
     readonly property var ticks: src ? src.checked : []
     readonly property int picked: src ? src.checkedCount : 0
@@ -145,10 +171,25 @@ Section {
         Text {
             objectName: "queueClipCount"
             text: queue.src && queue.src.clips.length
-                  ? queue.src.clips.length + " clips" + (queue.picked ? "  ·  " + queue.picked + " selected" : "") : ""
+                  ? (queue.src.clips.length - queue.archivedCount) + " clips"
+                    + (queue.archivedCount ? "  ·  " + queue.archivedCount + " finished" : "")
+                    + (queue.picked ? "  ·  " + queue.picked + " selected" : "") : ""
             color: Theme.fgFaint
             font.family: Theme.bodyFont
             font.pixelSize: Theme.smallSize
+        },
+        // Show Finished (user, 2026-10-31): with Resume on, a finished clip leaves the list; this
+        // lists those in finished/ again, dimmed, so one can be sent back to the stage before
+        AccentButton {
+            objectName: "queueShowFinished"
+            visible: !!queue.src && !!queue.src.canShowFinished
+            text: queue.src && queue.src.showFinished ? "Hide Finished" : "Show Finished"
+            kind: "ghost"
+            implicitHeight: 22
+            enabled: !queue.busy && !queue.moving
+            onClicked: queue.src.setShowFinished(!queue.src.showFinished)
+            HoverTip { tip: "Lists the clips this stage has finished and Resume moved into its 'finished' folders, dimmed. "
+                            + "Right-click one to rerun it in the stage before; they are never processed or moved from here." }
         }
     ]
     // Takes the room the rail has left rather than asking for its own: the
@@ -599,6 +640,8 @@ Section {
             // the next run starts (queue.done is cleared then)
             readonly property bool finished: !current && (!!queue.done[queue.keyOf(modelData)]
                                                           || queue.jobsDone.indexOf(queue.keyOf(modelData)) >= 0)
+            // Show Finished's: Resume moved it into finished/ (user, 2026-10-31)
+            readonly property bool archived: !!queue.archived[index]
             color: current ? Theme.alpha(Theme.accent, 0.16)
                  : finished ? Theme.alpha(Theme.success, 0.16)
                  : selected ? Theme.alpha(Theme.accent, 0.12)
@@ -697,8 +740,8 @@ Section {
                     spacing: 0
                     Text {
                         objectName: "jobQueueName"
-                        text: queue.shortName(row.modelData)
-                        color: Theme.fg
+                        text: queue.shortName(row.modelData) + (row.archived ? "  (finished)" : "")
+                        color: row.archived ? Theme.fgMuted : Theme.fg
                         font.family: Theme.bodyFont
                         font.pixelSize: Theme.bodySize
                         elide: Text.ElideMiddle
@@ -811,7 +854,7 @@ Section {
             }
             HoverHandler { id: rowHover; enabled: !queue.busy && !Theme.modalOpen; cursorShape: queue.pv ? Qt.PointingHandCursor : Qt.ArrowCursor }
             TapHandler {
-                enabled: !queue.busy && !!queue.pv && !Theme.modalOpen
+                enabled: !queue.busy && !!queue.pv && !Theme.modalOpen && !row.archived     // not in the preview's list
                 acceptedModifiers: Qt.NoModifier
                 onTapped: queue.pv.showClip(row.path)
             }
@@ -831,7 +874,13 @@ Section {
                     rowMenu.path = row.path
                     // an action marked whenDone shows on a row this run finished (green)
                     // only (user, 2026-10-11: "Send to <next stage>")
-                    rowMenu.actions = queue.rowActions.filter(a => !a.whenDone || row.finished)
+                    // a Show Finished row: the reruns only (a "back" action); on a ticked row with
+                    // others ticked, a rerun takes them all and says how many (user, 2026-10-31)
+                    const many = queue.backPaths(row.path).length
+                    rowMenu.actions = queue.rowActions
+                        .filter(a => row.archived ? !!a.back : (!a.whenDone || row.finished))
+                        .map(a => a.back && many > 1
+                             ? Object.assign({}, a, { text: a.text.replace(/^Rerun /, "Rerun " + many + " Selected ") }) : a)
                     rowMenu.plays = queue.src.playables(row.path)
                     rowMenu.explores = queue.src.explorables ? queue.src.explorables(row.path) : []
                     if (rowMenu.actions.length || rowMenu.plays.length || rowMenu.explores.length) rowMenu.popup()

@@ -1466,6 +1466,27 @@ Item {
                             }
                         }
                         RowLayout {
+                            // ROSE set up before it took TensorRT (2026-10-31): Set Up ROSE again adds it
+                            spacing: 6
+                            visible: depthInside.rose && !!depthInside.er.ready && !!depthInside.er.trtMissing
+                            Muted { text: "ROSE can run faster with TensorRT."; Layout.fillWidth: false }
+                            AccentButton {
+                                objectName: "deRoseTensorRT"
+                                text: "Add TensorRT"
+                                kind: "outline"
+                                enabled: !depthInside.er.task
+                                onClicked: page.prompt.ask({
+                                    title: "Add TensorRT to ROSE?",
+                                    message: "This installs NVIDIA TensorRT (about 2 GB of packages) into ROSE's own environment. "
+                                             + "Erase and Edge Fill then run about 15% faster. The first run at each kind of size "
+                                             + "builds an engine for it: about five minutes once, and 3 GB.",
+                                    buttons: [{ text: "Install", code: 1, kind: "filled" }, { text: "Cancel", code: 0, kind: "ghost" }],
+                                    onDone: (code) => { if (code === 1) page.de.setupRose() }
+                                })
+                                HoverTip { tip: "Installs NVIDIA TensorRT into ROSE's environment (Studio has it already)." }
+                            }
+                        }
+                        RowLayout {
                             spacing: 6
                             AccentButton {
                                 objectName: "deEraseFromClip"
