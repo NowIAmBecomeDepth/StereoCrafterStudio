@@ -696,7 +696,10 @@ Popup {
         StudioMenu {
             id: explorerMenu
             objectName: "pickerExplorerMenu"
-            parent: Overlay.overlay
+            // the field's own item, on the page: Overlay.overlay read from in here (this picker never
+            // shown) found no window, and the menu never opened -- Browse did nothing on a field that
+            // takes a clip too (user, 2026-10-31)
+            parent: picker.parent
             MenuItem { objectName: "pickerExplorerFolder"; text: "Pick a folder\u2026"; onTriggered: winFolderDlg.open() }
             MenuItem { objectName: "pickerExplorerClip"; text: "Pick a clip\u2026"; onTriggered: winFileDlg.open() }
         }

@@ -84,6 +84,16 @@ btn = [c for c in walk(page, []) if c.objectName() == "browseSource"][0]
 pk = [p for p in pickers if p.property("allowFiles") is True][0]
 po = [p for p in pickers if p.property("title") == "Output Splatted"][0]
 
+# on before Studio's own picker has ever shown (user, 2026-10-31: Browse did nothing on a field that
+# takes a clip too -- its menu found no window from inside the unshown picker)
+shell.setProperty("explorerPickers", True); pump(0.3)
+menu0 = named(pk, "pickerExplorerMenu")[0]
+QMetaObject.invokeMethod(btn, "clicked"); pump(0.8)
+check("on from the start: Browse on a folder-or-clip field opens the folder-or-clip menu",
+      menu0.property("opened") is True and menu0.property("visible") is True)
+QMetaObject.invokeMethod(menu0, "close"); pump(0.5)
+shell.setProperty("explorerPickers", False); pump(0.3)
+
 # off: Studio's own picker
 QMetaObject.invokeMethod(btn, "clicked"); pump(0.8)
 opened = [p for p in pickers if p.property("opened")]
