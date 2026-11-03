@@ -54,6 +54,10 @@ class Hooks:
     def frames(self, done: int, total: int, phase: str) -> None:
         """The clip: `done` of `total` frames through `phase` ("depth" or "encode")."""
 
+    def speed(self, fps: float, seconds_left: float) -> None:
+        """The pass's frames a second so far and the seconds it has left (-1: not known yet) -- the
+        console's progress line's numbers (user, 2026-11-01: an fps and time left counter on the page)."""
+
 
 class Stopped(Exception):
     """Stop (now) during a clip."""
@@ -285,6 +289,7 @@ class _Ticker:
         self.last = 0.0
         self.t0 = time.monotonic()
         hooks.frames(0, total, phase)
+        hooks.speed(0.0, -1.0)
         self._bar(0)
 
     def __call__(self, done: int) -> None:
@@ -292,11 +297,19 @@ class _Ticker:
         if done >= self.total or now - self.last >= 0.5:
             self.last = now
             self.hooks.frames(done, self.total, self.phase)
+            fps, left = self.speed(done, now)
+            self.hooks.speed(fps, left)
             self._bar(done)
 
-    def bar_text(self, done: int) -> str:
-        took = time.monotonic() - self.t0
+    def speed(self, done: int, now: Optional[float] = None):
+        """(frames a second so far, seconds left; -1 while not known)."""
+        took = (time.monotonic() if now is None else now) - self.t0
         fps = done / took if took > 0 and done else 0.0
+        left = (self.total - done) / fps if fps > 0 and done < self.total else (0.0 if done >= self.total else -1.0)
+        return fps, left
+
+    def bar_text(self, done: int) -> str:
+        fps, _ = self.speed(done)
         pct = 100 * done // self.total if self.total else 0
         left = f", {_clock((self.total - done) / fps)} left" if fps > 0 and done < self.total else ""
         speed = f", {fps:.1f} fps" if fps > 0 else ""

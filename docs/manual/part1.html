@@ -154,6 +154,8 @@
     <li><b>ROSE</b> (Erase from Clip, Edge Fill, about 3.7 GB): <span class="btn">Set Up ROSE</span> in the
       editor's Erase panel -- it builds an environment of its own.</li>
     <li><b>SEA-RAFT</b> (Edge Fill's Copy From Other Frames, 79 MB): downloads in Models.</li>
+    <li><b>MiniMax-Remover</b> (Edge Fill's other Inpainter, 2.6 GB; non-commercial use only): downloads in
+      Models.</li>
     <li><b>Scene Cut</b>: OmniShotCut, and DINOv3 (gated) and SSCD for cut validation, download in Models;
       TransNetV2 comes with Studio. AutoShot is only in the SceneCutGUI bundle on Google Drive
       (<span class="btn">Get It</span> opens it): put <code>ckpt_0_200_0.pth</code> in the models folder's
@@ -310,28 +312,39 @@
      downloads into that folder, and ROSE needs <span class="btn">Set Up ROSE</span> again.</span></div>
 
   <h3>Picking folders and clips</h3>
-  <p>Every <span class="btn">Browse</span> button opens Studio's folder picker. Each level of folders sits
-     side by side, every folder shows how many clips (or folders) it holds, and the last column lists the
-     clips in the folder that's open.</p>
+  <p>Every <span class="btn">Browse</span> button opens Studio's folder picker, laid out like Windows'
+     File Explorer: your pinned folders and drives on the left, the folder's contents in the middle, and a
+     preview of what is highlighted on the right. Every folder shows how many clips (or folders) it holds.</p>
   <ul>
-    <li><b>Click</b> a folder to open it in the next column; <b>double-click</b> it, or press
-      <span class="btn">Select Folder</span>, to use it.</li>
+    <li><b>Click</b> a folder or clip to highlight it; <b>double-click</b> a folder to go into it.
+      <span class="btn">Select Folder</span> uses the highlighted folder, or the one you're in when nothing
+      is highlighted.</li>
     <li>Where a single clip will do (the input folders of DepthCrafter, Splatting, Inpainting and
       Merging), <b>click a clip</b> and press <span class="btn">Select Clip</span> to work on just that
-      one; double-clicking it picks it straight away. Output folders take a folder only.</li>
-    <li><b>Right-click</b> in a column for <b>New Folder</b>: type its name and press <kbd>Enter</kbd>
-      (<kbd>Esc</kbd> cancels).</li>
-    <li><b>Right-click a folder or clip</b> for <b>Move to Recycle Bin</b>. Studio asks first, and you can
-      put it back from the Recycle Bin. On a drive with no Recycle Bin (a network share, some USB drives)
-      nothing is deleted. Something too big for its drive's Recycle Bin can't go there: Studio says so and
-      asks, as Windows does -- <b>Delete Permanently</b> removes it for good, <b>Keep It</b> leaves it. The
-      open project's folder (and a folder holding it) and the folders a running job is using can't be
+      one; double-clicking it picks it straight away. Output folders take a folder only: their clips are
+      listed but greyed.</li>
+    <li>The arrows go <b>back</b>, <b>forward</b> and <b>up</b> a folder (<kbd>Alt</kbd>+<kbd>←</kbd>,
+      <kbd>Alt</kbd>+<kbd>→</kbd>, <kbd>Alt</kbd>+<kbd>↑</kbd>; <kbd>Backspace</kbd> goes back too).
+      Every step of the path is clickable; click the empty part of it, or press <kbd>Ctrl</kbd>+<kbd>L</kbd>,
+      to type or paste a path, then <kbd>Enter</kbd>.</li>
+    <li>The <b>search</b> box (<kbd>Ctrl</kbd>+<kbd>F</kbd>) finds folders and clips in the folder you're in
+      and the ones under it.</li>
+    <li>Click a column heading (Name, Date modified, Type, Size) to sort by it, and again for the other way.
+      <b>Details</b>, <b>Tiles</b> and <b>Large icons</b> change the view, and <b>Preview pane</b> shows or hides
+      the right side; both stay as you leave them.</li>
+    <li>Drag a folder or clip from Windows' File Explorer onto the picker to go straight to it.</li>
+    <li><span class="btn">New Folder</span> (or right-click, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>)
+      makes a folder in the one you're in: type its name and press <kbd>Enter</kbd> (<kbd>Esc</kbd> cancels).</li>
+    <li><b>Right-click a folder or clip</b> (or press <kbd>Delete</kbd>) for <b>Move to Recycle Bin</b>. Studio
+      asks first, and you can put it back from the Recycle Bin. On a drive with no Recycle Bin (a network share,
+      some USB drives) nothing is deleted. Something too big for its drive's Recycle Bin can't go there: Studio
+      says so and asks, as Windows does -- <b>Delete Permanently</b> removes it for good, <b>Keep It</b> leaves
+      it. The open project's folder (and a folder holding it) and the folders a running job is using can't be
       moved to the Recycle Bin.</li>
-    <li>The path along the top is clickable, and the buttons at the top right jump to your project folder
-      or any drive.</li>
-    <li>Under the drives are four <b>Shortcuts</b> for the folders you use most. Click an empty one
-      (<b>+ Shortcut</b>) to keep the highlighted folder there; click it later to jump straight back.
-      Right-click a shortcut to change or remove it.</li>
+    <li>On the left, under <b>Pinned</b>, are your project folder and four <b>Shortcuts</b> for the folders you
+      use most. Click an empty one (<b>+ Shortcut</b>) to keep the highlighted folder there (or the one you're
+      in); click it later to jump straight back. Right-click a shortcut to change or remove it. Under
+      <b>This PC</b> are your drives, opened out to the folder you're in.</li>
     <li><span class="btn">Windows Explorer…</span> opens Windows' own dialog instead, if you'd rather pick
       that way. Where a clip will do too, it asks whether you're picking a folder or a clip. To always
       pick that way, turn on <b>Settings &gt; Studio &gt; Pick Folders with Windows Explorer</b>: every
@@ -373,10 +386,12 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>`</kbd></td><td>Show or hide the console</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>0</kbd></td><td>Fit the window to the page you're on</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>=</kbd> · <kbd>Ctrl</kbd>+<kbd>−</kbd></td><td>UI Scale up · down</td></tr>
+    <tr><td>Pinch (touchpad) · <kbd>Ctrl</kbd>+wheel</td><td>Over a preview that zooms: zoom it, about the point under your fingers · anywhere else: UI Scale up (fingers apart) · down</td></tr>
+    <tr><td>Two fingers sideways (touchpad)</td><td>Over the Splatting, Merging or Depth Map Editor preview: slide through the frames (left to right: forward)</td></tr>
     <tr><td><kbd>F1</kbd></td><td>Open this manual at the stage you're on (in Extra: Scene Cut, or the Depth Map Editor's part)</td></tr>
     <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>In a preview: one frame back · forward (<kbd>Shift</kbd>: ten)</td></tr>
     <tr><td><kbd>Home</kbd> · <kbd>End</kbd></td><td>In a preview: the first · last frame</td></tr>
-    <tr><td><kbd>↑</kbd> · <kbd>↓</kbd></td><td>In a preview: the next · previous clip</td></tr>
+    <tr><td><kbd>↑</kbd> · <kbd>↓</kbd></td><td>In a preview: the previous · next clip</td></tr>
     <tr><td><kbd>Space</kbd></td><td>In a preview: play or pause (<kbd>Shift</kbd>+<kbd>Space</kbd>: fast forward)</td></tr>
     <tr><td><kbd>F11</kbd> · <kbd>Esc</kbd></td><td>Full Preview, full screen (Splatting, Merging) · close it (F11 too)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Splatting: create or update the clip's sidecar</td></tr>

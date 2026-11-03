@@ -466,6 +466,8 @@
       shot changes. <b>EMA</b> lets the range follow a long shot whose depth really changes, eased by
       <span class="set">Decay</span> and looking <span class="set">Buffer</span> frames ahead.</td></tr>
   </table>
+  <p>While it runs, the line under the progress bar shows the frames done in the depth pass, then the
+     encode, with the speed in frames a second and the time that pass has left.</p>
   <p><b>Replacing a DepthCrafter map.</b> When the output folder already holds a DepthCrafter map of the
      clip, it moves into a <code>DepthCrafter</code> folder inside the output folder, and the new map takes its
      place, so Splatting shows the new depth straight away, with a <b>VDA</b> badge on the clip in its list. Nothing is lost: with Splatting's
@@ -578,7 +580,8 @@
       eye-tracking camera stays off. Choose another view and the camera and the 3D lens switch off.
       Tick <span class="set">Keep Tracking</span> (beside the view, while Glasses-Free 3D is chosen) to keep
       the camera on between clips, in and out of Full Preview and while a job runs, so the 3D doesn't
-      have to find you again each time. It still switches off on another tab or view, and when Studio closes.</li>
+      have to find you again each time. You can untick it while a job runs, to switch the camera off then.
+      It still switches off on another tab or view, and when Studio closes.</li>
     <li><b>Full Preview</b>: the full-screen icon in the preview's top-right corner (or <kbd>F11</kbd>) shows the preview full screen, for watching
       on a 3D TV or monitor. It opens on the screen Studio is on the first time; move it to another with
       <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> and it opens there from then on. With
@@ -591,9 +594,13 @@
       They are the page's own dials: keyframes work on them as on the page.</li>
     <li>The frame slider, <span class="btn">‹ Prev</span> / <span class="btn">Next ›</span> (clips),
       play and fast-forward move around. Keys: <kbd>←</kbd> <kbd>→</kbd> a frame
-      (<kbd>Shift</kbd> for 10), <kbd>↑</kbd> <kbd>↓</kbd> the next or previous clip, <kbd>Space</kbd>
+      (<kbd>Shift</kbd> for 10), <kbd>↑</kbd> <kbd>↓</kbd> the previous or next clip, <kbd>Space</kbd>
       play.</li>
-    <li>Double-click to zoom in on a spot, and again to see the whole frame; the mouse wheel zooms too.
+    <li>Double-click to zoom in on a spot, and again to see the whole frame; the mouse wheel zooms too, and so does a pinch on a touchpad
+      (or <kbd>Ctrl</kbd>+wheel), as far as your fingers move. A pinch away from the preview changes the UI Scale instead.
+      Two fingers sideways over the preview slide through the frames, as dragging the frame slider does. To move
+      a zoomed-in picture around without pressing the touchpad in, turn on Windows' <b>Tap twice and drag to multi-select</b>
+      (Settings &gt; Bluetooth &amp; devices &gt; Touchpad &gt; Taps), then tap twice and slide.
       <span class="set">Preview Scale</span> sets the size: <b>Fit</b> (the first choice, and how Studio
       starts) fills the space the preview has and keeps it filled as the window or the clip changes, up to
       250%; pick a percentage, or zoom with the wheel or a double-click, to hold a size instead (a
@@ -1115,6 +1122,9 @@
      which runs on a 16 GB card; check it against yours before starting. <b>Torch Compile</b> there makes the chunks faster after a first one that takes
      several minutes longer while it compiles: worth it for a long unattended run. It works with the
      offload modes <b>None</b>, <b>FP8 resident</b> and <b>MMGP streaming</b>; the others run without it.
+     With MMGP streaming, <b>FP8 Math</b> does the model's matrix maths in FP8, about twice as fast on RTX 40
+     and 50 series cards: on a 16 GB RTX 5060 Ti a clip took about 15% less time, and the fill came out a touch
+     different, too little to see. It and Torch Compile don't go together: ticking one hides the other.
      (SageAttention for V2 is in <b>Settings</b>.) <b>Upcoming Jobs</b> beside the settings lists the clips a
      Start would run, as V1's does: tick some and <span class="btn">Process Selected</span>, or right-click one
      for <span class="btn">Inpaint This Clip Now</span>, <span class="btn">Move to Finished</span> or, once
@@ -1126,7 +1136,7 @@
      <code>_inpaint_resume</code>), so a clip you stop -- or one cut off by a crash -- carries on from its last
      finished chunk at the next Start, and comes out the same as an unbroken run. Only the finished chunks'
      decoding is done again, a few seconds each. Change a setting that changes the result (chunk, overlap,
-     tiles, steps, seed, prompt or offload mode) and the clip starts over. A finished clip deletes its chunks.</p>
+     tiles, steps, seed, prompt, offload mode or FP8 Math) and the clip starts over. A finished clip deletes its chunks.</p>
   <div class="careful"><b>What it can't fix</b><span>V2 fills ordinary holes well, but it can't repair
      pixels the splat has already stretched: a person seen through thin near bars or a fence, where the
      depth map gives their edge the bars' depth. Fix the depth there instead (the
@@ -1367,6 +1377,10 @@
      found in each chapter of the Source folder; each one's merged output is looked for in that chapter of
      the merged folder, subfolders included. Split <code>_L</code> / <code>_R</code> files are joined side by
      side. For a TV show it's the episode Merging's chapter belongs to.</p>
+  <p>With no project open, it joins the merged clips in Merging's <b>Output Folder</b> instead (subfolders
+     included), in the order of the number at the end of their names -- <code>Scene-0001</code>,
+     <code>Scene-0002</code>... Nothing counts as missing then, and a scene with only one eye's file is left
+     out (it says which).</p>
   <ul>
     <li>When every scene has its merged output, it asks you to confirm and names the file it will write.</li>
     <li>When some don't, it lists them, each with the stage it still needs: <span class="btn">Play</span>
@@ -1424,6 +1438,13 @@
       with its progress bars, on the console's Extra tab. It works during a fill too.</li>
     <li>To fill one clip from Merging's <b>Upcoming Jobs</b>, right-click it there and pick
       <b>Fill Edges</b>: its merged clip is filled straight away (once it has been merged).</li>
+    <li><span class="set">Inpainter</span> is what paints the strip. <b>MiniMax-Remover</b> (the default) was
+      tested against <b>ROSE</b>, the one Edge Fill began with, on eight shots with their real edge hidden: its fill
+      met the picture beside it more closely on all eight and flickered less on seven -- the most on pans --
+      in about 2.6&times; less time. It has its own <span class="set">Steps</span>, 6 (the default) or 12, and
+      blanks the strip itself, so <span class="set">Pre-fill</span> is only shown for ROSE. It needs
+      <b>MiniMax-Remover</b> (2.6 GB) from <b>Settings &gt; Studio &gt; Models</b>; its weights are for
+      non-commercial use only.</li>
     <li><span class="set">Steps</span> is how many steps ROSE takes -- type any number. 6 looks the same as
       50 on an edge strip; fewer is quicker but softens fine detail.</li>
     <li><span class="set">Resolution</span> is how big ROSE works the edge: <b>560</b> keeps more texture (a
@@ -1470,8 +1491,9 @@
       follows it: each clip's strip, ROSE's size and steps, the grain and detail, the files written, a bar for
       each stretch (reading, each ROSE window's steps with their s/it, blend and write) and the time it took.</li>
   </ul>
-  <div class="tip"><b>Needs ROSE</b><span>Edge Fill uses the same ROSE as the Depth Map Editor's Erase:
-     set it up there once (<span class="btn">Set Up ROSE</span>).</span></div>
+  <div class="tip"><b>Needs ROSE or MiniMax-Remover</b><span>With ROSE, Edge Fill uses the same ROSE as the
+     Depth Map Editor's Erase: set it up there once (<span class="btn">Set Up ROSE</span>). MiniMax-Remover
+     downloads in <b>Settings &gt; Studio &gt; Models</b>.</span></div>
 
   <h3>In Settings</h3>
   <p><b>Save Preview Frame</b> and <b>Save Preview as SBS</b> save the frame on screen as a picture.

@@ -116,7 +116,9 @@ if "mg" in WANT:
     check("...wrote both clips", len(before) == 2, str(list(before)))
 
     import studio.stages.merging.engine as ME
-    _Reader = ME.VideoReader
+    # the inpainted clip is opened with open_rgb_reader_ahead since Merging read ahead (111f8b1): the stand-in
+    # wrapped ME.VideoReader, which no longer opens it, so it never failed (2026-11-03)
+    _Reader = ME.open_rgb_reader_ahead
     class FailingReader:
         """mA's inpainted clip: its second chunk cannot be read."""
         def __init__(self, path, *a, **kw):
@@ -130,11 +132,11 @@ if "mg" in WANT:
             return getattr(self._r, name)
         def __len__(self):
             return len(self._r)
-    ME.VideoReader = FailingReader
+    ME.open_rgb_reader_ahead = FailingReader
     mtimes = {p.name: p.stat().st_mtime_ns for p in out.iterdir()}
     toasts.clear()
     check("a re-run, mA failing mid-clip", run(mg, mg.start))
-    ME.VideoReader = _Reader
+    ME.open_rgb_reader_ahead = _Reader
     after = snapshot(out)
     check("...mA's previous output is untouched", {k: v for k, v in after.items() if k.startswith("mA")}
           == {k: v for k, v in before.items() if k.startswith("mA")}, str(list(after)))
@@ -171,7 +173,7 @@ if "sc" in WANT:
     _run = subprocess.run
     def failing_split(args, *a, **kw):
         r = _run(args, *a, **kw)             # ffmpeg writes its file...
-        if "-Scene-002" in " ".join(map(str, args)):
+        if "-Scene-0002" in " ".join(map(str, args)):
             written = Path(str(args[-1]))    # ...then "fails" having written half of it
             if written.exists():
                 data = written.read_bytes(); written.write_bytes(data[: len(data) // 2])
@@ -191,11 +193,11 @@ if "sc" in WANT:
     if _bin is not None:
         SE.send_to_recycle_bin = _bin
     after = snapshot(out)
-    s2 = [k for k in before if "-Scene-002" in k]
+    s2 = [k for k in before if "-Scene-0002" in k]
     check("...scene 2's previous clip went to the Recycle Bin, not left half-written",
-          s2 and binned == [Path(k).name for k in s2] and not [k for k in after if "-Scene-002" in k],
-          f"binned {binned}; left {[k for k in after if '-Scene-002' in k]}")
-    check("...scenes 1 and 3 are this run's", all(k in after for k in before if "-Scene-002" not in k), str(list(after)))
+          s2 and binned == [Path(k).name for k in s2] and not [k for k in after if "-Scene-0002" in k],
+          f"binned {binned}; left {[k for k in after if '-Scene-0002' in k]}")
+    check("...scenes 1 and 3 are this run's", all(k in after for k in before if "-Scene-0002" not in k), str(list(after)))
     check("...no partial file is left", not [k for k in after if k.endswith(".part")], str(list(after)))
 
 print()

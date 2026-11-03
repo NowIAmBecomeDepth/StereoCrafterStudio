@@ -231,5 +231,81 @@ class MergeAllTests(unittest.TestCase):
         return [all_[k] for k in idxs]
 
 
+
+class PlainFolderTests(unittest.TestCase):
+    """No project open (a tester, 2026-11-03: Merge All asked for a Source Clips folder, and
+    one made by hand didn't help): the merged clips in Merging's Output folder, in scene-number
+    order, built into one movie; a scene with only one eye's file is left out and named."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        f = cls.final = os.path.join(cls.tmp, "final")
+        _clip(os.path.join(f, "film-Scene-0010_256_merged_full_sbs.mp4"), 3, w=2 * EW)
+        _clip(os.path.join(f, "film-Scene-0002_256_merged_full_sbs.mp4"), 4, w=2 * EW, colour="green")
+        for eye, colour in (("L", "red"), ("R", "blue")):
+            _clip(os.path.join(f, f"film-Scene-0001_256_merged_full_sbs_{eye}.mp4"), 5, colour=colour)
+        _clip(os.path.join(f, "film-Scene-0005_256_merged_full_sbs_L.mp4"), 2)          # one eye only
+        _clip(os.path.join(f, "film-Scene-0003.mp4"), 2)                                  # not a merged clip
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_the_folders_merged_clips_in_scene_order(self):
+        info = M.scan_folder(self.final)
+        self.assertNotIn("error", info, info.get("error"))
+        self.assertTrue(info["plain"])
+        self.assertEqual([s["stem"] for s in info["scenes"]], ["film-Scene-0001", "film-Scene-0002", "film-Scene-0010"])
+        self.assertEqual([s["kind"] for s in info["scenes"]], ["lr", "sbs", "sbs"])
+        self.assertEqual((info["missing"], info["total"], info["name"]), ([], 3, "final"))
+        self.assertEqual(len(info["skipped"]), 1)
+        self.assertIn("film-Scene-0005", info["skipped"][0])
+
+    def test_built_into_one_movie(self):
+        info = M.scan_folder(self.final)
+        plan = M.plan_build(info, M.probe_all([f for s in info["scenes"] for f in s["files"]]), False)
+        self.assertNotIn("error", plan, plan.get("error"))
+        out = tempfile.mkdtemp(dir=self.tmp)
+        o = {**M.options_from({}), "codec": "H.264", "encoder": "Force CPU", "quality": "Fastest", "crf": "30",
+             "output_folder": out}
+        res = M.Build(info, plan, o).run()
+        self.assertNotIn("error", res, res.get("error"))
+        self.assertTrue(res["outputs"][0].endswith("final - 3D Full SBS.mkv"), res["outputs"])
+        got = M.probe(res["outputs"][0])
+        self.assertEqual((got["w"], got["h"], got["frames"]), (2 * EW, EH, 5 + 4 + 3))
+        first = MergeAllTests.frames_at(res["outputs"][0], (0,))[0]
+        self.assertGreater(first[:, : EW, 0].mean(), 150)        # scene 1 first: its left eye red
+        self.assertGreater(first[:, EW:, 2].mean(), 150)
+
+    def test_an_empty_or_missing_folder_says_so(self):
+        empty = tempfile.mkdtemp(dir=self.tmp)
+        self.assertIn("there are none", M.scan_folder(empty)["error"])
+        self.assertIn("isn't there", M.scan_folder(os.path.join(self.tmp, "nope"))["error"])
+
+    def test_the_button_scans_the_output_folder_without_a_project(self):
+        import threading
+        from types import SimpleNamespace
+        from studio.stages.merging.controller import MergingController
+        got, done = [], threading.Event()
+
+        def emit(info):
+            got.append(info)
+            done.set()
+        for project, base in (("", ""), ("C:/Projects/Movie", "")):
+            got.clear(); done.clear()
+            fake = SimpleNamespace(_busy=False, is_busy=lambda: False, toast=SimpleNamespace(emit=lambda *a: None),
+                                   _merge_base=lambda: base, _shell=SimpleNamespace(projectFolder=project),
+                                   _values=lambda: {"output_folder": self.final},
+                                   mergeAllScanned=SimpleNamespace(emit=emit), _sigMergeScanned=SimpleNamespace(emit=emit))
+            MergingController.mergeAllScan(fake)
+            self.assertTrue(done.wait(30))
+            if project:          # a show with no chapter picked: still "which episode?"
+                self.assertIn("Which episode", got[0].get("error", ""))
+            else:
+                self.assertTrue(got[0].get("plain"), got[0])
+                self.assertEqual(got[0]["total"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

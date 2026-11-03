@@ -56,6 +56,7 @@ Popup {
         Shell.openStage(p.index, p.index === 2 ? 0 : -1)       // Inpainting: V1, which lists clips
     }
     function chaptersText() {
+        if (info.plain) return total + (total === 1 ? " merged clip" : " merged clips")     // no project
         const n = (info.chapters || []).length
         return total + (total === 1 ? " scene" : " scenes") + " in " + n + (n === 1 ? " chapter" : " chapters")
     }
@@ -115,8 +116,12 @@ Popup {
         Body {
             objectName: "mergeAllReady"
             visible: dlg.phase === "ready"
-            text: "Every scene has its merged output: " + dlg.chaptersText() + " of " + (dlg.info.name || "the project")
-                  + ".\n\nMerge them all, in order, into " + (dlg.info.layout || "Full SBS") + "?\n"
+            text: (dlg.info.plain
+                   ? "No project is open: " + dlg.chaptersText() + " in " + (dlg.info.base || "").replace(/\//g, "\\")
+                     + ", in scene-number order."
+                     + ((dlg.info.skipped || []).length ? "\nLeft out, one eye only: " + dlg.info.skipped.join(", ") + "." : "")
+                   : "Every scene has its merged output: " + dlg.chaptersText() + " of " + (dlg.info.name || "the project") + ".")
+                  + "\n\nMerge them all, in order, into " + (dlg.info.layout || "Full SBS") + "?\n"
                   + dlg.outputsText()
                   + (dlg.info.audio ? "\n\nSound: " + dlg.info.audio.replace(/\//g, "\\") : "\n\nNo soundtrack: pick the movie file in Settings > Encoding Options > Merge All for one.")
         }

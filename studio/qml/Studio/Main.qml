@@ -107,8 +107,7 @@ ApplicationWindow {
         const cur = Shell.uiScale === "auto" ? autoPct : Math.round(Number(Shell.uiScale) * 100)
         const next = Math.max(75, Math.min(100, Math.round((cur + delta) / 5) * 5))
         if (next === cur) return
-        Shell.uiScale = next === autoPct ? "auto" : String(next / 100)
-        Theme.toast("info", "UI Scale " + next + "%" + (next === autoPct ? " (Auto)" : ""), "")
+        Shell.uiScale = next === autoPct ? "auto" : String(next / 100)   // no toast (user, 2026-10-31)
     }
 
     function fitToContent() {

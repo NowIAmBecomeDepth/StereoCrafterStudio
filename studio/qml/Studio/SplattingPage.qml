@@ -199,8 +199,10 @@ Item {
     Shortcut { enabled: page.keysLive; sequence: "Shift+Right"; onActivated: page.pv.stepFrames(10) }
     Shortcut { enabled: page.keysLive; sequence: "Ctrl+Left"; onActivated: page.pv.step(-1) }
     Shortcut { enabled: page.keysLive; sequence: "Ctrl+Right"; onActivated: page.pv.step(1) }
-    Shortcut { enabled: page.keysLive; sequence: "Up"; onActivated: page.pv.step(1) }
-    Shortcut { enabled: page.keysLive; sequence: "Down"; onActivated: page.pv.step(-1) }
+    // Up the list to the clip above, Down to the one below, as Upcoming Jobs lists them (a tester,
+    // 2026-11-02: v1's Up = next clip ran against the list)
+    Shortcut { objectName: "clipUpShortcut"; enabled: page.keysLive; sequence: "Up"; onActivated: page.pv.step(-1) }
+    Shortcut { objectName: "clipDownShortcut"; enabled: page.keysLive; sequence: "Down"; onActivated: page.pv.step(1) }
     Shortcut { enabled: page.keysLive; sequence: "Space"; onActivated: page.pv.togglePlay() }
     Shortcut { enabled: page.keysLive; sequence: "Shift+Space"; onActivated: page.pv.toggleFastForward(page.ffStep) }
     // (user, 2026-10-02) first / last frame; S / D a static / dynamic keyframe
@@ -800,7 +802,8 @@ ChangeFoldersButton {
             Rectangle {
                 id: previewPanel
                 objectName: "previewPanel"
-                enabled: page.idle
+                // Locked while Splatting's job runs -- each control in it, not the panel: Keep Tracking
+                // stays usable, so the 3D monitor's cameras can be let go mid-job (user, 2026-10-31)
                 x: page.wide ? leftCol.width + Theme.gap : 0
                 y: 0
                 width: page.wide ? body.width - leftCol.width - fxCol.width - 2 * Theme.gap : body.width
@@ -832,7 +835,7 @@ ChangeFoldersButton {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 10
-                        enabled: previewPanel.pv.loaded
+                        enabled: page.idle && previewPanel.pv.loaded
                         Caption {
                             text: "Frame: " + (previewPanel.pv.loaded ? (scrub.pressed ? Math.round(scrub.value) + 1 : previewPanel.pv.frame + 1) : 0)
                                   + " / " + previewPanel.pv.frameCount
@@ -928,6 +931,7 @@ ChangeFoldersButton {
                         Caption { text: "Front:" }
                         Dropdown {
                             objectName: "flipFront"
+                            enabled: page.idle
                             store: Shell; key: "splatFlipFront"
                             model: previewPanel.sources; measure: true; boxWidth: fitWidth
                             disabledItems: previewPanel.glassesWhyNot ? ["Glasses-Free 3D"] : []
@@ -938,6 +942,7 @@ ChangeFoldersButton {
                         Caption { text: "Back:" }
                         Dropdown {
                             objectName: "flipBack"
+                            enabled: page.idle
                             store: Shell; key: "splatFlipBack"
                             model: previewPanel.sources; measure: true; boxWidth: fitWidth
                             disabledItems: previewPanel.glassesWhyNot ? ["Glasses-Free 3D"] : []
@@ -961,7 +966,7 @@ ChangeFoldersButton {
                         AccentButton {
                             text: "Clear Preview"
                             kind: "outline"
-                            enabled: previewPanel.pv.loaded && !previewPanel.pv.loading
+                            enabled: page.idle && previewPanel.pv.loaded && !previewPanel.pv.loading
                             onClicked: previewPanel.pv.clear()
                             HoverTip { tip: "Releases the currently loaded preview and frees its GPU memory. Use this to "
                                             + "reclaim VRAM without closing the app -- e.g. before starting a render." }
@@ -972,6 +977,7 @@ ChangeFoldersButton {
                         // the wheel or a double-click zoom stands instead
                         Dropdown {
                             objectName: "previewScaleBox"
+                            enabled: page.idle
                             boxWidth: 84
                             model: ["Fit"].concat(page.sp.choices.preview_size || [])
                             currentIndex: page.previewFitOn ? 0 : model.indexOf(String(page.st.preview_size))
@@ -985,11 +991,12 @@ ChangeFoldersButton {
                                             + "and a double-click zoom pick one too, and a double-click on a zoomed-in "
                                             + "picture goes back to Fit." }
                         }
-                        SpCheck { key: "crosshair_enabled"; visible: !page.bh["splat.crosshair"]; text: "Crosshair"; help: page.help("crosshair_enabled"); Layout.leftMargin: 8 }
+                        SpCheck { enabled: page.idle; key: "crosshair_enabled"; visible: !page.bh["splat.crosshair"]; text: "Crosshair"; help: page.help("crosshair_enabled"); Layout.leftMargin: 8 }
                         Repeater {
                             model: page.pv.depthMaps
                             AnimRadio {
                                 required property var modelData
+                                enabled: page.idle
                                 text: modelData
                                 checked: String(page.st.selected_depth_map) === modelData
                                 font.bold: checked
@@ -1000,12 +1007,13 @@ ChangeFoldersButton {
                                 HoverTip { tip: "Multi-Map: preview (and save to this clip's sidecar) the depth map in this subfolder." }
                             }
                         }
-                        SpCheck { visible: !!page.st.crosshair_enabled && !page.bh["splat.crosshair_white"]; key: "crosshair_white"; text: "White"; help: page.help("crosshair_white") }
-                        SpCheck { visible: !!page.st.crosshair_enabled && !page.bh["splat.crosshair_multi"]; key: "crosshair_multi"; text: "Multi"; help: page.help("crosshair_multi") }
+                        SpCheck { enabled: page.idle; visible: !!page.st.crosshair_enabled && !page.bh["splat.crosshair_white"]; key: "crosshair_white"; text: "White"; help: page.help("crosshair_white") }
+                        SpCheck { enabled: page.idle; visible: !!page.st.crosshair_enabled && !page.bh["splat.crosshair_multi"]; key: "crosshair_multi"; text: "Multi"; help: page.help("crosshair_multi") }
                     }
                     // ...and the second: clips, playback, brightness. Never wider
                     // than the panel: the brightness slider gives way first.
                     RowLayout {
+                        enabled: page.idle
                         Layout.alignment: Qt.AlignHCenter
                         Layout.maximumWidth: parent.width
                         spacing: 8
@@ -1084,6 +1092,7 @@ ChangeFoldersButton {
                     // The picture
                     Rectangle {
                         id: stageArea
+                        enabled: page.idle
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 8
@@ -1317,20 +1326,71 @@ ChangeFoldersButton {
                             parent: flick
                             enabled: previewPanel.pv.loaded && !Theme.modalOpen
                             acceptedModifiers: Qt.NoModifier
-                            onWheel: (e) => {
-                                const cur = parseFloat(String(page.st.preview_size)) || 100
-                                const step = e.angleDelta.y > 0 ? 1.12 : 1 / 1.12
-                                const next = Math.max(10, Math.min(250, Math.round(cur * step)))
-                                if (next === cur) return
-                                // keep the frame point under the pointer where it is (applied once
-                                // the picture has its new size -- see zoomAnchor below)
-                                zoomAnchor.fx = shown.width > 0 ? (flick.contentX + e.x - shown.x) / shown.width : 0.5
-                                zoomAnchor.fy = shown.height > 0 ? (flick.contentY + e.y - shown.y) / shown.height : 0.5
-                                zoomAnchor.vx = e.x; zoomAnchor.vy = e.y
-                                zoomAnchor.at = Date.now()
-                                page.previewFitOn = false
-                                page.st.preview_size = next + "%"
+                            onWheel: (e) => zoomAnchor.zoomBy(e.angleDelta.y > 0 ? 1.12 : 1 / 1.12, e.x, e.y)
+                        }
+                        // sideways (a touchpad's two fingers, a tilt wheel): through the frames. Its own
+                        // handler: a vertical one never sees a wheel that only goes sideways.
+                        WheelHandler {
+                            objectName: "previewSlideWheel"
+                            parent: flick
+                            enabled: previewPanel.pv.loaded && !Theme.modalOpen
+                            orientation: Qt.Horizontal
+                            acceptedModifiers: Qt.NoModifier
+                            onWheel: (e) => { if (Math.abs(e.angleDelta.x) > Math.abs(e.angleDelta.y)) frameSlide.by(e.angleDelta.x) }
+                        }
+                        // A sideways two-finger swipe over the preview slides through the frames (user,
+                        // 2026-10-31), as the frame slider does while held: the fingers left to right go
+                        // forward (user, 2026-10-31: the other way round was backwards), a frame for every `unitsPerFrame` of the
+                        // wheel's (120 a notch: a tilt wheel's click is three frames). Rendered the fast
+                        // way while it moves, then where it stops.
+                        QtObject {
+                            id: frameSlide
+                            readonly property int unitsPerFrame: 40
+                            property real acc: 0
+                            property int target: -1
+                            function by(dx) {
+                                const pv = previewPanel.pv
+                                if (!pv.loaded || pv.frameCount < 2) return
+                                acc += dx          // + x: the fingers moving left to right -- forward
+                                const n = acc > 0 ? Math.floor(acc / unitsPerFrame) : Math.ceil(acc / unitsPerFrame)
+                                if (n === 0) return
+                                acc -= n * unitsPerFrame
+                                const f = Math.max(0, Math.min(pv.frameCount - 1, (target >= 0 ? target : pv.frame) + n))
+                                if (!slideEnd.running) { if (pv.playing) pv.pause(); pv.setDragging(true) }
+                                slideEnd.restart()
+                                if (f === target) return
+                                target = f
+                                pv.seek(f)
                             }
+                        }
+                        Timer {
+                            id: slideEnd
+                            objectName: "frameSlideEnd"
+                            interval: 250
+                            onTriggered: {
+                                previewPanel.pv.setDragging(false)
+                                if (frameSlide.target >= 0) previewPanel.pv.seek(frameSlide.target)   // exactly, where it stopped
+                                frameSlide.target = -1
+                                frameSlide.acc = 0
+                            }
+                        }
+                        // A trackpad's pinch (user, 2026-10-31): Windows sends it as the wheel with
+                        // Ctrl held, in small steps -- so as far as the fingers move, ~12% a notch's
+                        // worth, about the point between them. A mouse's Ctrl + wheel is the same.
+                        // studio/pinch.py lets it through to here only over pinchZoomArea while it
+                        // is on; anywhere else a pinch is the UI Scale.
+                        WheelHandler {
+                            objectName: "previewPinchWheel"
+                            parent: flick
+                            enabled: previewPanel.pv.loaded && !Theme.modalOpen
+                            acceptedModifiers: Qt.ControlModifier
+                            onWheel: (e) => zoomAnchor.zoomBy(Math.pow(1.12, e.angleDelta.y / 120), e.x, e.y)
+                        }
+                        Item {
+                            objectName: "pinchZoomArea"
+                            parent: flick
+                            anchors.fill: parent
+                            readonly property bool on: previewPanel.pv.loaded && !Theme.modalOpen
                         }
                         QtObject {
                             id: zoomAnchor
@@ -1339,6 +1399,23 @@ ChangeFoldersButton {
                             property real vx: 0
                             property real vy: 0
                             property double at: 0
+                            // the size a pinch is at before rounding (its small steps would round away)
+                            property real raw: 0
+                            // zoom by `step` about (x, y), a point in the Flickable
+                            function zoomBy(step, x, y) {
+                                const cur = parseFloat(String(page.st.preview_size)) || 100
+                                raw = Math.max(10, Math.min(250, (Math.abs(raw - cur) < 1 ? raw : cur) * step))
+                                const next = Math.round(raw)
+                                if (next === cur) return
+                                // keep the frame point under the pointer where it is (applied once
+                                // the picture has its new size -- see apply() below)
+                                fx = shown.width > 0 ? (flick.contentX + x - shown.x) / shown.width : 0.5
+                                fy = shown.height > 0 ? (flick.contentY + y - shown.y) / shown.height : 0.5
+                                vx = x; vy = y
+                                at = Date.now()
+                                page.previewFitOn = false
+                                page.st.preview_size = next + "%"
+                            }
                             function apply() {
                                 if (Date.now() - at > 2000) return
                                 flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, shown.x + fx * shown.width - vx))
@@ -1693,6 +1770,29 @@ ChangeFoldersButton {
                             HoverTip { tip: "The camera. Moving: the neighbouring frames are lined up on each frame before the "
                                             + "particles are separated (any shot, camera or people moving). Static: a "
                                             + "locked-off shot -- simpler and a little cleaner." }
+                        }
+                        // user, 2026-11-02: "a drop down option so i can see the live preview of each"
+                        Dropdown {
+                            id: rainFlow
+                            objectName: "rainFlow"
+                            visible: !page.webOn && parent.method === "moving"     // only Moving lines frames up
+                            boxWidth: 96
+                            // the box shows `short` (the row has no room for the third's whole name; the list does)
+                            readonly property var flows: [{ key: "dis", label: "DIS", short: "DIS" },
+                                                          { key: "raft", label: "SEA-RAFT", short: "SEA-RAFT" },
+                                                          { key: "raft_plain", label: "SEA-RAFT, no Relight", short: "No Relight" }]
+                            model: flows.map(m => m.label)
+                            displayText: flows[Math.max(0, currentIndex)].short
+                            currentIndex: Math.max(0, flows.findIndex(m => m.key === (page.st.rain_flow || "dis")))
+                            onActivated: (i) => page.st.rain_flow = rainFlow.flows[i].key
+                            HoverTip { tip: "How Moving lines the neighbouring frames up. DIS: the quick one, as before. "
+                                            + "SEA-RAFT: a neural optical flow on the GPU -- it lines up more of each "
+                                            + "neighbour and catches more of the streaks falling through the air, about as "
+                                            + "quick. SEA-RAFT, no Relight: the same, but a frame lit up brighter than its "
+                                            + "neighbours isn't evened out first and the scene's own texture isn't held back "
+                                            + "-- on some flickering-light shots it keeps shiny surfaces out better. Needs SEA-RAFT in Settings > Studio > "
+                                            + "Models (DIS without it). "
+                                            + "Saved with the clip." }
                         }
                         // the layers' own spacing and convergence (user, 2026-10-08: "distance between layers
                         // and such", "convergence for particles") in a popup: a row of their own made the

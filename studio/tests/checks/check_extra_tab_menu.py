@@ -83,7 +83,9 @@ move(sp_tab); pump(0.4)
 check("hovering a tab without a menu opens nothing", not menu.property("opened"))
 move(extra_tab); pump(0.05)
 check("...nor at once on Extra (a pass across the strip)", not menu.property("opened"))
-pump(0.5)
+pump(0.6)
+check("...nor after 0.6 s on it (user, 2026-11-01: a 1 s rest first)", not menu.property("opened"))
+pump(0.7)
 check("hovering Extra drops down its tools", menu.property("opened"))
 rows = [r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible()]
 names = [str(r.property("modelData")) for r in sorted(rows, key=lambda r: r.mapToScene(QPointF(0, 0)).y())]
@@ -106,7 +108,7 @@ click(extra_tab); pump(0.6)
 check("a click on Extra opens the tool last used", stage.property("current") == 4 and extra.property("tool") == 1,
       f"stage {stage.property('current')} tool {extra.property('tool')}")
 
-move(extra_tab); pump(0.5)
+move(extra_tab); pump(1.3)
 opened = menu.property("opened")
 QTest.mouseMove(win, QPoint(int(win.width() / 2), int(win.height() * 0.8))); pump(0.6)
 check("leaving the tab and the list closes it", opened and not menu.property("opened"), f"opened first {opened}")
@@ -115,7 +117,7 @@ check("leaving the tab and the list closes it", opened and not menu.property("op
 dcpage = stage.property("pages").property(0).toQObject()
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 1), Q_ARG("QVariant", True)); pump(0.5)
 QTest.mouseMove(win, QPoint(int(win.width() / 2), int(win.height() * 0.8))); pump(0.5)
-move(dm_tab); pump(0.6)
+move(dm_tab); pump(1.3)
 rows = [r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible()]
 names = [str(r.property("modelData")) for r in sorted(rows, key=lambda r: r.mapToScene(QPointF(0, 0)).y())]
 check("hovering Depth Map drops down DepthCrafter and VDA", menu.property("opened") and names == ["DepthCrafter", "VDA"], str(names))
@@ -127,7 +129,7 @@ check("picking VDA opens Depth Map on its VDA tab", stage.property("current") ==
 QMetaObject.invokeMethod(stage, "show", Q_ARG("QVariant", 1), Q_ARG("QVariant", True)); pump(0.5)
 click(dm_tab); pump(0.6)
 check("...and a click on Depth Map opens the tab last used", stage.property("current") == 0 and dcpage.property("engine") == 1)
-move(dm_tab); pump(0.6)
+move(dm_tab); pump(1.3)
 dc_row = next(r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible() and r.property("modelData") == "DepthCrafter")
 move(dc_row); pump(0.4); click(dc_row); pump(0.6)
 check("...picking DepthCrafter goes back to it", stage.property("current") == 0 and dcpage.property("engine") == 0)

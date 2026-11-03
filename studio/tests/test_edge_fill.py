@@ -858,5 +858,107 @@ class UsualEdgeFillTest(EdgeFillTest.__base__):
         self.assertEqual([(e["eye"], e["edge"]) for e in r["edges"]], [("R", "right")])
 
 
+class MiniMaxInpainterTest(unittest.TestCase):
+    """The Inpainter (user, 2026-11-03): MiniMax-Remover instead of ROSE -- the same crop, mask and
+    finishing, its own job (its 6 steps, no Pre-fill: it blanks the mask itself), its own worker."""
+
+    setUp = EdgeFillTest.setUp
+    tearDown = EdgeFillTest.tearDown
+
+    def _fill(self, worker, **kw):
+        from core.removal import minimax_env
+        g = F.find_groups(self.out)[0]
+        with mock.patch.object(E, "_run_worker", worker), \
+                mock.patch.object(minimax_env, "available", lambda: True), \
+                mock.patch.object(F.rose_env, "ready", lambda: False), \
+                mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
+            return g, F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=50, grain=False,
+                             settings={}, inpainter="MiniMax-Remover", **kw)
+
+    def test_it_paints_the_strip_with_its_own_job(self):
+        from core.removal import minimax_env
+        got = []
+
+        def worker(job_path, *a, **k):
+            with open(job_path, encoding="utf-8") as f:
+                for c in json.load(f)["chunks"]:
+                    got.append((np.load(c["frames"]), np.load(c["masks"]) > 0))
+            _fake_worker(job_path, *a, **k)
+        g, r = self._fill(worker, prefill="Stretched")
+        job = _fake_worker.calls[0]
+        self.assertEqual(job["inpainter"], "minimax")
+        self.assertEqual(job["steps"], minimax_env.STEPS, "its own steps, not ROSE's Steps")
+        self.assertEqual(job["dilate"], minimax_env.DILATE)
+        self.assertNotIn("rose_dir", job)
+        for frames, masks in got:                   # no Pre-fill: the clip's own picture under the mask
+            mw = int(masks[0, 0].sum())
+            self.assertFalse(np.array_equal(frames[:, :, :mw], np.repeat(frames[:, :, mw:mw + 1], mw, axis=2)))
+            self.assertLess(np.abs(frames[:, :, :STRIP // 2].astype(float).mean(axis=(0, 1, 2)) - (20, 10, 40)).max(), 25,
+                            "the clip's dark bar, as it is")
+        after = list(E._reader(g.files["R"], W, H, "rgb24"))
+        fill = after[N // 2][:, :r["edges"][0]["strip"] - 2].reshape(-1, 3).mean(axis=0)
+        self.assertLess(np.abs(fill - FILL).max(), 25, "the strip is the inpainter's")
+
+    def test_not_downloaded_says_where_to_get_it(self):
+        from core.removal import minimax_env
+        g = F.find_groups(self.out)[0]
+        with mock.patch.object(minimax_env, "available", lambda: False), \
+                mock.patch.object(F.rose_env, "ready", lambda: True):
+            with self.assertRaises(RuntimeError) as cm:
+                F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), settings={},
+                       inpainter="MiniMax-Remover")
+        self.assertIn("Settings > Studio > Models", str(cm.exception))
+
+    def test_the_runner_starts_its_worker_not_roses(self):
+        """erase._run_worker reads the job: "inpainter": "minimax" runs minimax_env's command, and its
+        progress is labelled MiniMax-Remover."""
+        from core.removal import minimax_env
+        fake = os.path.join(self.tmp, "fake_mmr.py")
+        with open(fake, "w", encoding="utf-8") as f:
+            f.write("import json, sys\nimport numpy as np\njob = json.load(open(sys.argv[1]))\n"
+                    "for k, c in enumerate(job['chunks'], 1):\n"
+                    "    print('CHUNK', k, len(job['chunks']), flush=True)\n"
+                    "    for s in range(1, job['steps'] + 1):\n        print('STEP', s, job['steps'], flush=True)\n"
+                    "    np.save(c['out'], np.load(c['frames']))\n    print('DONE', k, flush=True)\n")
+        fr = np.zeros((5, 16, 16, 3), np.uint8)
+        paths = {s: os.path.join(self.tmp, f"{s}.npy") for s in ("f", "m", "o")}
+        np.save(paths["f"], fr)
+        np.save(paths["m"], np.zeros((5, 16, 16), np.uint8))
+        jp = os.path.join(self.tmp, "job.json")
+        with open(jp, "w", encoding="utf-8") as f:
+            json.dump({"inpainter": "minimax", "steps": 6,
+                       "chunks": [{"frames": paths["f"], "masks": paths["m"], "out": paths["o"]}]}, f)
+        said = []
+
+        def no_rose():
+            raise AssertionError("ROSE's Python started")
+        with mock.patch.object(minimax_env, "command", lambda p: [sys.executable, "-u", fake, p]), \
+                mock.patch.object(E.rose_env, "python", no_rose):
+            E._run_worker(jp, 1, 6, lambda f, t: said.append(t), threading.Event(), 0.0, 1.0)
+        self.assertTrue(os.path.isfile(paths["o"]))
+        self.assertTrue(said and all(t.startswith("MiniMax-Remover:") for t in said), said)
+        self.assertIn("step 6 of 6", said[-1])
+
+    def test_the_setting_and_its_models_row(self):
+        from studio import model_catalog as C
+        from studio.stages.edgefill import settings as ES
+        self.assertEqual(ES.DEFAULTS["inpainter"], "MiniMax-Remover", "the default (user, 2026-11-03)")
+        self.assertEqual(ES.INPAINTERS[0], "MiniMax-Remover", "listed first")
+        self.assertEqual(ES.coerce("inpainter", "ROSE"), "ROSE")
+        self.assertEqual(ES.coerce("inpainter", "nonsense"), "MiniMax-Remover")
+        self.assertEqual(ES.normalise({})["inpainter"], "MiniMax-Remover")
+        self.assertEqual(ES.INPAINTERS, list(F.INPAINTERS))
+        row = next(m for m in C.MODELS if m.key == "minimax_remover")
+        self.assertIn("non-commercial", row.note)
+        from core.removal import minimax_env
+        files = {f for p in row.parts for f, _n in p.files}
+        self.assertEqual(files, set(minimax_env.NEEDED), "the catalog downloads what minimax_env needs")
+        for p in row.parts:
+            self.assertEqual(p.folder, minimax_env.FOLDER)
+            if p.url:
+                self.assertIn("28e12b450d8a72a7547b86940a4985e6ad90d75b", p.url, "a pinned commit")
+                self.assertEqual(len(p.sha256), 64)
+
+
 if __name__ == "__main__":
     unittest.main()

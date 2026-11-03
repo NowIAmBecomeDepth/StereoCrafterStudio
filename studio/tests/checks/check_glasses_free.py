@@ -29,6 +29,8 @@ from PySide6.QtCore import QCoreApplication, QEventLoop, QMetaObject, Q_ARG, QOb
 warns = []
 qInstallMessageHandler(lambda t, ctx, m: warns.append(m) if (".qml" in m or "qml" in m.lower()) else None)
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtTest import QTest
 from studio import app as A
 from studio import sr_display
 
@@ -232,6 +234,10 @@ shell.setProperty("mergeFlipFront", "Blended Image"); pump(0.4)
 check("...another source: the box hidden, the view no longer wanting",
       kt.property("shown") is False and not any(k.startswith("merging#") for k in hub._wanting), str(hub._wanting))
 shell.setProperty("mergeFlipFront", _mf); pump(0.4)
+_fixtures.fake_busy(objs["Merging"], True); pump(0.4)
+check("...Merging's job running: Keep Tracking still there and can be clicked",
+      kt.isVisible() and kt.isEnabled(), f"visible {kt.isVisible()}, enabled {kt.isEnabled()}")
+_fixtures.fake_busy(objs["Merging"], False); pump(0.4)
 _sp = page(1)
 _skt = keep_box(_sp)
 _sf = shell.property("splatFlipFront"), shell.property("splatFlipBack")
@@ -239,6 +245,21 @@ shell.setProperty("splatFlipFront", "Dubois Anaglyph"); shell.setProperty("splat
 check("Keep Tracking: hidden on Splatting without the choice", _skt is not None and _skt.property("shown") is False)
 shell.setProperty("splatFlipBack", GF); pump(0.3)
 check("...shown with it on the back", _skt.property("shown") is True)
+# ...and it can be turned off while a job runs (user, 2026-10-31: the cameras stayed on until the job ended)
+def _usable(box):
+    return box is not None and box.isVisible() and box.isEnabled()
+_fixtures.fake_busy(objs["Splatting"], True); pump(0.4)
+check("...Splatting's job running: still there and can be clicked", _usable(_skt),
+      f"visible {_skt.isVisible()}, enabled {_skt.isEnabled()}")
+_fsrc = find_all(_sp, lambda c: c.objectName() == "flipFront", [])
+check("...while the rest of the preview's controls stay locked", bool(_fsrc) and not _fsrc[0].isEnabled())
+shell.setProperty("glassesKeepTracking", True); pump(0.1)
+_c = _skt.mapToScene(QPointF(14, _skt.height() / 2))
+QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(_c.x()), int(_c.y()))); pump(0.3)
+check("...a click turns it off, and the hub lets the camera go", shell.property("glassesKeepTracking") is False and hub._keep is False)
+_fixtures.fake_busy(objs["Splatting"], False); pump(0.4)
+check("...the preview's controls back after the job", _fsrc[0].isEnabled())
+shell.setProperty("glassesKeepTracking", True); pump(0.1)       # as the steps after expect
 shell.setProperty("splatFlipFront", _sf[0]); shell.setProperty("splatFlipBack", _sf[1]); pump(0.3)
 mpage = page(3)
 

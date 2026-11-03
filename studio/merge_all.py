@@ -277,6 +277,38 @@ def scan(base: str) -> Dict:
             "scenes": scenes, "missing": missing_rows, "total": len(scenes)}
 
 
+def scan_folder(folder: str) -> Dict:
+    """No project open (a tester, 2026-11-03): the merged outputs in `folder` -- Merging's
+    Output folder, any subfolder -- one per scene as scan() picks them, in scene-number
+    order. There is no scene list to hold them against, so none is "missing"; a scene with
+    only one eye's file is left out and named in "skipped"."""
+    if not folder or not os.path.isdir(folder):
+        return {"error": "No project is open, so Merge All joins the merged clips in Merging's Output folder"
+                         " -- and that folder isn't there:\n" + str(folder or "(not set)")}
+    index = _merged_index(folder)
+    stems = {}
+    for key, entries in index.items():
+        m = MERGED_RE.match(os.path.basename(entries[0]["path"]))
+        stems[m.group("stem") if m else key] = entries
+    scenes: List[dict] = []
+    skipped: List[str] = []
+    for stem in _order(list(stems)):
+        kind, files, note = _pick_output(stems[stem], None)
+        if kind is None:
+            skipped.append(f"{stem} ({note})" if note else stem)
+            continue
+        scenes.append({"chapter": 1, "chapterName": "", "stem": stem, "source": "", "kind": kind,
+                       "files": [f.replace("\\", "/") for f in files]})
+    if not scenes:
+        return {"error": "No project is open, so Merge All joins the merged clips in Merging's Output folder"
+                         " -- and there are none in\n" + folder + "\n\nMerged clips are named "
+                         "<clip>_<width>_merged_full_sbs (or _half_sbs, or an _L / _R pair)."}
+    return {"base": folder.replace("\\", "/"), "name": os.path.basename(os.path.normpath(folder)),
+            "mergedRoot": folder.replace("\\", "/"), "plain": True, "skipped": skipped,
+            "chapters": [{"num": 1, "name": "", "scenes": len(scenes), "missing": 0}],
+            "scenes": scenes, "missing": [], "total": len(scenes)}
+
+
 def send_plan(scene: Dict) -> Dict:
     """What loads a missing scene into the stage it still needs: {"stage",
     "index", "clip", "input", "fields"} for that controller's loadSent -- for

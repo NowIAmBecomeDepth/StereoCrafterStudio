@@ -140,6 +140,8 @@ Item {
     // ---- engine switch: v1's sub-tab strip -----------------------------------
     StageTabBar {
         id: engineSwitch
+        objectName: "inpEngineSwitch"
+        subTabs: true          // the glow-dot row (StageTabBar.subTabs)
         x: 14
         y: 0
         implicitHeight: 34

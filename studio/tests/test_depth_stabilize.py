@@ -65,6 +65,33 @@ class StabiliseTest(unittest.TestCase):
         self.assertLess(float(np.abs(out - out[0]).max()), 0.01)
 
 
+class NothingFitsTheWidestTest(unittest.TestCase):
+    """User, 2026-11-02, ch.35 goblinbridgeattack00145362: after a close pass DepthCrafter redrew the
+    background, so no frame looked like the clip's usual scene, spread alone picked a frame in the closing
+    whip pan, nothing fitted it and Stabilize held 206 of 220 frames. Here: a drifting scene, a redrawn one
+    after it, and a last frame with the widest spread that is neither."""
+
+    def setUp(self):
+        n, half = 100, 50
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        a, b = 0.1 + 0.4 * xx / W, 0.5 - 0.4 * xx / W                # the redraw: its slope reversed
+        d = np.empty((n, H, W), np.float32)
+        for t in range(n):
+            d[t] = (a if t < half else b) * (1.0 + 0.5 * t / n)       # both drifting
+        d[n - 1] = np.random.default_rng(0).random((H, W)) * 3.0      # the whip: widest, fits nothing
+        self.d, self.n = d, n
+
+    def test_the_reference_is_one_the_clip_fits(self):
+        ref = DS._auto_reference_index(self.d, 4)
+        self.assertNotEqual(ref, self.n - 1)
+        g, o, st = DS.solve_affine_series(self.d)
+        self.assertLessEqual(st["frames_held"], self.n // 2 + 1, f"reference {st['reference_index']}")
+        out = DS.apply_affine_series(self.d.copy(), g, o)
+        part = slice(0, 50) if ref < 50 else slice(50, 99)            # the reference's part is steady
+        means = out[part].mean(axis=(1, 2))
+        self.assertLess(float(means.max() / means.min()), 1.02)
+
+
 class AutoTopTest(unittest.TestCase):
     """Percentile Output Norm's Auto Top (user, 2026-10-12): the range from the usual frames only, so
     the brief close pass clips to white and the scene keeps the range; without a pass, unchanged."""

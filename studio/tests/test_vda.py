@@ -226,5 +226,49 @@ class CatalogTest(unittest.TestCase):
             self.assertFalse(C.MODELS_BY_KEY[key].gated)
 
 
+class SpeedTest(unittest.TestCase):
+    """The page's fps and time left (user, 2026-11-01): the console's progress line's numbers, sent on."""
+
+    def test_the_ticker_sends_fps_and_seconds_left(self):
+        from unittest import mock
+        from studio.stages.vda import runner as R
+
+        class Hooks(R.Hooks):
+            def __init__(self):
+                self.speeds = []
+
+            def speed(self, fps, left):
+                self.speeds.append((fps, left))
+
+        h = Hooks()
+        with mock.patch.object(R.time, "monotonic", return_value=100.0):
+            t = R._Ticker(h, 300, "depth")
+        self.assertEqual(h.speeds[-1], (0.0, -1.0), "not known before a frame")
+        with mock.patch.object(R.time, "monotonic", return_value=110.0):
+            t(100)                                      # 100 frames in 10 s
+            line = t.bar_text(100)
+        fps, left = h.speeds[-1]
+        self.assertAlmostEqual(fps, 10.0)
+        self.assertAlmostEqual(left, 20.0)              # 200 frames to go at 10 fps
+        self.assertIn("10.0 fps, 0:20 left", line)      # the console's line says the same
+        with mock.patch.object(R.time, "monotonic", return_value=130.0):
+            t(300)
+        self.assertEqual(h.speeds[-1][1], 0.0, "nothing left at the end")
+
+    def test_the_page_reads_them_while_a_job_runs(self):
+        from studio.stages.vda.controller import VdaController
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.instance() or QCoreApplication([])
+        c = VdaController.__new__(VdaController)
+        c._task, c._speed = "batch", (12.34, 102.0)
+        self.assertAlmostEqual(VdaController.fps.fget(c), 12.34)
+        self.assertEqual(VdaController.timeLeft.fget(c), "1:42")
+        c._speed = (12.34, -1.0)
+        self.assertEqual(VdaController.timeLeft.fget(c), "", "not known yet: nothing shown")
+        c._task, c._speed = "", (12.34, 102.0)
+        self.assertEqual(VdaController.fps.fget(c), 0.0, "idle: no speed")
+        self.assertEqual(VdaController.timeLeft.fget(c), "")
+
+
 if __name__ == "__main__":
     unittest.main()

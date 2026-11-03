@@ -48,6 +48,16 @@ HELP: Dict[str, str] = {
     "mask_folder": (
         "The clips' splats from Splatting (<clip>_<width>_splatted2...), here or in its finished folder: each "
         "one's mask says how wide the strip at the frame's edge is, row by row."),
+    "inpainter": (
+        "What paints the strip. MiniMax-Remover (the default): tested against ROSE on eight shots with their "
+        "edge hidden, its fill met the picture beside it more closely on all eight and flickered less on "
+        "seven, the most on pans, in about 2.6x less time; it runs its own 6 steps and blanks the strip "
+        "itself, so Steps and Pre-fill are ROSE's only. Needs MiniMax-Remover in Settings > Studio > Models "
+        "(2.6 GB); its weights are for non-commercial use only (CC-BY-NC-4.0). ROSE: the inpainter Edge Fill "
+        "began with (set up in the Depth Map Editor's Erase)."),
+    "mmr_steps": (
+        "MiniMax-Remover's denoising steps per window. 6 (the default) scored a little better than 12 on the "
+        "eight test shots and takes about 60% of 12's time; 12 is the authors' own example."),
     "steps": (
         "ROSE's denoising steps per window. 6 matched 50 when tested; fewer is faster but loses fine detail "
         "(3-4 softened a wall's ridges)."),
@@ -70,8 +80,8 @@ HELP: Dict[str, str] = {
         "(and filled). Tick this to look at the right eye's right edge too, for a clip whose strip really "
         "is on that side. The strips are measured again when you change it."),
     "detail": (
-        "Sharpens ROSE's fill to the picture's own fine detail. ROSE works the edge smaller than the frame, "
-        "so its fill comes back softer; the strength is measured per clip where ROSE repainted real picture "
+        "Sharpens the Inpainter's fill to the picture's own fine detail. It works the edge smaller than the frame, "
+        "so its fill comes back softer; the strength is measured per clip where it repainted real picture "
         "(the band just past the strip) and is only used when the fill really is softer."),
     "copy_frames": (
         "Before ROSE paints, copies the real picture into the strip from the frames where a pan or a move "
@@ -79,7 +89,7 @@ HELP: Dict[str, str] = {
         "no frame shows. A still shot shows nothing new: Edge Fill sees that in a few seconds and leaves "
         "the strip to ROSE. Needs SEA-RAFT (Settings > Studio > Models, 79 MB); about 0.8 s a frame."),
     "fill": (
-        "Refills the strip at the edge of each ticked clip with ROSE. Each clip's files are written again in "
+        "Refills the strip at the edge of each ticked clip with the Inpainter. Each clip's files are written again in "
         "their own format with only the strip changed. The originals are kept in edge_fill_originals beside "
         "them, and filling a clip again starts from its original (the once-filled file goes to the Recycle "
         "Bin); delete that folder once you're happy with the fills."),
@@ -105,7 +115,7 @@ class EdgeFillController(QObject):
     toast = Signal(str, str, str)
     message = Signal(str, str, str)
     fieldRejected = Signal(str)
-    #: the folder's clips: {"folder", "masks", "clips": [...], "rose"} or {"error"}
+    #: the folder's clips: {"folder", "masks", "clips": [...], "rose", "minimax"} or {"error"}
     scanned = Signal("QVariantMap")
     #: one clip's strip, measured for the grid: {name, px, eyeWidth, frame, eye, edge, thumb, part}
     measured = Signal("QVariantMap")
@@ -181,6 +191,8 @@ class EdgeFillController(QObject):
     help = Property("QVariantMap", lambda self: HELP, constant=True)
     sizes = Property("QVariantList", lambda self: list(S.SIZES), constant=True)
     prefills = Property("QVariantList", lambda self: list(S.PREFILLS), constant=True)
+    inpainters = Property("QVariantList", lambda self: list(S.INPAINTERS), constant=True)
+    mmrSteps = Property("QVariantList", lambda self: list(S.MMR_STEPS), constant=True)
 
     def _values(self) -> Dict[str, Any]:
         return {k: self._map.value(k) for k in self._map.keys()}
@@ -383,7 +395,7 @@ class EdgeFillController(QObject):
         both = bool(self._values().get("both_edges", False))     # the right eye's right edge too
 
         def run():
-            from core.removal import edge_fill, rose_env
+            from core.removal import edge_fill, minimax_env, rose_env
             measure = []
             try:
                 if merged and os.path.isdir(merged):
@@ -411,7 +423,7 @@ class EdgeFillController(QObject):
                                       # its hi-res splat, for "Open Hi-Res Splat in Explorer" (user, 2026-10-18)
                                       "mask": mask.replace("\\", "/") if mask else ""})
                     info = {"folder": merged.replace("\\", "/"), "masks": masks.replace("\\", "/"), "clips": clips,
-                            "rose": rose_env.ready()}
+                            "rose": rose_env.ready(), "minimax": minimax_env.available()}
                     if not clips:
                         info = {"error": f"No merged clips (Full SBS or _L / _R) in:\n{merged}"}
             except Exception as e:
@@ -505,7 +517,7 @@ class EdgeFillController(QObject):
     def fillClip(self, path, merged, masks) -> None:
         """Merging's Upcoming Jobs right-click (user, 2026-10-14): fill the edges of the merged
         clip made from inpainted clip `path`, in `merged` with its splat in `masks`, now."""
-        from core.removal import edge_fill, rose_env
+        from core.removal import edge_fill, minimax_env, rose_env
         if self._busy:
             self.toast.emit("warning", "Edge Fill is busy", "Wait for its job to finish, then try again.")
             return
@@ -526,7 +538,11 @@ class EdgeFillController(QObject):
         if edge_fill.find_mask(g, masks) is None:
             self.toast.emit("warning", "No splat mask", f"{g.name}: its splat mask isn't in the Mask folder.")
             return
-        if not rose_env.ready():
+        if S.coerce("inpainter", self._values().get("inpainter")) == "MiniMax-Remover":
+            if not minimax_env.available():
+                self.toast.emit("warning", "MiniMax-Remover isn't downloaded", minimax_env.missing_message())
+                return
+        elif not rose_env.ready():
             self.toast.emit("warning", "ROSE isn't set up", "Depth Map Editor > Erase > Set Up ROSE first.")
             return
         if edge_fill.done(g):
@@ -554,6 +570,9 @@ class EdgeFillController(QObject):
         copy_frames = bool(v.get("copy_frames", True))
         height = S.height(v.get("size"))
         prefill = S.coerce("prefill", v.get("prefill"))
+        inpainter = S.coerce("inpainter", v.get("inpainter"))
+        if inpainter == "MiniMax-Remover":           # its own Steps: 6 or 12
+            steps = int(S.coerce("mmr_steps", v.get("mmr_steps")))
         # an H.264 / H.265 clip is written again with Merging's encoder settings (app.py sets .merging)
         merging = getattr(self, "merging", None)
         enc = merging._values() if merging is not None else {}
@@ -586,7 +605,9 @@ class EdgeFillController(QObject):
             # and Inpainting's): reading the edges, then each ROSE window's steps (erase.step_bar,
             # as ROSE reports them), then the blend and the files written. fill()'s progress:
             # 0-0.08 reading, ROSE up to 0.75, then the rest.
-            STRETCH = {"read": (0.0, 0.08, "Reading edges"), "finish": (0.75, 1.0, "Blend + write")}
+            # Copy From Other Frames its own bar (2026-11-03: its lines drew in "Blend + write")
+            STRETCH = {"read": (0.0, 0.08, "Reading edges"), "copy": (0.08, 0.25, "Copy from frames"),
+                       "finish": (0.75, 1.0, "Blend + write")}
             bar = {"open": False, "phase": None, "t0": 0.0}
 
             def end_bar():
@@ -598,7 +619,11 @@ class EdgeFillController(QObject):
                     bar["open"] = False
 
             def phase_of(frac, text):
-                return "rose" if text.startswith("ROSE") else ("read" if frac < 0.08 else "finish")
+                if text.startswith(("ROSE", "MiniMax")):
+                    return "rose"
+                if text.startswith("Copy From Other Frames"):
+                    return "copy"
+                return "read" if frac < 0.08 else "finish"
 
             def draw_bar(frac, text):
                 try:                               # a console that can't show the bar never ends the fill
@@ -623,7 +648,9 @@ class EdgeFillController(QObject):
                 bar["open"] = part < 1
 
             size = str(v.get("size") or "").split(" ")[0] or str(height)
-            logger.info(f"=== Edge Fill: {len(names)} clip(s); {steps} steps, size {size}, pre-fill {prefill.lower()}, "
+            how = (f"MiniMax-Remover, {steps} steps, size {size}" if inpainter == "MiniMax-Remover"
+                   else f"{steps} steps, size {size}, pre-fill {prefill.lower()}")
+            logger.info(f"=== Edge Fill: {len(names)} clip(s); {how}, "
                         f"grain {'on' if grain else 'off'}, detail {'on' if detail else 'off'} ===")
             try:
                 from studio.gpu_jobs import wait_for_gpu
@@ -656,7 +683,7 @@ class EdgeFillController(QObject):
                     try:
                         r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain, settings=enc,
                                            rose_height=height, detail=detail, both_edges=both_edges,
-                                           prefill=prefill, copy_frames=copy_frames)
+                                           prefill=prefill, copy_frames=copy_frames, inpainter=inpainter)
                     except Stopped:
                         end_bar()
                         logger.info(f"  Stopped: {name} is as it was.")

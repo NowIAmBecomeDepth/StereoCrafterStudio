@@ -79,6 +79,7 @@ class SidecarConfigManager:
         "rain_spread": (float, None),
         "rain_spacing": (float, None),
         "rain_conv": (float, None),
+        "rain_flow": (str, None),
     }
 
     #: Keys whose GUI value stays as it is when a sidecar doesn't have them
@@ -86,7 +87,7 @@ class SidecarConfigManager:
     KEEP_GUI_WHEN_MISSING = frozenset({"rain_mode", "rain_any_direction", "rain_depth", "rain_amount", "rain_layers",
                                        "rain_strands", "rain_lights", "rain_pop", "rain_preset", "rain_guard",
                                        "rain_particle", "rain_placement", "rain_grow", "rain_reflections",
-                                       "rain_spread", "rain_spacing", "rain_conv",
+                                       "rain_spread", "rain_spacing", "rain_conv", "rain_flow",
                                        "submask_grow", "submask_soften", "submask_clean", "submask_conv"})
 
     def _get_defaults(self) -> dict:

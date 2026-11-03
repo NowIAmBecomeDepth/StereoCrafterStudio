@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import string
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -34,6 +35,52 @@ def _inside(child: str, parent: str) -> bool:
 
 VIDEO = ("mp4", "mkv", "mov", "avi", "webm", "m4v", "flv")
 MAX_ENTRIES = 400
+#: Search (the Explorer view's box) stops after this many hits.
+SEARCH_MAX = 300
+
+
+def size_text(n: int) -> str:
+    """A size as Explorer writes it: 812 KB, 4.2 MB, 1.3 GB."""
+    if n < 1024:
+        return f"{n} bytes"
+    v = float(n)
+    for unit in ("KB", "MB", "GB", "TB"):
+        v /= 1024.0
+        if v < 1024 or unit == "TB":
+            return f"{v:,.0f} {unit}" if v >= 10 else f"{v:,.1f} {unit}"
+    return ""
+
+
+def _kind(ext: str) -> str:
+    """Explorer's Type column for a file of extension `ext` (upper case, no dot)."""
+    if not ext:
+        return "File"
+    return f"{ext} Video" if ext.lower() in VIDEO else f"{ext} File"
+
+
+def _date(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
+
+
+def _counts(path: str):
+    """(folders, clips) in `path`, from its first 2000 entries."""
+    sub = clips = 0
+    try:
+        with os.scandir(path) as it:
+            for i, f in enumerate(it):
+                if i > 2000:
+                    break
+                try:
+                    if f.is_dir():
+                        if not _hidden(f.name):
+                            sub += 1
+                    elif f.name.rsplit(".", 1)[-1].lower() in VIDEO:
+                        clips += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return sub, clips
 
 
 def natural(s: str):
@@ -163,6 +210,109 @@ class FolderBrowser(QObject):
     def parentOf(self, path: str) -> str:
         p = Path(path) if path else None
         return str(p.parent) if p and p.parent != p else ""
+
+    # ---- the Explorer view (user, 2026-10-31: prototypes/explorer_lab's "Explorer+Preview") ----
+
+    @Slot(str, "QVariantList", str, str, bool, result="QVariantList")
+    def entries(self, path: str, types, search: str, sort_key: str, ascending: bool):
+        """The open folder's folders, then its clips (of `types`, no dot; empty: video): name, path,
+        isDir, date, type, size, and for a folder how many folders and clips it holds. `search`
+        looks through this folder and the ones under it instead, as Explorer's search box does
+        (SEARCH_MAX hits at most). Sorted by `sort_key` (name, modified, type, size), folders first."""
+        exts = tuple(str(t).lower().lstrip(".") for t in (types or [])) or VIDEO
+        needle = str(search or "").strip().lower()
+        out = []
+
+        def item(e, where=""):
+            try:
+                is_dir = e.is_dir()
+                if not is_dir and e.name.rsplit(".", 1)[-1].lower() not in exts:
+                    return None
+                st = e.stat()
+            except OSError:
+                return None
+            ext = e.name.rsplit(".", 1)[-1].upper() if "." in e.name else ""
+            d = {"name": e.name, "path": e.path, "isDir": is_dir, "where": where, "mtime": st.st_mtime,
+                 "modified": _date(st.st_mtime), "type": "File folder" if is_dir else _kind(ext),
+                 "size": 0 if is_dir else st.st_size, "sizeText": "" if is_dir else size_text(st.st_size),
+                 "dirs": 0, "clips": 0}
+            if is_dir:
+                d["dirs"], d["clips"] = _counts(e.path)
+            return d
+
+        try:
+            if needle:
+                base = os.path.normcase(os.path.abspath(path))
+                for top, dnames, _ in os.walk(path):
+                    dnames[:] = [n for n in dnames if not _hidden(n)]
+                    rel = os.path.relpath(top, path) if os.path.normcase(os.path.abspath(top)) != base else ""
+                    with os.scandir(top) as it:
+                        for e in it:
+                            if not _hidden(e.name) and needle in e.name.lower():
+                                d = item(e, rel)
+                                if d:
+                                    out.append(d)
+                    if len(out) >= SEARCH_MAX:
+                        break
+            else:
+                with os.scandir(path) as it:
+                    for e in it:
+                        if not _hidden(e.name):
+                            d = item(e)
+                            if d:
+                                out.append(d)
+                                if len(out) >= MAX_ENTRIES * 2:
+                                    break
+        except OSError:
+            return []
+        keys = {"modified": lambda d: d["mtime"], "type": lambda d: (d["type"].lower(), natural(d["name"])),
+                "size": lambda d: (d["size"], natural(d["name"]))}
+        key = keys.get(sort_key, lambda d: natural(d["name"]))
+        rev = not ascending
+        return (sorted((d for d in out if d["isDir"]), key=key, reverse=rev)
+                + sorted((d for d in out if not d["isDir"]), key=key, reverse=rev))
+
+    @Slot(str, result="QVariantMap")
+    def details(self, path: str):
+        """The preview pane's lines for a clip or a folder ({} when it isn't there)."""
+        try:
+            st = os.stat(path)
+        except (OSError, ValueError):
+            return {}
+        name = os.path.basename(os.path.normpath(path)) or path
+        when = datetime.fromtimestamp(st.st_mtime).strftime("%d %B %Y, %H:%M")
+        if os.path.isdir(path):
+            dirs, clips = _counts(path)
+            size = 0
+            if clips:
+                try:
+                    with os.scandir(path) as it:
+                        for i, e in enumerate(it):
+                            if i > 2000:
+                                break
+                            if e.name.rsplit(".", 1)[-1].lower() in VIDEO:
+                                try:
+                                    size += e.stat().st_size
+                                except OSError:
+                                    pass
+                except OSError:
+                    pass
+            return {"name": name, "kind": "File folder", "dir": True, "dirs": dirs, "clips": clips,
+                    "sizeText": size_text(size) if clips else "", "modified": when}
+        ext = name.rsplit(".", 1)[-1].upper() if "." in name else ""
+        return {"name": name, "kind": _kind(ext), "dir": False,
+                "sizeText": size_text(st.st_size), "modified": when, "where": os.path.dirname(path)}
+
+    @Slot(str, result=str)
+    def resolve(self, typed: str) -> str:
+        """A path typed or pasted into the address bar, quotes and all; "" when it isn't there."""
+        t = str(typed or "").strip().strip('"').strip()
+        if not t:
+            return ""
+        t = os.path.expandvars(os.path.expanduser(t))
+        if len(t) == 2 and t[1] == ":":
+            t += "\\"
+        return os.path.normpath(t) if os.path.exists(t) else ""
 
     @Slot(str, str, result=str)
     def join(self, folder: str, name: str) -> str:

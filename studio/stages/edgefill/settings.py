@@ -17,6 +17,11 @@ STRINGS: Dict[str, str] = {
     "size": "560 (sharper texture)",
     # Pre-fill (user, 2026-10-26): what ROSE sees under its mask -- it isn't blanked
     "prefill": "Blur",
+    # Inpainter (user, 2026-11-03): MiniMax-Remover (core/removal/minimax_env.py; the default: "Make it the
+    # default"), or ROSE
+    "inpainter": "MiniMax-Remover",
+    # MiniMax-Remover's steps (user, 2026-11-03: "add the 12 step on to the minimax options"): 6 or 12
+    "mmr_steps": "6",
 }
 INTS: Dict[str, int] = {
     "steps": 6,                # ROSE's denoising steps per window
@@ -42,6 +47,10 @@ TILE_RANGE = (120, 420)
 #: Blur: a wide blur from beside the strip (erase.prefill_frames); Stretched: the last good column
 #: across it, as before 2026-10-26 (it came back as horizontal streaks)
 PREFILLS = ["Blur", "Stretched"]
+#: what paints the strip (core/removal/edge_fill.INPAINTERS)
+INPAINTERS = ["MiniMax-Remover", "ROSE"]
+#: MiniMax-Remover's steps (core/removal/minimax_env.STEP_CHOICES)
+MMR_STEPS = ["6", "12"]
 
 
 def height(value: Any) -> int:
@@ -69,6 +78,10 @@ def coerce(key: str, value: Any) -> Any:
             return value if value in SIZES else SIZES[0]
         if key == "prefill":
             return value if value in PREFILLS else PREFILLS[0]
+        if key == "inpainter":
+            return value if value in INPAINTERS else STRINGS["inpainter"]
+        if key == "mmr_steps":
+            return str(value) if str(value) in MMR_STEPS else STRINGS["mmr_steps"]
         if key in STRINGS:
             return str(value)
     except (TypeError, ValueError, OverflowError):      # "inf" (bug sweep 2026-10-14)

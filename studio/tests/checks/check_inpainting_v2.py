@@ -279,7 +279,8 @@ menu = page.property("stageMenus").property(0).toQObject()
 from PySide6.QtCore import QObject
 item = None
 for ch in menu.findChildren(QObject):
-    if ch.property("text") == "Use Sage Attention (for V2)" and ch.metaObject().indexOfSignal("triggered()") >= 0:
+    _t = str(ch.property("text") or "")     # "Use " + Theme.sageName + " (for V2)" since SageAttention 1 (f35c5f3)
+    if _t.startswith("Use SageAttention") and _t.endswith("(for V2)") and ch.metaObject().indexOfSignal("triggered()") >= 0:
         item = ch
 v1_sage = ipst.property("use_sageattention")
 check("(for V2) item present", item is not None)

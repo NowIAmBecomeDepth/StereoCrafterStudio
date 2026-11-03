@@ -143,6 +143,21 @@ class DamagedClipTest(unittest.TestCase):
         from core.scenecut.frames import autoshot_frame_generator
         self.assertEqual(self.read_all(autoshot_frame_generator), [120])
 
+    def test_the_reader_gets_frames_from_the_real_ffmpeg(self):
+        """2026-11-03: -fps_mode (2e95a8c, for -vsync) went in before -i, where it's an input option; FFmpeg
+        opened nothing and AutoShot "received no frames" on every clip. The stand-in above never saw it."""
+        import os
+        import subprocess
+        import tempfile
+        from core.scenecut import detection
+        from core.scenecut.frames import autoshot_frame_generator
+        with tempfile.TemporaryDirectory() as d:
+            clip = os.path.join(d, "bars.mp4")
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=96x54:rate=24:duration=1",
+                            "-pix_fmt", "yuv420p", clip], check=True)
+            for gen in (autoshot_frame_generator, detection._autoshot_frame_generator):
+                self.assertEqual(sum(len(c) for c in gen(clip)), 24, gen.__module__)
+
     def test_the_engine_reads_with_it_and_so_does_omnishot(self):
         from core.scenecut import detection, frames
         from studio.stages.scenecut import engine
@@ -373,11 +388,14 @@ class FailedSceneTest(unittest.TestCase):
         binned = Path(tmp.name) / "bin"
         binned.mkdir()
         for k in (1, 2):
-            (out / f"v-Scene-00{k}.mp4").write_bytes(b"old cut")
+            (out / f"v-Scene-000{k}.mp4").write_bytes(b"old cut")
+        # a cut from before 4-digit numbers (a tester, 2026-11-03): its clip goes, or
+        # Scene-001 sat beside this run's Scene-0001
+        (out / "v-Scene-001.mp4").write_bytes(b"3-digit cut")
 
         def ffmpeg(cmd, **kw):               # scene 2 fails; the rest write their .part
             target = str(cmd[-1])
-            if "Scene-002" in target:
+            if "Scene-0002" in target:
                 return subprocess.CompletedProcess(cmd, 1, "", "nvenc: OpenEncodeSessionEx failed")
             Path(target).write_bytes(b"new cut")
             return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -399,10 +417,12 @@ class FailedSceneTest(unittest.TestCase):
                 mock.patch.object(E, "send_to_recycle_bin", to_bin):
             cls._split_video(fake, "v.mp4", str(out), 24.0)
         self.assertEqual(fake._split_failed, 1)
-        self.assertEqual((out / "v-Scene-001.mp4").read_bytes(), b"new cut")
-        self.assertEqual((out / "v-Scene-003.mp4").read_bytes(), b"new cut")
-        self.assertFalse((out / "v-Scene-002.mp4").exists(), "the earlier cut's scene 2 was left")
-        self.assertTrue((binned / "v-Scene-002.mp4").exists())
+        self.assertEqual((out / "v-Scene-0001.mp4").read_bytes(), b"new cut", "4 digits")
+        self.assertEqual((out / "v-Scene-0003.mp4").read_bytes(), b"new cut")
+        self.assertFalse((out / "v-Scene-0002.mp4").exists(), "the earlier cut's scene 2 was left")
+        self.assertTrue((binned / "v-Scene-0002.mp4").exists())
+        self.assertFalse((out / "v-Scene-001.mp4").exists(), "the 3-digit cut's clip was left beside the new one")
+        self.assertTrue((binned / "v-Scene-001.mp4").exists())
 
 
 
@@ -442,8 +462,8 @@ class AutoCropTest(unittest.TestCase):
                                 "stream=width,height", "-of", "csv=p=0:s=x", str(out / name)],
                                capture_output=True, text=True)
             return r.stdout.strip()
-        self.assertEqual(size("movie-Scene-001.mp4"), "640x268", "the letterboxed shot, its bars cut")
-        self.assertEqual(size("movie-Scene-002.mp4"), "640x360", "the full-frame shot left whole")
+        self.assertEqual(size("movie-Scene-0001.mp4"), "640x268", "the letterboxed shot, its bars cut")
+        self.assertEqual(size("movie-Scene-0002.mp4"), "640x360", "the full-frame shot left whole")
 
     def test_on_the_gpu_nvdec_crops_as_it_decodes(self):
         # user, 2026-10-11: "do the cropped shots have to use cpu?" -- no: NVDEC's own
@@ -482,8 +502,8 @@ class AutoCropTest(unittest.TestCase):
                                 "stream=width,height,nb_read_frames", "-of", "csv=p=0:s=x", str(out / name)],
                                capture_output=True, text=True)
             return r.stdout.strip()
-        self.assertEqual(probe("movie-Scene-001.mp4"), "640x268x24", "cropped on the GPU, every frame")
-        self.assertEqual(probe("movie-Scene-002.mp4"), "640x360x24")
+        self.assertEqual(probe("movie-Scene-0001.mp4"), "640x268x24", "cropped on the GPU, every frame")
+        self.assertEqual(probe("movie-Scene-0002.mp4"), "640x360x24")
 
     def test_off_leaves_every_shot_whole(self):
         from core.scenecut import autocrop as AC

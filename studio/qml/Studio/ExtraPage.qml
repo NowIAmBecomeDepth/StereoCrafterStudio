@@ -31,6 +31,7 @@ Item {
 
     StageTabBar {
         id: toolSwitch
+        subTabs: true          // the glow-dot row (StageTabBar.subTabs)
         objectName: "extraSwitch"
         x: 14
         y: 0

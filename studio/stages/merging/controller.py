@@ -801,7 +801,9 @@ class MergingController(QObject):
             self.toast.emit("warning", "Merging is busy", "Wait for its job to finish, then try again.")
             return
         base = self._merge_base()
-        if not base:
+        # no project (a tester, 2026-11-03): the merged clips in the Output folder
+        plain = "" if base or self._shell.projectFolder else os.path.abspath(str(self._values().get("output_folder") or ""))
+        if not base and not plain:
             self.mergeAllScanned.emit({"error": "Which episode? Pick one of its chapters in Merging's chapter "
                                                 "list first: Merge All puts that episode together."})
             return
@@ -810,7 +812,7 @@ class MergingController(QObject):
 
         def run():
             try:
-                info = merge_all.scan(base)
+                info = merge_all.scan(base) if base else merge_all.scan_folder(plain)
                 if "error" not in info:
                     info["outputs"] = [p.replace("\\", "/") for p in merge_all.output_paths(info, opts)]
                     info["layout"] = opts["layout"]

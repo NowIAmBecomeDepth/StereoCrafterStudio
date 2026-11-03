@@ -522,6 +522,12 @@ class InpaintingV2Controller(QObject):
         self._runner_values.update(S.normalise(self._values()))
         if sage1.installed():   # Triton 3.2 (SageAttention 1, RTX 20) breaks Torch Compile: off, whatever was saved
             self._runner_values["use_compile"] = False
+        # FP8 Math (user, 2026-10-31): under MMGP streaming only, not with Torch Compile (the page hides
+        # each while the other is on; an older file with both ticked runs compiled, without FP8)
+        from studio.stages.inpainting_v2 import fp8_matmul
+        v = self._runner_values
+        fp8_matmul.set_enabled(bool(v.get("use_fp8_matmul")) and not v.get("use_compile")
+                               and str(v.get("offload_mode", "")).lower().startswith("mmgp"))
         if getattr(self, "_test", False):
             from studio import test_renders
             self._runner_values["output_folder"] = test_renders.folder(self._runner_values["output_folder"])

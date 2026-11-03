@@ -174,6 +174,7 @@ class _Plan:
         self.moves: List[Tuple[str, str]] = []      # (file, the folder it goes into)
         self.aside: List[str] = []                  # old copies, into a "replaced" folder beside them
         self.fields: Dict[str, str] = {}            # the stage before's settings
+        self.own: Dict[str, str] = {}               # this stage's, where it must read the rerun's output
         self.ticks: List[str] = []                  # its rows, once moved
         self.missing: List[str] = []                # clips whose inputs weren't found
         self.clips: List[str] = []                  # the clips sent
@@ -211,7 +212,8 @@ class _Plan:
         if error:
             return {"error": error, "target": target}
         return {"target": target, "title": TITLES.get(target, target), "moves": [list(m) for m in self.moves],
-                "aside": list(self.aside), "fields": dict(self.fields), "ticks": list(self.ticks),
+                "aside": list(self.aside), "fields": dict(self.fields), "own_fields": dict(self.own),
+                "ticks": list(self.ticks),
                 "missing": list(self.missing), "clips": list(self.clips), "single": dict(self.single),
                 "note": self.note}
 
@@ -318,6 +320,24 @@ def _to_splatting(p: _Plan, kind: str, names: List[str], values: Dict, tv: Dict)
         subs = [dep]
     here = _level(values.get("input_folder"))
     hires = _level(values.get("hires_blend_folder")) if kind == "inpainting" else ""
+    # A chapter picked once its clips were done reads each input where the clips are
+    # (chapter_paths.locate): this stage <splats>/lowres/finished, Splatting <source>/finished/
+    # finished. Splatting writes its new splats at the top of <out>/lowres and <out>/hires, so
+    # this stage is pointed back there, and every archived copy -- the level it read included --
+    # goes aside (a tester, 2026-11-02: the old splat was inpainted again, the new ones were
+    # never moved to finished/ and the clip never reached Merging).
+    archive = {}                                         # its folder -> the levels to set aside
+    for key, folder in (("input_folder", here), ("hires_blend_folder", hires)):
+        if not folder:
+            continue
+        base = _base(folder)
+        if not _same(base, folder) and _splat_output_for(folder) and os.path.isdir(base):
+            if not os.path.isfile(str(values.get(key) or "")):
+                p.own[key] = base
+            archive[folder] = below(base)
+        else:
+            archive[folder] = below(folder)
+    found = []
     for n in names:
         clip = _find(src_order, _source_match(n))
         depth, at = "", ""
@@ -329,6 +349,22 @@ def _to_splatting(p: _Plan, kind: str, names: List[str], values: Dict, tv: Dict)
         if not clip or not depth:
             p.missing.append(n)
             continue
+        found.append((n, clip, depth, at))
+    # ...and Splatting's own input there too: its source at <source>/finished/finished, the clip
+    # found right at that level is the archive Merging reads its original from. Splatting reads it
+    # from a level up, so its Resume move puts it back there, not a level deeper.
+    resume = bool(tv.get("move_to_finished", True))
+    lift = (resume and found and _base(src) != os.path.normpath(src)
+            and all(_same(os.path.dirname(c), src) for _n, c, _d, _a in found))
+    if lift:
+        src = os.path.dirname(src)
+        p.fields["input_source_clips"] = src
+        if not multi and _base(dep) != os.path.normpath(dep) and all(_same(a, dep) and _same(os.path.dirname(d), dep)
+                                                                    for _n, _c, d, a in found):
+            dep = os.path.dirname(dep)
+            p.fields["input_depth_maps"] = dep
+            found = [(n, c, d, dep) for n, c, d, _a in found]
+    for n, clip, depth, at in found:
         p.ticks.append(p.put(clip, src))
         p.put(depth, at)
         p.put_beside(src_order, src, [n + SIDECAR_EXT, n + "_submask.mp4"])
@@ -338,13 +374,17 @@ def _to_splatting(p: _Plan, kind: str, names: List[str], values: Dict, tv: Dict)
                          [f"{n}_depth{SIDECAR_EXT}"])
         if here:
             match = _splat_match(n)
-            p.set_aside(below(here), lambda d, x, match=match: match(d, x) or (
+            p.set_aside(archive[here], lambda d, x, match=match: match(d, x) or (
                 x.lower().endswith(".spsidecar") and match(d, os.path.splitext(x)[0] + ".mp4")))
         if hires and not _same(hires, here):
-            p.set_aside(below(hires), _splat_match(n))
+            p.set_aside(archive[hires], _splat_match(n))
     out = _splat_output_for(here) if here else ""
     if out and not _same(_level(tv.get("output_splatted")), out):
         p.fields["output_splatted"] = out
+    if p.own:
+        title = TITLES.get(kind, kind)
+        p.note = (f"{title} now reads " + " and ".join(os.path.normpath(v) for v in p.own.values())
+                  + ", where Splatting writes the new splats.")
     return ""
 
 

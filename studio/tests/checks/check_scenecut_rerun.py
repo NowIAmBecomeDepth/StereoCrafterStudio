@@ -5,7 +5,8 @@ the new set (it goes to the Recycle Bin -- stubbed here, so the user's bin is
 not touched), the Success message says so, and files that are not this
 clip's scenes are left alone. Configs and last_jobs.json redirected.
 """
-import os, sys, tempfile, hashlib, time, json, shutil, subprocess
+import os
+import re, sys, tempfile, hashlib, time, json, shutil, subprocess
 from pathlib import Path
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["QT_QPA_FONTDIR"] = "C:/Windows/Fonts"
@@ -79,6 +80,7 @@ check("...wrote three scenes", len(first) == 3, str(first))
 keep = [out / "other-Scene-009.mp4", out / "shots-Scene-004.mp4.txt", out / "shots-Scene-00x.mp4"]
 for p in keep:
     p.write_bytes(b"keep")
+(out / "shots-Scene-002.mp4").write_bytes(b"3-digit")   # a cut from before 4-digit numbers
 
 import studio.stages.scenecut.engine as E
 binned = []
@@ -91,9 +93,11 @@ messages.clear()
 check("the re-run (two shots)", run(sc, sc.start))
 if _saved is not None:
     E.send_to_recycle_bin = _saved
-second = sorted(p.name for p in out.glob("shots-Scene-[0-9][0-9][0-9].mp4"))
-check("...only this run's two scenes are left", second == ["shots-Scene-001.mp4", "shots-Scene-002.mp4"], str(second))
-check("...the stale one went to the Recycle Bin", binned == ["shots-Scene-003.mp4"], str(binned))
+# scenes only (digits, any count: a 3-digit one left behind shows): not the look-alikes kept above
+second = sorted(p.name for p in out.glob("shots-Scene-*.mp4") if re.fullmatch(r"shots-Scene-\d+\.mp4", p.name))
+check("...only this run's two scenes are left, 4 digits", second == ["shots-Scene-0001.mp4", "shots-Scene-0002.mp4"], str(second))
+check("...the stale one and the 3-digit one went to the Recycle Bin",
+      sorted(binned) == ["shots-Scene-0003.mp4", "shots-Scene-002.mp4"], str(binned))
 check("...look-alikes and other clips are untouched", all(p.read_bytes() == b"keep" for p in keep))
 said = [m for m in messages if m[0] == "info"]
 check("...the Success message says so", said and "Recycle Bin" in said[-1][2], str(messages))

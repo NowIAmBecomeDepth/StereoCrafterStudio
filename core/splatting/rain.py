@@ -187,6 +187,22 @@ WEB_PRESETS = ("strands", "orb")
 #: own depth where it is (smoothed, PLACE_SIGMA px at 1920), lifted toward the camera by its layer
 #: (the nearest by PLACE_LIFT of the scene's spread) -- sparks off something in the middle distance.
 PLACEMENTS = ("front", "place")
+#: Moving mode's optical flow (user, 2026-11-02: a dropdown to compare them in the preview): OpenCV's DIS on
+#: the CPU, or SEA-RAFT on the GPU (Edge Fill's checkpoint; rain_gpu._raft_flows). SEA-RAFT lined up more of
+#: the neighbours on the Super Hero Stalker clips (65-100% against 46-87%) and caught falling streaks DIS
+#: missed, at about 1.15x the time; the CPU extractor always uses DIS. raft_plain: SEA-RAFT without Relight
+#: and the texture test (user, 2026-11-02, ch.28 00115209: "no relight sea raft seems best").
+FLOWS = ("dis", "raft", "raft_plain")
+
+
+def uses_raft(s) -> bool:
+    """The settings ask for SEA-RAFT (either way)."""
+    return getattr(s, "flow", "dis") in ("raft", "raft_plain")
+
+
+def lit_guards(s) -> bool:
+    """Relight and the texture test run (RELIGHT / TEXTURE) -- not for Flow 'SEA-RAFT, no Relight'."""
+    return getattr(s, "flow", "dis") != "raft_plain"
 PLACE_SIGMA, PLACE_LIFT = 6.0, 0.25
 #: Depth (user, 2026-10-07: "so miniscule in how much it adjusts ... id like the slider being at 0
 #: to show the preview with 0 particle effects applied"): 0 = each particle at the scene's own
@@ -277,6 +293,7 @@ class RainSettings:
     spread: float = 1.0         # the distance between the layers (MAX_SPREAD)
     spacing: float = 1.0        # how they share it out: 1 even (SPACING_RANGE)
     conv: float = 0.0           # their own Convergence, from the scene's (MAX_CONV)
+    flow: str = "dis"           # Moving mode's optical flow: dis | raft | raft_plain (FLOWS)
 
     @property
     def on(self) -> bool:
@@ -286,7 +303,7 @@ class RainSettings:
     def from_values(cls, mode=None, any_direction=None, depth=None, amount=None, layers=None,
                     strands=None, pop=None, preset=None, guard=None, particle=None,
                     placement=None, grow=None, reflections=None, spread=None, spacing=None,
-                    conv=None, lights=None) -> "RainSettings":
+                    conv=None, lights=None, flow=None) -> "RainSettings":
         m = str(mode or "off").lower()
         try:
             n = int(round(float(layers if layers is not None else 3)))
@@ -314,7 +331,8 @@ class RainSettings:
                    reflections=False if reflections is None else _truthy(reflections),
                    spread=float(np.clip(_num(spread, 1.0), 0.0, MAX_SPREAD)),
                    spacing=float(np.clip(_num(spacing, 1.0), *SPACING_RANGE)),
-                   conv=float(np.clip(_num(conv, 0.0), -MAX_CONV, MAX_CONV)))
+                   conv=float(np.clip(_num(conv, 0.0), -MAX_CONV, MAX_CONV)),
+                   flow=str(flow).lower() if str(flow or "").lower() in FLOWS else "dis")
 
 
 def _num(v, default: float) -> float:
@@ -531,14 +549,15 @@ class RainExtractor:
             okF &= (mx >= 0) & (mx <= W - 1) & (my >= 0) & (my <= H - 1)
             stack.append(cv2.remap(window[k], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE))
             valid.append(okF)
-        if RELIGHT and not self.sparks:
+        if RELIGHT and not self.sparks and lit_guards(self.s):
             for i in range(1, len(stack)):
                 g = relight_gain(stack[0], stack[i], valid[i], self.scale)
                 if g is not None:
                     g = cv2.resize(g, (W, H), interpolation=cv2.INTER_LINEAR)
                     stack[i] = np.clip(stack[i].astype(np.float32) * g, 0, 255)
         self.last_texture = None                # the least any lined-up neighbour correlates
-        if TEXTURE and not self.sparks and len(stack) > 1 and getattr(self.s, "preset", "downpour") != "mist":
+        if TEXTURE and not self.sparks and lit_guards(self.s) and len(stack) > 1 \
+                and getattr(self.s, "preset", "downpour") != "mist":
             m = np.stack([texture_match(stack[0], stack[i], valid[i], self.scale) for i in range(1, len(stack))])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)          # nowhere lined up: nan
@@ -1047,7 +1066,7 @@ def preview_rain(engine, left_tensor, depth_tensor, params: dict):
         placement=_var(engine, "rain_placement_var", "front"), grow=_var(engine, "rain_grow_var", 0),
         reflections=_var(engine, "rain_reflections_var", False),
         spread=_var(engine, "rain_spread_var", 1.0), spacing=_var(engine, "rain_spacing_var", 1.0),
-        conv=_var(engine, "rain_conv_var", 0.0))
+        conv=_var(engine, "rain_conv_var", 0.0), flow=_var(engine, "rain_flow_var", "dis"))
     if not rs.on:
         _WEB_SCENE.clear()
         return None, None
@@ -1063,7 +1082,7 @@ def preview_rain(engine, left_tensor, depth_tensor, params: dict):
     H, W = int(left_tensor.shape[2]), int(left_tensor.shape[3])
     flip = bool(params.get("flip_horizontal", False))
     key = (_clip_key(pv), id(reader), idx, rs.mode, rs.any_direction, rs.strands, rs.lights, rs.preset, rs.particle,
-           rs.reflections, H, W, flip)
+           rs.reflections, rs.flow, H, W, flip)
     hit = _PREVIEW_CACHE.get(key)
     if hit is None:
         win_idx, centres = window_indices([idx], len(reader), radius_of(rs))

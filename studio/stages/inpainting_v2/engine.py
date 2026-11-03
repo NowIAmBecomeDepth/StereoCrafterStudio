@@ -850,6 +850,7 @@ def run_wan_pipeline(
     
     latents = torch.randn(1, c, f, h, w, device=DEVICE, dtype=DTYPE)
 
+    step_t0 = time.time()  # v2: each step's time on the console
     for i, t in enumerate(noise_scheduler.timesteps):
         if should_stop():
             raise InferenceCancelled()
@@ -865,6 +866,8 @@ def run_wan_pipeline(
         latents = noise_scheduler.step(model_pred, t, latents)
         if STEP_HOOK is not None:  # v2: the step to Studio's numbers
             STEP_HOOK(i + 1, len(noise_scheduler.timesteps))
+        logger.info("  Step %d/%d (%.1f s)", i + 1, len(noise_scheduler.timesteps), time.time() - step_t0)
+        step_t0 = time.time()
     
     return latents
 

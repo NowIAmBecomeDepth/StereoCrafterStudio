@@ -178,9 +178,25 @@ SEA_RAFT = Part("SEA-RAFT (spring-M)", "MemorySlices/Tartan-C-T-TSKH-spring540x9
                 "eb97ef34ba5d856c3fa2cdcd073150c057ac8b69", "SEA-RAFT",
                 (("model.safetensors", 78778760),), key="sea_raft", extras=(("README.md", 517),))
 
+#: MiniMax-Remover (Edge Fill's other inpainter; user, 2026-11-03): its weights, and the authors' two code
+#: files from their GitHub at a pinned commit -- downloaded, not shipped (the repository states no licence)
+MINIMAX = Part("MiniMax-Remover", "zibojia/minimax-remover", "889e41651d903bcef2d2aea307155812b6d326fd",
+               "MiniMax-Remover", (("scheduler/scheduler_config.json", 751), ("transformer/config.json", 422),
+                                  ("transformer/diffusion_pytorch_model.safetensors", 2254157576),
+                                  ("vae/config.json", 724), ("vae/diffusion_pytorch_model.safetensors", 507591892)),
+               key="minimax_remover", extras=(("README.md", 3603),))
+MINIMAX_PIPE = Part("MiniMax-Remover pipeline", "", "", "MiniMax-Remover",
+                    (("pipeline_minimax_remover.py", 6857),), key="minimax_pipeline",
+                    url="https://raw.githubusercontent.com/zibojia/MiniMax-Remover/28e12b450d8a72a7547b86940a4985e6ad90d75b/pipeline_minimax_remover.py",
+                    sha256="311ce5c4806f8252d87dc06108ac657c79baa51a0f5c8803bed35c9283791cff")
+MINIMAX_NET = Part("MiniMax-Remover transformer code", "", "", "MiniMax-Remover",
+                   (("transformer_minimax_remover.py", 10677),), key="minimax_transformer",
+                   url="https://raw.githubusercontent.com/zibojia/MiniMax-Remover/28e12b450d8a72a7547b86940a4985e6ad90d75b/transformer_minimax_remover.py",
+                   sha256="251aa2de588c9716ee1629270f079ca67cde72dc5948990cf6ddf6920ee769b1")
+
 PARTS: Dict[str, Part] = {p.key: p for p in (SVD, DEPTHCRAFTER, STEREOCRAFTER, WAN_VACE, STEREOCRAFTER2,
                                              STEREOCRAFTER2_FP8, SAM3, OMNISHOTCUT, DINOV3, SSCD,
-                                             VDA_S, VDA_B, VDA_L, SEA_RAFT)}
+                                             VDA_S, VDA_B, VDA_L, SEA_RAFT, MINIMAX, MINIMAX_PIPE, MINIMAX_NET)}
 
 #: The rows of the Models window, in the stages' order.
 MODELS: Tuple[Model, ...] = (
@@ -212,6 +228,12 @@ MODELS: Tuple[Model, ...] = (
           page="https://github.com/princeton-vl/SEA-RAFT", note="BSD 3-Clause.",
           tip="Optical flow: Edge Fill copies the real picture into the strip from frames where a pan or a move "
               "shows it, and ROSE fills only what no frame shows."),
+    Model("minimax_remover", "MiniMax-Remover", "Edge Fill (Inpainter)", (MINIMAX, MINIMAX_PIPE, MINIMAX_NET),
+          page="https://github.com/zibojia/MiniMax-Remover",
+          note="CC-BY-NC-4.0: non-commercial use only. Its two code files come from the authors' GitHub, "
+               "which states no licence.",
+          tip="Edge Fill's other inpainter: tested against ROSE on eight shots with their edge hidden, its fill "
+              "met the picture beside it more closely and flickered less, in about 2.6x less time."),
     Model("omnishotcut", "OmniShotCut", "Scene Cut", (OMNISHOTCUT,), page="https://huggingface.co/uva-cv-lab/OmniShotCut"),
     Model("transnetv2", "TransNetV2", "Scene Cut", kind="bundled", page="https://github.com/soCzech/TransNetV2",
           note="Comes with Studio's packages (transnetv2-pytorch)."),

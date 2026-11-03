@@ -502,6 +502,15 @@ class StudioShell(QObject):
             shortcuts = self._picker_shortcuts()
             shortcuts[index] = str(path or "")
             self._set_pref("picker_shortcuts", shortcuts)
+
+    # The folder picker's view (user, 2026-10-31: the Explorer design): Details, Tiles or Large icons,
+    # and whether the preview pane shows -- as it was left, in every picker
+    pickerView = Property(str, lambda self: self._pref("picker_view", "details")
+                          if self._pref("picker_view", "details") in ("details", "tiles", "icons") else "details",
+                          lambda self, v: self._set_pref("picker_view", v if v in ("details", "tiles", "icons") else "details"),
+                          notify=changed)
+    pickerPreview = Property(bool, lambda self: bool(self._pref("picker_preview", True)),
+                             lambda self, v: self._set_pref("picker_preview", bool(v)), notify=changed)
     # Merging's Shadow fold (its five shadow dials), closed by default.
     # Settings > Studio > Hide Beginner Mode Switch (user, 2026-10-11: for experts who
     # never use it). The header shows the switch anyway while the mode is on.

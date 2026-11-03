@@ -28,8 +28,8 @@ def autoshot_frame_generator(video_path: str, width: int = 48, height: int = 27)
     frame_size = width * height * 3
     cmd = [
         "ffmpeg", "-v", "error",
-        "-fps_mode", "passthrough",          # Force frame-exact passthrough
         "-i", video_path,
+        "-fps_mode", "passthrough",          # frame-exact; an output option, so after -i (2026-11-03)
         "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-s", f"{width}x{height}", "-"
     ]

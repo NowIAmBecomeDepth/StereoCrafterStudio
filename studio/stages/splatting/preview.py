@@ -46,7 +46,7 @@ CLIP_DIALS = {"submask_grow": "submask_grow", "submask_soften": "submask_soften"
               **{k: k for k in ("rain_mode", "rain_any_direction", "rain_depth", "rain_amount", "rain_layers",
                                 "rain_strands", "rain_lights", "rain_pop", "rain_preset", "rain_guard",
                                 "rain_particle", "rain_placement", "rain_grow", "rain_reflections",
-                                "rain_spread", "rain_spacing", "rain_conv")}}
+                                "rain_spread", "rain_spacing", "rain_conv", "rain_flow")}}
 
 #: Settings that never change the picture: no re-render when they move.
 #: (Folders change WHICH clips there are -- that is a reload, not a render.)
@@ -1150,6 +1150,11 @@ class SplattingPreview(QObject):
                 # with its clip, and an open reader would hold it
                 eng._preview_submask_reader = None
                 eng._preview_submask_path = None
+                try:
+                    from core.splatting import rain_gpu
+                    rain_gpu.release_flow()    # Rain's SEA-RAFT
+                except Exception:
+                    logger.debug("Could not release Rain's flow model", exc_info=True)
                 # an open editor lets go of its clip, or the batch cannot move
                 # it to finished/ (audit #29: Detect Text held it open)
                 for ed in list(getattr(self, "_editors", {}).values()):

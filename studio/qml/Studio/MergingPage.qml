@@ -152,8 +152,10 @@ Item {
     Shortcut { enabled: page.keysLive; sequence: "Shift+Right"; onActivated: page.pv.stepFrames(10) }
     Shortcut { enabled: page.keysLive; sequence: "Ctrl+Left"; onActivated: page.pv.step(-1) }
     Shortcut { enabled: page.keysLive; sequence: "Ctrl+Right"; onActivated: page.pv.step(1) }
-    Shortcut { enabled: page.keysLive; sequence: "Up"; onActivated: page.pv.step(1) }
-    Shortcut { enabled: page.keysLive; sequence: "Down"; onActivated: page.pv.step(-1) }
+    // Up the list to the clip above, Down to the one below, as Upcoming Jobs lists them (a tester,
+    // 2026-11-02: v1's Up = next clip ran against the list)
+    Shortcut { objectName: "clipUpShortcut"; enabled: page.keysLive; sequence: "Up"; onActivated: page.pv.step(-1) }
+    Shortcut { objectName: "clipDownShortcut"; enabled: page.keysLive; sequence: "Down"; onActivated: page.pv.step(1) }
     Shortcut { enabled: page.keysLive; sequence: "Space"; onActivated: page.pv.togglePlay() }
     Shortcut { enabled: page.keysLive; sequence: "Shift+Space"; onActivated: page.pv.toggleFastForward(page.ffStep) }
     Shortcut { enabled: page.keysLive; sequence: "Home"; onActivated: page.pv.seek(0) }   // first / last frame (2026-10-02)
@@ -855,20 +857,70 @@ Item {
                             parent: flick
                             enabled: previewPanel.pv.loaded && !Theme.modalOpen
                             acceptedModifiers: Qt.NoModifier
-                            onWheel: (e) => {
-                                const cur = parseFloat(String(page.st.preview_size)) || 100
-                                const step = e.angleDelta.y > 0 ? 1.12 : 1 / 1.12
-                                const next = Math.max(10, Math.min(250, Math.round(cur * step)))
-                                if (next === cur) return
-                                // keep the frame point under the pointer where it is (applied once
-                                // the picture has its new size -- see zoomAnchor below)
-                                zoomAnchor.fx = shown.width > 0 ? (flick.contentX + e.x - shown.x) / shown.width : 0.5
-                                zoomAnchor.fy = shown.height > 0 ? (flick.contentY + e.y - shown.y) / shown.height : 0.5
-                                zoomAnchor.vx = e.x; zoomAnchor.vy = e.y
-                                zoomAnchor.at = Date.now()
-                                page.previewFitOn = false
-                                page.st.preview_size = next + "%"
+                            onWheel: (e) => zoomAnchor.zoomBy(e.angleDelta.y > 0 ? 1.12 : 1 / 1.12, e.x, e.y)
+                        }
+                        // sideways (a touchpad's two fingers, a tilt wheel): through the frames. Its own
+                        // handler: a vertical one never sees a wheel that only goes sideways.
+                        WheelHandler {
+                            objectName: "previewSlideWheel"
+                            parent: flick
+                            enabled: previewPanel.pv.loaded && !Theme.modalOpen
+                            orientation: Qt.Horizontal
+                            acceptedModifiers: Qt.NoModifier
+                            onWheel: (e) => { if (Math.abs(e.angleDelta.x) > Math.abs(e.angleDelta.y)) frameSlide.by(e.angleDelta.x) }
+                        }
+                        // A sideways two-finger swipe over the preview slides through the frames (user,
+                        // 2026-10-31), as the frame slider does while held: the fingers left to right go
+                        // forward (user, 2026-10-31: the other way round was backwards), a frame for every `unitsPerFrame` of the
+                        // wheel's (120 a notch: a tilt wheel's click is three frames). Rendered the fast
+                        // way while it moves, then where it stops.
+                        QtObject {
+                            id: frameSlide
+                            readonly property int unitsPerFrame: 40
+                            property real acc: 0
+                            property int target: -1
+                            function by(dx) {
+                                const pv = previewPanel.pv
+                                if (!pv.loaded || pv.frameCount < 2) return
+                                acc += dx          // + x: the fingers moving left to right -- forward
+                                const n = acc > 0 ? Math.floor(acc / unitsPerFrame) : Math.ceil(acc / unitsPerFrame)
+                                if (n === 0) return
+                                acc -= n * unitsPerFrame
+                                const f = Math.max(0, Math.min(pv.frameCount - 1, (target >= 0 ? target : pv.frame) + n))
+                                if (!slideEnd.running) { if (pv.playing) pv.pause(); pv.setDragging(true) }
+                                slideEnd.restart()
+                                if (f === target) return
+                                target = f
+                                pv.seek(f)
                             }
+                        }
+                        Timer {
+                            id: slideEnd
+                            objectName: "frameSlideEnd"
+                            interval: 250
+                            onTriggered: {
+                                previewPanel.pv.setDragging(false)
+                                frameSlide.target = -1
+                                frameSlide.acc = 0
+                            }
+                        }
+                        // A trackpad's pinch (user, 2026-10-31): Windows sends it as the wheel with
+                        // Ctrl held, in small steps -- so as far as the fingers move, ~12% a notch's
+                        // worth, about the point between them. A mouse's Ctrl + wheel is the same.
+                        // studio/pinch.py lets it through to here only over pinchZoomArea while it
+                        // is on; anywhere else a pinch is the UI Scale.
+                        WheelHandler {
+                            objectName: "previewPinchWheel"
+                            parent: flick
+                            enabled: previewPanel.pv.loaded && !Theme.modalOpen
+                            acceptedModifiers: Qt.ControlModifier
+                            onWheel: (e) => zoomAnchor.zoomBy(Math.pow(1.12, e.angleDelta.y / 120), e.x, e.y)
+                        }
+                        Item {
+                            objectName: "pinchZoomArea"
+                            parent: flick
+                            anchors.fill: parent
+                            readonly property bool on: previewPanel.pv.loaded && !Theme.modalOpen
                         }
                         QtObject {
                             id: zoomAnchor
@@ -877,6 +929,23 @@ Item {
                             property real vx: 0
                             property real vy: 0
                             property double at: 0
+                            // the size a pinch is at before rounding (its small steps would round away)
+                            property real raw: 0
+                            // zoom by `step` about (x, y), a point in the Flickable
+                            function zoomBy(step, x, y) {
+                                const cur = parseFloat(String(page.st.preview_size)) || 100
+                                raw = Math.max(10, Math.min(250, (Math.abs(raw - cur) < 1 ? raw : cur) * step))
+                                const next = Math.round(raw)
+                                if (next === cur) return
+                                // keep the frame point under the pointer where it is (applied once
+                                // the picture has its new size -- see apply() below)
+                                fx = shown.width > 0 ? (flick.contentX + x - shown.x) / shown.width : 0.5
+                                fy = shown.height > 0 ? (flick.contentY + y - shown.y) / shown.height : 0.5
+                                vx = x; vy = y
+                                at = Date.now()
+                                page.previewFitOn = false
+                                page.st.preview_size = next + "%"
+                            }
                             function apply() {
                                 if (Date.now() - at > 2000) return
                                 flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, shown.x + fx * shown.width - vx))

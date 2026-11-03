@@ -677,8 +677,9 @@ def _autoshot_frame_generator(video_path: str, width: int = 48, height: int = 27
     frame_size = width * height * 3
     cmd = [
         "ffmpeg", "-v", "error",
-        "-fps_mode", "passthrough",  # Studio, 2026-10-30: -vsync is gone from newer FFmpeg builds
         "-i", video_path,
+        # Studio: after -i -- an output option (2026-11-03: before it FFmpeg opened nothing, AutoShot had no frames)
+        "-fps_mode", "passthrough",  # Studio, 2026-10-30: -vsync is gone from newer FFmpeg builds
         "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-s", f"{width}x{height}", "-"
     ]

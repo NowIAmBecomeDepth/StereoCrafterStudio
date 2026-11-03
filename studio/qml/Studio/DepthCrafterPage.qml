@@ -185,6 +185,7 @@ Item {
     // ---- engine switch: DepthCrafter | VDA (as Inpainting's V1 | V2) ----
     StageTabBar {
         id: engineSwitch
+        subTabs: true          // the glow-dot row (StageTabBar.subTabs)
         objectName: "dcEngineSwitch"
         x: 14
         y: 0

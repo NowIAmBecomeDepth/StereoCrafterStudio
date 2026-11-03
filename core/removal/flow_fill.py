@@ -19,7 +19,10 @@ What made it clean (each was a visible fault on the bench):
     frame per pixel left a patchwork with hard seams;
   * islands of copies under 400 px are dropped, holes under 400 px filled from around them;
   * steadying: each frame's strip is averaged with its +-2 neighbours', warped along the strip's flow,
-    and a pixel this frame missed takes theirs -- a letter went soft for one frame without it.
+    and a pixel this frame missed takes theirs -- a letter went soft for one frame without it;
+  * ...and from a neighbour's real picture only where its round trip held (STEADY_CHECK), a frame's
+    share faded out where its copy stops (SEAM), and no pixel copied from one far frame alone (SOLO):
+    a pole passing close to a moving car showed early, doubled and as a stray dark shape without them.
 A static shot (or one moving the wrong way) shows nothing new: a quick look at 8 frames first skips
 the pass when no copy would be made, so it costs seconds, not minutes.
 """
@@ -53,12 +56,27 @@ FB_ABS, FB_REL = 1.5, 0.05    # the round trip: within 1.5 px + 5% of the motion
 NEAR_DECAY = 6.0          # a frame d away weighs exp(-d / 6)
 SMALL = 400               # px: smaller islands of copies dropped, smaller holes filled from around them
 STEADY = 2                # frames each side the strip is steadied over
-FILL_FROM = 0.3           # the neighbours' share that fills a pixel this frame missed
+#: ...taking a neighbour's real picture only where its round trip holds, as the copies do (user,
+#: 2026-11-02, ch.1 smintroscenes00006103: a pole passing close was pasted a frame early at the
+#: background's speed -- a ghost, then a doubled pole); its own strip is still taken where it copied
+STEADY_CHECK = True
+#: px over which a frame's share fades out where its copy stops (its landing leaves the picture, its round
+#: trip nears the limit) -- a hard stop left a hard-edged shape in the average (user, 2026-11-02, ch.1
+#: smintroscenes00006103 frame 2: a dark parallelogram on the pavement, sharpened by Detail) (0: off)
+SEAM = 12.0
+#: a pixel only one frame shows is copied only from a frame this near; far frames count when two or more
+#: show it -- a lone far frame let an occluder through (user, 2026-11-02, ch.1 smintroscenes00006103: the
+#: pole at frame 14, 12 frames on, passed the round trip and was frame 2's whole copy: a dark shape) (0: off)
+SOLO = 4
+FILL_FROM = 0.3          # the neighbours' share that fills a pixel this frame missed
 LOOK_FRAMES = 8           # the quick look: frames tried...
 LOOK_OFFSETS = (24, 48)   # ...against these, each side
 LOOK_LEAST = 0.005        # ...and the share of their strips that must copy to run the pass
 ROSE_GROW = 13            # px: ROSE's mask grown past what no frame showed
 BATCH = 16                # flow pairs at once
+#: the least half-size side SEA-RAFT runs on (its correlation pyramid halves 1/8 size three times; a
+#: 160x96 crop failed in check_fill_edges, 2026-11-03)
+MIN_HALF = 128
 
 
 def weights_path() -> Path:
@@ -148,6 +166,10 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
     progress(lo + 0.05 * (hi - lo), "Copy From Other Frames: looking for motion")
 
     flow = _make_flow()
+    if not hasattr(flow, "between") and min(h2, w2) < MIN_HALF:   # SEA-RAFT itself fails that small
+        flow.release()
+        logger.info(f"  Copy From Other Frames: the {W}x{H} crop is too small for SEA-RAFT; the inpainter fills it all")
+        return None
     ys, xs = torch.meshgrid(torch.arange(H, device=dev, dtype=torch.float32),
                             torch.arange(W, device=dev, dtype=torch.float32), indexing="ij")
     ysm, xsm = ys[:, :M], xs[:, :M]
@@ -178,7 +200,7 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
         return F.grid_sample(img, torch.stack([gx, gy], -1), mode="bilinear", padding_mode="border",
                              align_corners=True)
 
-    def gather(t, ks, want_near=False):
+    def gather(t, ks, want_near=False, solo=False):
         """frame t's strip from frames ks: (sum of weighted pixels [3,H,M], weights [H,M], near flows)"""
         f_tk = flows([(t, k) for k in ks])
         f_kt = flows([(k, t) for k in ks])
@@ -188,12 +210,20 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
         ok = (qx >= M + MARGIN) & (qx <= W - 1) & (qy >= 0) & (qy <= H - 1)   # the last row too (a 7-row ROSE band without)
         back = sample(f_kt, fx, fy)
         err = torch.hypot(fx + back[:, 0], fy + back[:, 1])
-        ok &= err < FB_ABS + FB_REL * torch.hypot(fx, fy)
+        tol = FB_ABS + FB_REL * torch.hypot(fx, fy)
+        ok &= err < tol
         real = torch.from_numpy(np.stack([frames[k] for k in ks])).to(dev).permute(0, 3, 1, 2).float()
         pix = sample(real, fx, fy)
         d = torch.tensor([abs(k - t) for k in ks], device=dev, dtype=torch.float32)[:, None, None]
         w = ok.float() * torch.exp(-d / NEAR_DECAY) / (1.0 + err)
-        near = {k - t: fs[j].half().cpu() for j, k in enumerate(ks) if abs(k - t) <= STEADY} if want_near else None
+        if SEAM > 0:             # faded, not cut: into the picture, back from its far edge, near the trip's limit
+            w = w * ((qx - (M + MARGIN)) / SEAM).clamp(0, 1) * ((W - 1 - qx) / SEAM).clamp(0, 1) \
+                  * (2.0 * (1.0 - err / tol)).clamp(0, 1)
+        near = {k - t: (fs[j].half().cpu(), ok[j].cpu()) for j, k in enumerate(ks) if abs(k - t) <= STEADY} \
+            if want_near else None
+        if solo and SOLO > 0:      # one frame alone: only a near one
+            used = w > 0
+            w = w * ((used.sum(0) != 1) | (used & (d <= SOLO)).any(0)).float()[None]
         return (pix * w[:, None]).sum(0), w.sum(0), near
 
     try:
@@ -208,7 +238,7 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
             looked += 1
         if looked and seen / looked < LOOK_LEAST:
             logger.info(f"  Copy From Other Frames: no frame shows the strip ({seen / max(looked, 1):.1%} of "
-                        f"{looked} frames looked at) -- a static shot; ROSE fills it all")
+                        f"{looked} frames looked at) -- a static shot; the inpainter fills it all")
             return None
 
         # 2. every frame from its neighbours
@@ -218,7 +248,7 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
         for t in range(n):
             check()
             ks = [t + s * d for d in OFFSETS for s in (-1, 1) if 0 <= t + s * d < n]
-            acc, wsum, near[t] = gather(t, ks, want_near=True)
+            acc, wsum, near[t] = gather(t, ks, want_near=True, solo=True)
             fill[t] = (acc / wsum.clamp(min=1e-6)).permute(1, 2, 0).cpu().numpy()
             found[t] = (wsum > 0).cpu().numpy()
             if t % 8 == 0:
@@ -266,13 +296,16 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
                 if d == 0 or not 0 <= k < n or near[t] is None or d not in near[t]:
                     continue
                 wt = 1.0 / (1 + abs(d))
-                fs = near[t][d].to(dev).float()
+                fs, held = near[t][d]
+                fs = fs.to(dev).float()
                 src = torch.from_numpy(np.ascontiguousarray(frames[k])).to(dev).permute(2, 0, 1).float()
                 src[:, :, :M] = torch.from_numpy(fill[k]).to(dev).permute(2, 0, 1)
                 fk = torch.cat([torch.from_numpy(found[k].astype(np.float32)).to(dev),
                                 torch.ones((H, pad_w), device=dev)], 1)
                 warped = sample(src[None], fs[None, 0], fs[None, 1])[0]
                 fw = sample(fk[None, None], fs[None, 0], fs[None, 1])[0, 0] * wt
+                if STEADY_CHECK:         # landing in k's picture: only where the round trip held
+                    fw = fw * ((xsm + fs[0] < M + MARGIN) | held.to(dev)).float()
                 acc += warped * fw
                 ws += fw
             support[t] = (ws / norm).clamp(0, 1).cpu().numpy()      # this frame's own copy counts 1
@@ -294,6 +327,6 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
         soft = np.maximum(soft, 1.0 - np.minimum(cv2.GaussianBlur(trust[t].astype(np.float32), (0, 0), 4), trust[t]))
         copy[t] = np.clip((1.0 - soft) * 255.0 + 0.5, 0, 255).astype(np.uint8)
     share = float(found.mean())
-    logger.info(f"  Copy From Other Frames: {share:.0%} of the strip copied from other frames; ROSE fills the rest")
+    logger.info(f"  Copy From Other Frames: {share:.0%} of the strip copied from other frames; the inpainter fills the rest")
     progress(hi, "Copy From Other Frames: done")
     return steady, copy, rose_mask

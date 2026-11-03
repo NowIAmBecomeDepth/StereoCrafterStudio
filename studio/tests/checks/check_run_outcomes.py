@@ -307,7 +307,7 @@ if "sc" in WANT:
     _run = subprocess.run
     def run(args, *a, **kw):
         text = " ".join(map(str, args)) if isinstance(args, (list, tuple)) else str(args)
-        if any(f"-Scene-{n:03d}" in text for n in fail_scenes):
+        if any(f"-Scene-{n:04d}" in text for n in fail_scenes):
             return subprocess.CompletedProcess(args, 1, "", "stand-in split failure")
         return _run(args, *a, **kw)
     subprocess.run = run

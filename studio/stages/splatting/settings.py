@@ -153,6 +153,7 @@ DEFAULTS: Dict[str, Any] = {
     "rain_spread": 1.0,
     "rain_spacing": 1.0,
     "rain_conv": 0.0,
+    "rain_flow": "dis",          # Moving mode's optical flow: dis | raft (SEA-RAFT; user, 2026-11-02)
     "rain_method": "moving",     # the Particles method kept while the switch is off (page only)
     # Special FX: Frame Break
     "frame_break_bars": 0.0,
@@ -421,6 +422,7 @@ def config_for_run(values: Dict[str, Any]) -> Dict[str, Any]:
     config["rain_spread"] = _f(s.get("rain_spread", 1.0), 1.0)
     config["rain_spacing"] = _f(s.get("rain_spacing", 1.0), 1.0)
     config["rain_conv"] = _f(s.get("rain_conv", 0.0), 0.0)
+    config["rain_flow"] = str(s.get("rain_flow", "dis") or "dis")
     config["frame_break_bars"] = _f(s["frame_break_bars"], 0.0)
     config["frame_break_thresh"] = _f(s["frame_break_thresh"], 1.0)
     config["frame_break_erode_left"] = _f(s["fb_erode_left"], 0.0)

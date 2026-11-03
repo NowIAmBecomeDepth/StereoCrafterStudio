@@ -31,6 +31,8 @@ DEFAULTS: Dict[str, Any] = {
     "use_sageattention": True,
     # Torch Compile on the page (user, 2026-10-11): each transformer block compiled
     "use_compile": False,
+    # FP8 Math (user, 2026-10-31; fp8_matmul.py): the transformer's multiplies in FP8, MMGP streaming only
+    "use_fp8_matmul": False,
     "free_text_encoder": True,
     "move_to_finished": True,
 }
@@ -48,7 +50,7 @@ OFFLOAD_MODES = ["None", "Transformer only", "Group offload",
 #: The numeric fields: v1 StringVars, validated at Start by v1.
 NUMERIC = ("frames_chunk", "frames_overlap", "tile_overlap", "tile_num", "inference_steps", "seed")
 
-BOOLS = ("use_sageattention", "use_compile", "free_text_encoder", "move_to_finished")
+BOOLS = ("use_sageattention", "use_compile", "use_fp8_matmul", "free_text_encoder", "move_to_finished")
 
 
 def coerce(key: str, value: Any) -> Any:

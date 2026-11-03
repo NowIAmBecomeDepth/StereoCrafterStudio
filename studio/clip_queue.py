@@ -1079,6 +1079,14 @@ class ClipQueue(QObject):
             self.sentBack.emit(plan["target"], False, "Some files are in use",
                                ", ".join(failed) + " -- couldn't be moved. Close what has them open, then try again.")
         else:
+            own = dict(plan.get("own_fields") or {})
+            setter = getattr(owner, "_set", None)
+            if own and setter is not None:
+                # this stage reads where the rerun writes (send_back._to_splatting)
+                for key, value in own.items():
+                    setter(key, os.path.normpath(str(value)))
+                if hasattr(owner, "save"):
+                    owner.save()
             target_ctl.takeBack(plan)
             self.sentBack.emit(plan["target"], True, "", "")
         self._timer.stop()

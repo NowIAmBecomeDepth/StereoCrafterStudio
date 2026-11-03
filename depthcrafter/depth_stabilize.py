@@ -70,6 +70,15 @@ _MAX_GAIN_STEP = 1.25
 # was picked as the reference by spread alone, and nothing fitted it).
 _MIN_REFERENCE_CORRELATION = 0.8
 
+# The reference by spread is tried first: a solve against it that holds more than
+# this share of the frames (nothing fits it) has picked a frame of its own -- then
+# a few frames across the clip are tried and the one fewest frames are held for
+# wins (user, 2026-11-02, ch.35 goblinbridgeattack00145362: no frame passed the
+# usual-scene test, spread alone picked f217 inside a closing whip pan, and 206 of
+# 220 frames were held -- Stabilize did nothing; f160 holds 37).
+_MAX_HELD_SHARE = 0.25
+_REFERENCE_TRIALS = 7
+
 
 def _sample_grid(shape: Tuple[int, int], stride: int) -> Tuple[np.ndarray, np.ndarray]:
     """Row/col index arrays for a strided sample of an (H, W) frame."""
@@ -188,7 +197,22 @@ def _auto_reference_index(depth: np.ndarray, stride: int) -> int:
         spread = float(np.median(np.abs(sample - med)))
         candidates.append((bool(usual[t]), spread, -t))
     typical = [c for c in candidates if c[0]] or candidates     # none typical: spread alone, as before
-    return int(-max(typical, key=lambda c: (c[1], c[2]))[2])
+    best = int(-max(typical, key=lambda c: (c[1], c[2]))[2])
+    n = depth.shape[0]
+    trial_stride = max(1, int(stride)) * 2                      # the trials on a coarser grid: 4x cheaper
+
+    def held(ref: int) -> int:
+        return solve_affine_series(depth, ref_index=ref, stride=trial_stride)[2]["frames_held"]
+
+    best_held = held(best)
+    if n < 8 or best_held <= _MAX_HELD_SHARE * n:
+        return best
+    spread = {-c[2]: c[1] for c in candidates}
+    for ref in sorted(set(np.linspace(0, n - 1, _REFERENCE_TRIALS).round().astype(int).tolist()) - {best}):
+        h = held(ref)
+        if h < best_held or (h == best_held and spread[ref] > spread[best]):
+            best, best_held = ref, h
+    return best
 
 
 def _scene_correlation(samples: np.ndarray) -> np.ndarray:

@@ -29,6 +29,9 @@ Item {
     readonly property var ef: EdgeFill
     readonly property var st: ef.settings
     readonly property bool idle: !ef.busy
+    // the Inpainter (user, 2026-11-03): ROSE, or MiniMax-Remover -- Steps and Pre-fill are ROSE's only
+    readonly property bool mmr: st.inpainter === "MiniMax-Remover"
+    readonly property bool ready: mmr ? !!info.minimax : !!info.rose
 
     property var info: ({})
     property string phase: "none"          // none | scanning | waiting | error | list
@@ -177,6 +180,16 @@ Item {
         Section {
             title: "Fill Settings"
             enabled: page.idle
+            FieldRow {
+                label: "Inpainter"; labelWidth: 110
+                help: page.help("inpainter")
+                Dropdown {
+                    objectName: "fillEdgesInpainter"
+                    store: page.st; key: "inpainter"
+                    model: page.ef.inpainters
+                    boxWidth: 190
+                }
+            }
             CheckField {
                 objectName: "fillEdgesBothEdges"
                 store: page.st
@@ -192,7 +205,20 @@ Item {
                 text: "Copy From Other Frames"
                 help: page.help("copy_frames")
             }
+            // MiniMax-Remover's own Steps, 6 or 12 (user, 2026-11-03)
             FieldRow {
+                visible: page.mmr
+                label: "Steps"; labelWidth: 110
+                help: page.help("mmr_steps")
+                Dropdown {
+                    objectName: "fillEdgesMmrSteps"
+                    store: page.st; key: "mmr_steps"
+                    model: page.ef.mmrSteps
+                    boxWidth: 80
+                }
+            }
+            FieldRow {
+                visible: !page.mmr
                 label: "Steps"; labelWidth: 110
                 help: page.help("steps")
                 TextBox { objectName: "fillEdgesSteps"; store: page.st; owner: page.ef; key: "steps"; boxWidth: 80 }
@@ -208,6 +234,7 @@ Item {
                 }
             }
             FieldRow {
+                visible: !page.mmr
                 label: "Pre-fill"; labelWidth: 110
                 help: page.help("prefill")
                 Dropdown {
@@ -248,12 +275,13 @@ Item {
 
         Text {
             objectName: "fillEdgesNoRose"
-            visible: page.phase === "list" && !page.info.rose
+            visible: page.phase === "list" && !page.ready
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Theme.danger
             font.family: Theme.bodyFont; font.pixelSize: Theme.bodySize
-            text: "ROSE isn't set up yet: Depth Map Editor > Erase > Set Up ROSE first."
+            text: page.mmr ? "MiniMax-Remover isn't downloaded yet: Settings > Studio > Models > MiniMax-Remover."
+                           : "ROSE isn't set up yet: Depth Map Editor > Erase > Set Up ROSE first."
         }
     }
 
@@ -586,7 +614,7 @@ Item {
         MenuItem {
             objectName: "fillEdgesJustThis"
             text: "Fill Just This Clip"
-            enabled: tileMenu.can && !!page.info.rose && page.idle
+            enabled: tileMenu.can && page.ready && page.idle
             onTriggered: page.fill(tileMenu.name)
         }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
@@ -646,7 +674,7 @@ Item {
             objectName: "fillEdgesGo"
             text: page.picked.length === 1 ? "Fill 1 Clip" : "Fill " + page.picked.length + " Clips"
             iconGlyph: Theme.icon.play
-            enabled: page.idle && !page.otherJob && page.phase === "list" && page.picked.length > 0 && !!page.info.rose
+            enabled: page.idle && !page.otherJob && page.phase === "list" && page.picked.length > 0 && page.ready
             onClicked: page.fill("")
             HoverTip { tip: page.help("fill") }
         }

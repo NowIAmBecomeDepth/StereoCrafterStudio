@@ -18,10 +18,21 @@ Item {
     // the tab drops them down; picking one sends menuPicked. A click on the tab itself is as before.
     property var menus: ({})
     signal menuPicked(int index, int item)
+    // how long the pointer rests on such a tab before its list drops (user, 2026-11-01: at 120 ms a pass
+    // over Depth Map or Extra dropped a list over the options right below them)
+    property int menuDelay: 1000
     readonly property alias hoverMenu: hoverMenu
     // a backing under the labels over thin glass (Theme.bed); Main's strip
     // has one of its own
     property bool bed: true
+    // The row under the stage tabs (user, 2026-11-01: two accent lines one above the other felt
+    // repetitive; picked in prototypes/subtab_lab): no pill and no line -- the label under the pointer
+    // grows, the current one stays full size and bright with a glowing dot under it, the rest sit
+    // smaller and dimmer.
+    property bool subTabs: false
+    readonly property real restScale: 0.70
+    readonly property real hoverScale: 0.86
+    readonly property real restInk: 0.46        // of the ink a resting label keeps (hovered: + 0.35)
 
     implicitHeight: 48
     implicitWidth: row.implicitWidth
@@ -37,6 +48,7 @@ Item {
     }
     Rectangle {
         id: pill
+        visible: !root.subTabs
         x: root.currentTab ? root.currentTab.x : 0
         width: root.currentTab ? root.currentTab.width : 0
         y: 4
@@ -48,6 +60,7 @@ Item {
     }
     Rectangle {
         id: bar
+        visible: !root.subTabs
         // The bar trails the pill a little (a softer spring), which reads as
         // one object with weight rather than two things moving in lockstep.
         x: root.currentTab ? root.currentTab.x + 14 : 0
@@ -68,6 +81,27 @@ Item {
         }
     }
 
+    Rectangle {
+        id: dot
+        objectName: "subTabDot"
+        visible: root.subTabs && !!root.currentTab
+        width: 6
+        height: 6
+        radius: 3
+        x: root.currentTab ? root.currentTab.x + root.currentTab.width / 2 - 3 : 0
+        y: root.height - 6
+        color: Theme.accent
+        Behavior on x { enabled: !Theme.calm; SpringAnimation { spring: 2.6; damping: 0.26; epsilon: 0.05 } }
+        layer.enabled: visible
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: Theme.accent
+            shadowBlur: 0.8
+            shadowOpacity: 1.0
+            shadowVerticalOffset: 0
+        }
+    }
+
     Row {
         id: row
         height: parent.height
@@ -80,7 +114,15 @@ Item {
                 required property int index
                 required property var modelData
                 readonly property bool current: index === root.currentIndex
-                width: content.implicitWidth + 32
+                // a sub-tab keeps room for its label bold and full size, so nothing beside it moves
+                width: (root.subTabs ? fullWidth.width : content.implicitWidth) + 32
+                TextMetrics {
+                    id: fullWidth
+                    text: Theme.tabText(tab.modelData)
+                    font.family: Theme.tabFont
+                    font.pixelSize: Theme.tabSize + 1
+                    font.weight: Font.Bold
+                }
                 height: row.height
 
                 Rectangle {
@@ -89,13 +131,16 @@ Item {
                     anchors.bottomMargin: 4
                     radius: 10
                     color: Theme.hover
-                    opacity: hover.hovered && !tab.current ? 1 : 0
+                    opacity: hover.hovered && !tab.current && !root.subTabs ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: Theme.dur(160) } }
                 }
 
                 Row {
                     id: content
                     anchors.centerIn: parent
+                    anchors.verticalCenterOffset: root.subTabs ? -2 : 0
+                    scale: !root.subTabs || tab.current ? 1.0 : hover.hovered ? root.hoverScale : root.restScale
+                    Behavior on scale { NumberAnimation { duration: Theme.dur(60); easing.type: Easing.OutCubic } }
                     spacing: 6
                     // "1." plain (user, 2026-09-26; it was a disc filled with the accent).
                     // Solid ink, every tab; the current one is told by weight alone
@@ -117,11 +162,13 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         // v1 app_fonts: Bahnschrift caps; the current tab Bold
                         text: Theme.tabText(tab.modelData)
-                        color: tab.enabled ? Theme.fg : Theme.fgFaint
+                        color: !tab.enabled ? Theme.fgFaint
+                               : !root.subTabs || tab.current ? Theme.fg
+                               : Theme.mix(Theme.surface, Theme.fg, hover.hovered ? root.restInk + 0.35 : root.restInk)
                         font.family: Theme.tabFont
                         font.pixelSize: Theme.tabSize + 1
                         font.weight: tab.current ? Font.Bold : Font.Normal
-                        Behavior on color { ColorAnimation { duration: Theme.dur(200) } }
+                        Behavior on color { ColorAnimation { duration: Theme.dur(root.subTabs ? 60 : 200) } }
                     }
                 }
 
@@ -176,7 +223,7 @@ Item {
             if ((tab && tab.hovered) || listHover.hovered) closeTimer.stop()
             else { openTimer.stop(); if (opened) closeTimer.restart() }
         }
-        Timer { id: openTimer; interval: 120; onTriggered: if (hoverMenu.tab && hoverMenu.tab.hovered) hoverMenu.open() }
+        Timer { id: openTimer; interval: root.menuDelay; onTriggered: if (hoverMenu.tab && hoverMenu.tab.hovered) hoverMenu.open() }
         Timer { id: closeTimer; interval: 220; onTriggered: hoverMenu.close() }
 
         enter: Transition {

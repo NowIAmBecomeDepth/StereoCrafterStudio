@@ -23,6 +23,8 @@ Item {
     property var consoleRef: null   // the console window: the Progress heading's Open Console
     readonly property var wan: InpaintingV2
     readonly property var st: wan.settings
+    // MMGP streaming picked: FP8 Math is offered (user, 2026-10-31)
+    readonly property bool mmgp: String(st.offload_mode).toLowerCase().indexOf("mmgp") === 0
     readonly property var tips: wan.tips
     readonly property real requiredHeight: content.y + content.implicitHeight + 16
 
@@ -271,12 +273,25 @@ Item {
                     // Inpainting already, as Use Sage Attention (for V2))
                     CheckField {
                         objectName: "v2Compile"
-                        shown: !Theme.sage1     // SageAttention 1 (RTX 20): its Triton 3.2 breaks Torch Compile
+                        // SageAttention 1 (RTX 20): its Triton 3.2 breaks Torch Compile; hidden while FP8 Math is on
+                        shown: !Theme.sage1 && !(page.mmgp && !!page.st.use_fp8_matmul)
                         store: page.st; key: "use_compile"; text: "Torch Compile"
                         help: "Compiles the model for this GPU when a run starts: faster chunks, after a first chunk that takes "
                               + "several minutes longer while it compiles (the compiled kernels are kept, so the next run of the "
                               + "same size starts sooner). Worth it for long unattended runs, not for a clip or two. Works with "
                               + "Offload mode None, FP8 resident and MMGP streaming; the other offload modes run without it."
+                    }
+                    // FP8 Math (user, 2026-10-31; stages/inpainting_v2/fp8_matmul.py): MMGP streaming only, and
+                    // not with Torch Compile (untested together): each hides the other, as V1's TensorRT does
+                    CheckField {
+                        objectName: "v2Fp8"
+                        shown: page.mmgp && !(!Theme.sage1 && !!page.st.use_compile)
+                        store: page.st; key: "use_fp8_matmul"; text: "FP8 Math"
+                        help: "Runs the model's matrix maths in FP8, about twice as fast as the normal way on RTX 40 "
+                              + "and 50 series cards: on a 16 GB RTX 5060 Ti each step took 26.8 s instead of 32.5, a "
+                              + "whole clip about 15% less time. The fill comes out a touch different, too little to "
+                              + "see. MMGP streaming only; older cards run the normal way. Torch Compile is hidden "
+                              + "while this is on: the two don't go together."
                     }
                     // Hidden under MMGP streaming, which holds its own references and
                     // ignores it (v1 _sync_free_te_visibility); the value is kept.

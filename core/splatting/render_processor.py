@@ -1027,7 +1027,9 @@ class RenderProcessor:
                                     f"{', reflections kept out' if _rain_settings.particle == 'sparks' and _rain_settings.reflections else ''}"
                                     f"{f', spread {_rain_settings.spread:.2f}' if _rain_settings.spread != 1.0 else ''}"
                                     f"{f', spacing {_rain_settings.spacing:.2f}' if _rain_settings.spacing != 1.0 else ''}"
-                                    f"{f', convergence {_rain_settings.conv:+.2f}' if _rain_settings.conv else ''}")
+                                    f"{f', convergence {_rain_settings.conv:+.2f}' if _rain_settings.conv else ''}"
+                                    f"{', SEA-RAFT flow' if _rain_settings.mode == 'moving' and _rain_settings.flow == 'raft' else ''}"
+                                    f"{', SEA-RAFT flow, no Relight' if _rain_settings.mode == 'moving' and _rain_settings.flow == 'raft_plain' else ''}")
                     if _win_raw is not None:             # read with the batch (step 1)
                         _win = _win_raw
                     else:

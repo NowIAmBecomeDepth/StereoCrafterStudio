@@ -89,7 +89,8 @@
       things -- see <a href="#despeck">Taking out left-edge specks</a>, below.</li>
     <li>Step through frames with the slider, the <span class="btn">&lt;</span>
       <span class="btn">&gt;</span> buttons, or the arrow keys.</li>
-    <li>Zoom in with the mouse wheel, about the point under the pointer, as in Splatting and Merging;
+    <li>Zoom in with the mouse wheel or a touchpad pinch, about the point under the pointer, as in Splatting and Merging
+      (two fingers sideways slide through the frames there too);
       drag with the middle button to move around. The <span class="set">Zoom</span> box after the frame counter
       picks a size, or <span class="set">Fit</span> for the whole frame again. In the 3D view's
       <b>Right Eye + Holes</b>, which takes no clicks, the left button drags too and a double-click zooms in,
@@ -561,7 +562,8 @@
      video's size, 1920 wide for a 1080p clip, instead of the depth map's. RGB layers then use SAM 3's full-size
      masks, so an object's real outline reaches Splatting at full detail, the way Detect Text's masks do, instead
      of being squeezed onto the depth map's much coarser pixels. The file is bigger and the render takes a little
-     longer; Splatting runs as fast as before. A layer tracked before this option existed has no full-size masks
+     longer; Splatting runs as fast as before. With an NVIDIA card the edits themselves run on the card, which is
+     several times faster than the processor. A layer tracked before this option existed has no full-size masks
      yet: press <span class="btn">Start Tracking</span> once more to make them.</p>
   <p>The <b>RGB</b> view is shown at up to 720p, finer than the depth map, so you can see what SAM 3 is
      outlining; with Render at source resolution on, the mask drawn on it is the full-size one Render uses.

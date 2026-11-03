@@ -937,10 +937,37 @@ def sample_add_depth(v: np.ndarray, mask: Optional[np.ndarray]) -> Optional[floa
     return float(np.percentile(v[mask], 90))
 
 
+#: The whole edit on the GPU (core.depthedit.edit_gpu) from this many pixels a frame (user, 2026-10-31:
+#: the render back to Splatting "feels slower"). Measured with four layers (Edges, Edge snap, Grow, a
+#: gradient): 1920x1038 299 -> 29 ms a frame, 768x448 118 -> 18 ms; the result is this module's to float
+#: rounding (at the map's own size a gradient's Keep detail can land 2 of 1023 codes apart -- OpenCV's
+#: blur there, gpu_ops's on the GPU). Six CPU threads instead: 2.3x at best. None for the CPU only.
+GPU_EDIT_MIN_PIXELS = 200_000
+_gpu_edit_failed = False
+
+
+def _edit_on_gpu(v: np.ndarray) -> bool:
+    if _gpu_edit_failed or v.size < GPU_EDIT_MIN_PIXELS:
+        return False
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
 def apply_all(v: np.ndarray, global_settings: GlobalSettings,
               layers: Sequence[Tuple[LayerSettings, Optional[np.ndarray]]],
               frame_idx: int) -> np.ndarray:
     """The whole edit for one frame. `layers` is (settings, mask) bottom-up."""
+    global _gpu_edit_failed
+    if _edit_on_gpu(v):
+        try:
+            from core.depthedit import edit_gpu
+            return edit_gpu.apply_all(v, global_settings, layers, frame_idx)
+        except Exception as e:
+            _gpu_edit_failed = True          # once: the CPU from here on, this session
+            logger.warning("The depth edit on the GPU failed (%s); using the CPU.", e, exc_info=True)
     x = apply_global(v, global_settings)
     for s, mask in layers:
         if layer_active(s, frame_idx):

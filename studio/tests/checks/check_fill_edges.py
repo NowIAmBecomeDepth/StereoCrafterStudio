@@ -122,6 +122,9 @@ def type_into(item, text):
     QTest.keyClick(win, Qt.Key.Key_Return); pump(0.3)
 toasts, errors = [], []
 mg, shell, ef = objs["Merging"], objs["Shell"], objs["EdgeFill"]
+check("Edge Fill's Inpainter starts on MiniMax-Remover (user, 2026-11-03: \"Make it the default\")",
+      ef.settings.property("inpainter") == "MiniMax-Remover", str(ef.settings.property("inpainter")))
+ef.settings.setProperty("inpainter", "ROSE")       # this check fills with ROSE's stand-in (fake_worker)
 for ctl in (mg, ef):
     ctl.toast.connect(lambda k, t, m: toasts.append((k, t, m)))
     ctl.message.connect(lambda k, t, m: errors.append((k, t, m)))
@@ -297,6 +300,14 @@ check("...the note on what it suits: simple backgrounds, not faces or text (user
       bool(shown("fillEdgesSuits")) and "simple backgrounds" in shown("fillEdgesSuits")[0].property("text"))
 check("...Right Edge Too offered, off: the right eye's left edge only (user, 2026-10-18)",
       bool(shown("fillEdgesBothEdges")) and ef.settings.property("both_edges") is False)
+check("...Inpainter offered: MiniMax-Remover first, then ROSE (user, 2026-11-03)",
+      bool(shown("fillEdgesInpainter")) and list(ef.property("inpainters") or []) == ["MiniMax-Remover", "ROSE"],
+      str(ef.property("inpainters")))
+ef.settings.setProperty("inpainter", "MiniMax-Remover"); pump(0.3)
+check("...MiniMax-Remover hides Steps and Pre-fill (its own 6 steps; it blanks the strip itself)",
+      not shown("fillEdgesSteps") and not shown("fillEdgesPrefill"))
+ef.settings.setProperty("inpainter", "ROSE"); pump(0.3)
+check("...and ROSE shows them again", bool(shown("fillEdgesSteps")) and bool(shown("fillEdgesPrefill")))
 check("...Steps shows the default, 6", shown("fillEdgesSteps") and shown("fillEdgesSteps")[0].property("text") == "6",
       shown("fillEdgesSteps")[0].property("text") if shown("fillEdgesSteps") else "")
 if shown("fillEdgesSteps"):
@@ -349,7 +360,9 @@ last = {}
 for r in [r for r in con._rows if r[4]]:
     last[r[4][0].strip()] = r[4]
 check("...a bar for each stretch, drawn as bars, each ending full: reading, ROSE's window, blend + write",
-      [k for k in last] == ["Reading edges:", "ROSE window 1/1:", "Blend + write:"]
+      # Copy From Other Frames' own bar where SEA-RAFT is downloaded (2026-11-03: it drew in Blend + write)
+      [k for k in last if k != "Copy from frames:"] == ["Reading edges:", "ROSE window 1/1:", "Blend + write:"]
+      and list(last)[:2] in (["Reading edges:", "ROSE window 1/1:"], ["Reading edges:", "Copy from frames:"])
       and all(abs(b[1] - 1.0) < 1e-6 for b in last.values()), str({k: round(b[1], 3) for k, b in last.items()}))
 check("...ROSE's bar counts steps and s/it", "9/9 [0.12s/it]" in last.get("ROSE window 1/1:", ["", 0, ""])[2],
       str(last.get("ROSE window 1/1:")))

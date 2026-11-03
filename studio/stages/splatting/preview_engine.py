@@ -215,6 +215,7 @@ VAR_TYPES = {
     'rain_any_direction_var': 'BooleanVar',
     'rain_conv_var': 'DoubleVar',
     'rain_depth_var': 'DoubleVar',
+    'rain_flow_var': 'StringVar',
     'rain_grow_var': 'IntVar',
     'rain_guard_var': 'DoubleVar',
     'rain_layers_var': 'IntVar',
@@ -1959,6 +1960,7 @@ class SplattingPreviewEngine:
         "rain_reflections": "rain_reflections_var",
         "rain_spread": "rain_spread_var",
         "rain_spacing": "rain_spacing_var",
+        "rain_flow": "rain_flow_var",
         "rain_conv": "rain_conv_var",
         "submask_conv": "submask_conv_var",
     }
@@ -3701,6 +3703,7 @@ class SplattingPreviewEngine:
                 "rain_reflections": bool(self.rain_reflections_var.get()),
                 "rain_spread": self._safe_float(self.rain_spread_var, 1.0),
                 "rain_spacing": self._safe_float(self.rain_spacing_var, 1.0),
+                "rain_flow": str(self.rain_flow_var.get() or "dis"),
                 "rain_conv": self._safe_float(self.rain_conv_var, 0.0),
                 "dual_eye": bool(self.dual_eye_var.get()),
                 "dual_eye_bias": self._safe_float(self.dual_eye_bias_var, 0.5),

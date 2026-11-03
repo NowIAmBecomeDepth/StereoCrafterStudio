@@ -367,13 +367,14 @@ def sweep_stale_temp(clip: str) -> None:
 
 # ---- the job ------------------------------------------------------------------------------
 
-def step_bar(chunk: int, n_chunks: int, step: int, steps: int, per_step: Optional[float]) -> None:
+def step_bar(chunk: int, n_chunks: int, step: int, steps: int, per_step: Optional[float],
+             label: str = "ROSE") -> None:
     """One ROSE window's denoising steps as a console bar (Fill Edges, user 2026-10-14: like
     DepthCrafter's and Inpainting's), with the seconds a step takes; the line ends at the last."""
     from core.common.cli_utils import draw_progress_bar
     rate = f"{per_step:.2f}s/it" if per_step else "?s/it"
     try:                                   # a console that can't show the bar never ends the fill
-        draw_progress_bar(step, steps, bar_length=40, prefix=f"  ROSE window {chunk}/{n_chunks}:",
+        draw_progress_bar(step, steps, bar_length=40, prefix=f"  {label} window {chunk}/{n_chunks}:",
                           suffix=f"{step}/{steps} [{rate}]", keep_suffix=True)
     except (UnicodeError, OSError, ValueError):
         pass
@@ -381,8 +382,19 @@ def step_bar(chunk: int, n_chunks: int, step: int, steps: int, per_step: Optiona
 
 def _run_worker(job_path: str, n_chunks: int, steps: int, progress: Progress, stop: threading.Event,
                 lo: float, hi: float, bars: bool = False) -> None:
-    """Run ROSE on the job's chunks. `bars`: each window's steps also as a console bar."""
-    proc = subprocess.Popen([str(rose_env.python()), "-u", str(rose_env.WORKER), job_path],
+    """Run ROSE on the job's chunks. `bars`: each window's steps also as a console bar. A job with
+    "inpainter": "minimax" (Edge Fill's other inpainter) runs MiniMax-Remover's worker instead."""
+    label, cmd = "ROSE", None
+    try:
+        with open(job_path, encoding="utf-8") as f:
+            if json.load(f).get("inpainter") == "minimax":
+                from . import minimax_env
+                label, cmd = minimax_env.LABEL, minimax_env.command(job_path)
+    except (OSError, ValueError, AttributeError):
+        pass
+    if cmd is None:                      # ROSE's own Python only for ROSE (it needn't be set up for the other)
+        cmd = [str(rose_env.python()), "-u", str(rose_env.WORKER), job_path]
+    proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -416,14 +428,14 @@ def _run_worker(job_path: str, n_chunks: int, steps: int, progress: Progress, st
                 continue
             if parts[0] == "CHUNK":
                 chunk = int(parts[1])
-                progress(lo + (hi - lo) * (chunk - 1) / n_chunks, f"ROSE: window {chunk} of {n_chunks}, loading")
+                progress(lo + (hi - lo) * (chunk - 1) / n_chunks, f"{label}: window {chunk} of {n_chunks}, loading")
                 if bars:
                     bar.update(open=True, t=time.monotonic(), first=None)
-                    step_bar(chunk, n_chunks, 0, steps, None)
+                    step_bar(chunk, n_chunks, 0, steps, None, label)
             elif parts[0] == "STEP":
                 s = int(parts[1])
                 progress(lo + (hi - lo) * ((chunk - 1) + s / steps) / n_chunks,
-                         f"ROSE: window {chunk} of {n_chunks}, step {s} of {steps}")
+                         f"{label}: window {chunk} of {n_chunks}, step {s} of {steps}")
                 if bars:
                     now = time.monotonic()
                     # s/it from the first step's end on: the first carries the window's set-up
@@ -433,15 +445,17 @@ def _run_worker(job_path: str, n_chunks: int, steps: int, progress: Progress, st
                     t0, s0 = bar["first"]
                     # "?" until a second step: the first one's time is mostly the window's set-up
                     per = (now - t0) / (s - s0) if s > s0 else None
-                    step_bar(chunk, n_chunks, s, steps, per)
+                    step_bar(chunk, n_chunks, s, steps, per, label)
                     bar["open"] = s < steps
             elif parts[0] == "DONE":
-                logger.info(f"ROSE window {parts[1]} of {n_chunks} done ({' '.join(parts[2:])}).")
+                logger.info(f"{label} window {parts[1]} of {n_chunks} done ({' '.join(parts[2:])}).")
             elif parts[0] == "TRT" and parts[1:2] == ["building"]:
                 # the first run on this GPU / TensorRT: an export and a build, minutes, once
                 logger.info("ROSE: building its TensorRT engine -- several minutes, once.")
                 progress(lo + (hi - lo) * (max(chunk, 1) - 1) / n_chunks,
                          "ROSE: building its TensorRT engine (several minutes, once)")
+            elif parts[0] == "SAGE" and label != "ROSE":
+                logger.info(f"{label}: SageAttention {' '.join(parts[1:2])}.")
             elif parts[0] == "TRT" and parts[1:2] == ["on"]:
                 logger.info("ROSE: TensorRT on.")
             elif parts[0] == "ERROR":
@@ -451,7 +465,7 @@ def _run_worker(job_path: str, n_chunks: int, steps: int, progress: Progress, st
         if proc.wait() != 0 or error:
             drainer.join(timeout=5)          # its last lines are the traceback that matters
             tail = "\n".join(err_lines[-8:])
-            raise RuntimeError(error or f"ROSE stopped with exit code {proc.returncode}.\n{tail}")
+            raise RuntimeError(error or f"{label} stopped with exit code {proc.returncode}.\n{tail}")
     finally:
         if bars and bar["open"]:               # cut short: the bar's line still ends
             sys.stdout.write("\n")

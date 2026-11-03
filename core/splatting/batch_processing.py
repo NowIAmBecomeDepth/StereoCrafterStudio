@@ -153,6 +153,7 @@ class ProcessingSettings:
     rain_spread: float = 1.0
     rain_spacing: float = 1.0
     rain_conv: float = 0.0
+    rain_flow: str = "dis"
     submask_grow: float = 0.0           # the Detect Text mask's own grow / soften (px)
     submask_soften: float = 0.0
     submask_clean: float = 0.0          # Text Clean: the text taken out of the depth (px)
@@ -588,6 +589,11 @@ class BatchProcessor:
         finally:
             if getattr(renderer, "out_of_vram", False):
                 result["hint"] = OOM_HINT
+            try:
+                from core.splatting import rain_gpu
+                rain_gpu.release_flow()           # Rain's SEA-RAFT, when a clip used it
+            except Exception:
+                pass
             release_cuda_memory()
             self.progress_queue.put(("result", dict(result)))
             self.progress_queue.put("finished")
@@ -969,6 +975,7 @@ class BatchProcessor:
                 "spread": _saved_or(sidecar_data, "rain_spread", settings.rain_spread),
                 "spacing": _saved_or(sidecar_data, "rain_spacing", settings.rain_spacing),
                 "conv": _saved_or(sidecar_data, "rain_conv", settings.rain_conv),
+                "flow": _saved_or(sidecar_data, "rain_flow", settings.rain_flow),
             },
             "depth_dilate_size_x": sidecar_data.get("depth_dilate_size_x", settings.depth_dilate_size_x)
             if settings.enable_sidecar_blur_dilate

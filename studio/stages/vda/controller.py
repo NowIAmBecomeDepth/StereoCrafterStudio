@@ -93,6 +93,9 @@ class _QtHooks(R.Hooks):
     def frames(self, done, total, phase):
         self.ctl._sigFrames.emit(int(done), int(total), str(phase))
 
+    def speed(self, fps, seconds_left):
+        self.ctl._sigSpeed.emit(float(fps), float(seconds_left))
+
 
 class VdaController(QObject):
     stateChanged = Signal()
@@ -109,6 +112,7 @@ class VdaController(QObject):
     _sigProgress = Signal(int, int)
     _sigClip = Signal(str, str, str)
     _sigFrames = Signal(int, int, str)
+    _sigSpeed = Signal(float, float)
     _sigFinished = Signal(bool)
     _sigWeights = Signal()                       # weights_paths' listener runs on any thread
 
@@ -136,6 +140,7 @@ class VdaController(QObject):
         self._done = self._total = 0
         self._clip = ("N/A", "N/A", "N/A")
         self._frames = (0, 0, "")
+        self._speed = (0.0, -1.0)              # the running pass's fps, seconds left (-1: not known yet)
         self._stop = threading.Event()
         self._stop_now = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -153,6 +158,7 @@ class VdaController(QObject):
         self._sigProgress.connect(self._on_progress, q)
         self._sigClip.connect(self._on_clip, q)
         self._sigFrames.connect(self._on_frames, q)
+        self._sigSpeed.connect(self._on_speed, q)
         self._sigFinished.connect(self._on_finished, q)
         self._sigWeights.connect(self.weightsChanged, q)
 
@@ -326,6 +332,13 @@ class VdaController(QObject):
     framesDone = Property(int, lambda self: self._frames[0], notify=framesChanged)
     framesTotal = Property(int, lambda self: self._frames[1], notify=framesChanged)
     framesPhase = Property(str, lambda self: self._frames[2], notify=framesChanged)
+    # the running pass's speed and time left (user, 2026-11-01), as the console's progress line has them
+    fps = Property(float, lambda self: self._speed[0] if self._task else 0.0, notify=framesChanged)
+
+    @Property(str, notify=framesChanged)
+    def timeLeft(self):
+        left = self._speed[1]
+        return R._clock(left) if self._task and left >= 0 else ""
 
     @Property(str, notify=infoChanged)
     def progressCount(self):
@@ -352,6 +365,11 @@ class VdaController(QObject):
     @Slot(int, int, str)
     def _on_frames(self, done, total, phase):
         self._frames = (done, total, phase)
+        self.framesChanged.emit()
+
+    @Slot(float, float)
+    def _on_speed(self, fps, left):
+        self._speed = (fps, left)
         self.framesChanged.emit()
 
     # ---- GpuJobs (studio/gpu_jobs.py) ---------------------------------------------------------
@@ -430,6 +448,7 @@ class VdaController(QObject):
         self._stop_now.clear()
         self._clip = ("N/A", "N/A", "N/A")
         self._frames = (0, 0, "")
+        self._speed = (0.0, -1.0)
         self._done, self._total = 0, len(specs)
         self._task = "batch"
         self.queue.hold(True)

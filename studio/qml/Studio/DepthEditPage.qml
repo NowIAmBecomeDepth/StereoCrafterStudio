@@ -569,6 +569,52 @@ Item {
                 acceptedModifiers: Qt.NoModifier
                 onWheel: (e) => picture.zoomAt(picture.zoom * (e.angleDelta.y > 0 ? 1.12 : 1 / 1.12), e.x, e.y)
             }
+            // a trackpad's pinch (user, 2026-10-31): Windows sends it as Ctrl + the wheel in small
+            // steps, so as far as the fingers move; a mouse's Ctrl + wheel the same. studio/pinch.py
+            // lets it through only over pinchZoomArea while on; elsewhere a pinch is the UI Scale.
+            WheelHandler {
+                objectName: "dePinchWheel"
+                enabled: !!page.s.hasClip && !Theme.modalOpen
+                acceptedModifiers: Qt.ControlModifier
+                onWheel: (e) => picture.zoomAt(picture.zoom * Math.pow(1.12, e.angleDelta.y / 120), e.x, e.y)
+            }
+            Item {
+                objectName: "pinchZoomArea"
+                anchors.fill: parent
+                readonly property bool on: !!page.s.hasClip && !Theme.modalOpen
+            }
+            // A sideways two-finger swipe slides through the frames (user, 2026-10-31), as Splatting's and
+            // Merging's previews do: the fingers left to right go forward, a frame for every
+            // `unitsPerFrame` of the wheel's (120 a notch). Its own handler: the zoom's vertical one never
+            // sees a wheel that only goes sideways.
+            WheelHandler {
+                id: slideWheel
+                objectName: "deSlideWheel"
+                enabled: !!page.s.hasClip && !Theme.modalOpen
+                orientation: Qt.Horizontal
+                acceptedModifiers: Qt.NoModifier
+                readonly property int unitsPerFrame: 40
+                property real acc: 0
+                property int target: -1
+                onWheel: (e) => {
+                    if (Math.abs(e.angleDelta.x) <= Math.abs(e.angleDelta.y)) return
+                    acc += e.angleDelta.x      // + x: the fingers moving left to right -- forward
+                    const n = acc > 0 ? Math.floor(acc / unitsPerFrame) : Math.ceil(acc / unitsPerFrame)
+                    if (n === 0) return
+                    acc -= n * unitsPerFrame
+                    const last = Math.max(0, (page.s.frames || 1) - 1)
+                    const f = Math.max(0, Math.min(last, (target >= 0 ? target : (page.s.frame || 0)) + n))
+                    slideEnd.restart()
+                    if (f === target) return
+                    target = f
+                    page.de.setFrame(f)
+                }
+            }
+            Timer {
+                id: slideEnd
+                interval: 250
+                onTriggered: { slideWheel.target = -1; slideWheel.acc = 0 }
+            }
             Item {
                 id: shown
                 // the video stays clean of the window's film grain

@@ -54,11 +54,14 @@ import cv2
 import numpy as np
 
 from . import erase as E
-from . import rose_env
+from . import minimax_env, rose_env
 
 logger = logging.getLogger(__name__)
 
 STEPS = 6                 # ROSE's steps: 6 matched 50 on the bench; 3-4 lost detail
+#: the inpainters (user, 2026-11-03): ROSE, or MiniMax-Remover (minimax_env.py) -- the same crop, mask and
+#: finishing; MiniMax-Remover blanks its mask itself (so no Pre-fill) and runs its own 6 steps
+INPAINTERS = ("MiniMax-Remover", "ROSE")     # Edge Fill's default first
 STRIP_PAD = 8             # px past the mask's holes: the inpainter's smear
 FEATHER = 16              # px the fill fades into the picture over, past the strip
 OVERMASK = 4              # px ROSE refills past that fade (28 extrapolated a sloping roof
@@ -749,7 +752,7 @@ def _copy_ready() -> bool:
     from . import flow_fill
     if not flow_fill.available():
         logger.info("  Copy From Other Frames is on but SEA-RAFT isn't downloaded (Settings > Studio > Models): "
-                    "ROSE fills the whole strip")
+                    "the inpainter fills the whole strip")
         return False
     try:
         import torch
@@ -757,22 +760,29 @@ def _copy_ready() -> bool:
             return True
     except Exception:
         pass
-    logger.info("  Copy From Other Frames needs an NVIDIA card: ROSE fills the whole strip")
+    logger.info("  Copy From Other Frames needs an NVIDIA card: the inpainter fills the whole strip")
     return False
 
 
 def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
          steps: int = STEPS, grain: bool = True, settings: Optional[Dict] = None,
          strips: Optional[Dict] = None, rose_height: int = ROSE_HEIGHT, detail: bool = False,
-         both_edges: bool = False, prefill: str = "Blur", copy_frames: bool = True) -> Dict:
+         both_edges: bool = False, prefill: str = "Blur", copy_frames: bool = True,
+         inpainter: str = "ROSE") -> Dict:
     """Refill the edge strips of one merged clip, its files rewritten in place -- each eye's usual edge
     (USUAL_EDGE), or every edge with a strip with `both_edges`. `prefill`: what ROSE sees under its
     mask -- "Blur" (erase.prefill_frames) or "Stretched" (the last good column across it). `copy_frames`:
     first copy the real picture into the strip from the frames that show it (flow_fill.py; needs
     SEA-RAFT), ROSE filling only the rest. Returns {"edges": [...], "files": [...]}
     or {"skipped": why}. Raises E.Stopped, RuntimeError."""
-    if not rose_env.ready():
+    mmr = inpainter == "MiniMax-Remover"
+    if mmr and not minimax_env.available():
+        raise RuntimeError(minimax_env.missing_message())
+    if not mmr and not rose_env.ready():
         raise RuntimeError("ROSE isn't set up: Set Up ROSE in the Depth Map Editor's Erase first.")
+    who = minimax_env.LABEL if mmr else "ROSE"
+    if mmr:                                  # its own steps: 6 or 12, anything else its 6
+        steps = int(steps) if int(steps) in minimax_env.STEP_CHOICES else minimax_env.STEPS
     from studio.merge_all import probe as probe_file
     # a refill reads each file's unfilled original (2026-10-26: Blur over an earlier Stretched fill
     # faded into that fill -- a line where it ended); `read` is the clip as it is read
@@ -904,7 +914,9 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                             whole = np.zeros((e.rose.shape[1], e.crop), np.uint8)
                             whole[:, :e.mask] = e.rose[min(a + t, n - 1)]
                             masks[t] = (cv2.resize(whole * 255, (rw, rh_all), interpolation=cv2.INTER_AREA)[ta:tb] > 0) * 255
-                    if prefill == "Stretched":
+                    if mmr:
+                        pass                # MiniMax-Remover blanks its mask itself
+                    elif prefill == "Stretched":
                         stretched = np.repeat(frames[:, :, mw:mw + 1], mw, axis=2)    # the last good column
                         frames[:, :, :mw] = np.where(masks[:, :, :mw, None] > 0, stretched, frames[:, :, :mw])
                     else:
@@ -919,26 +931,31 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                         np.save(op, frames)
                     chunks.append(chunk)
                     owner.append((k, j, ti))
-        job = {"rose_dir": str(rose_env.ROSE_DIR), "embeds": str(rose_env.EMBEDS),
-               "size": [tiles[0][1] - tiles[0][0], rw],
-               "steps": int(steps), "seed": 42, "guidance": E.GUIDANCE, "chunks": to_paint}
+        if mmr:
+            job = {"inpainter": "minimax", "model_dir": str(minimax_env.model_dir()),
+                   "size": [tiles[0][1] - tiles[0][0], rw], "steps": int(steps), "seed": 42,
+                   "dilate": minimax_env.DILATE, "chunks": to_paint}
+        else:
+            job = {"rose_dir": str(rose_env.ROSE_DIR), "embeds": str(rose_env.EMBEDS),
+                   "size": [tiles[0][1] - tiles[0][0], rw],
+                   "steps": int(steps), "seed": 42, "guidance": E.GUIDANCE, "chunks": to_paint}
         job_path = os.path.join(tmp, "job.json")
         with open(job_path, "w", encoding="utf-8") as f:
             json.dump(job, f)
         for e in edges:
             e.small = None
-        progress(0.08, "ROSE: starting")          # the reading bar ends before ROSE's lines
+        progress(0.08, f"{who}: starting")        # the reading bar ends before the inpainter's lines
         if tiled:
-            logger.info(f"  ROSE: {n} frames in {len(windows)} window(s) x {len(tiles)} tiles per edge at "
+            logger.info(f"  {who}: {n} frames in {len(windows)} window(s) x {len(tiles)} tiles per edge at "
                         f"{rw}x{tiles[0][1] - tiles[0][0]} (Native: a {crop}-px crop at its own size, the tiles "
                         f"overlapping {tiles[0][1] - tiles[1][0]} rows), {int(steps)} steps")
         else:
-            logger.info(f"  ROSE: {n} frames in {len(windows)} window(s) per edge at {rw}x{rh} "
+            logger.info(f"  {who}: {n} frames in {len(windows)} window(s) per edge at {rw}x{rh} "
                         f"(a {crop}-px crop at {scale:.2f}), {int(steps)} steps")
         if to_paint:
             E._run_worker(job_path, len(to_paint), int(steps), progress, stop, rose_lo, 0.75, bars=True)
         else:
-            logger.info("  ROSE: nothing left to paint -- other frames showed the whole strip")
+            logger.info(f"  {who}: nothing left to paint -- other frames showed the whole strip")
 
         # 3. + 4. each edge's fill at full size, grained, faded in
         for k, e in enumerate(edges):

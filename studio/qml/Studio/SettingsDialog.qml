@@ -402,7 +402,7 @@ Popup {
                                     ["Left · Right", "One frame back · forward"],
                                     ["Shift+Left · Shift+Right", "Ten frames back · forward"],
                                     ["Home · End", "First · last frame"],
-                                    ["Up · Down", "Next · previous clip (also Ctrl+Right · Ctrl+Left)"],
+                                    ["Up · Down", "Previous · next clip (also Ctrl+Left · Ctrl+Right)"],
                                     ["Space", "Play or pause"],
                                     ["Shift+Space", "Fast forward"],
                                     ["F11", "Full Preview, full screen (Splatting, Merging); Escape or F11 closes it"]] },

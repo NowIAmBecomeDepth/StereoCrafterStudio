@@ -126,6 +126,7 @@ class PreviewFrameBuffer:
             str(params.get("rain_placement", "")),
             str(params.get("rain_grow", "")),
             str(params.get("rain_reflections", "")),
+            str(params.get("rain_flow", "")),
             str(params.get("rain_spread", "")),
             str(params.get("rain_spacing", "")),
             str(params.get("rain_conv", "")),

@@ -407,9 +407,13 @@ Item {
         // the clip's frames, depth then encode (the batch's count is in Current Clip Info)
         done: page.vda.busy ? page.vda.framesDone : page.vda.progressDone
         total: page.vda.busy ? page.vda.framesTotal : page.vda.progressTotal
+        // ...with the pass's speed and its time left (user, 2026-11-01), as the console's progress line
         status: page.vda.busy && page.vda.framesTotal > 0
                 ? (page.vda.framesPhase === "encode" ? "Encoding " : "Depth ") + page.vda.framesDone + " / "
-                  + page.vda.framesTotal + " frames" + (page.vda.progressCount ? "  ·  clip " + page.vda.progressCount : "")
+                  + page.vda.framesTotal + " frames"
+                  + (page.vda.fps > 0 ? "  ·  " + page.vda.fps.toFixed(1) + " fps" : "")
+                  + (page.vda.timeLeft ? "  ·  " + page.vda.timeLeft + " left" : "")
+                  + (page.vda.progressCount ? "  ·  clip " + page.vda.progressCount : "")
                 : page.vda.status
 
         AccentButton {

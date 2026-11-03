@@ -48,7 +48,8 @@ def _identity(path: str) -> dict:
 def signature(input_path: str, *, frames_chunk: int, frames_overlap: int, tile_num: int, tile_overlap: int,
               inference_steps: int, seed, prompt: str, is_dual_input: bool, total_frames: int, model: dict) -> dict:
     """Everything that changes a chunk's latents: a checkpoint made under anything else is stale."""
-    return {
+    from studio.stages.inpainting_v2 import fp8_matmul
+    sig = {
         "format": FORMAT,
         "input": _identity(input_path),
         "frames_chunk": int(frames_chunk),
@@ -62,6 +63,10 @@ def signature(input_path: str, *, frames_chunk: int, frames_overlap: int, tile_n
         "total_frames": int(total_frames),
         "model": {k: str(v) for k, v in sorted((model or {}).items())},
     }
+    # FP8 Math changes the latents a little: only when on, so earlier checkpoints still match without it
+    if fp8_matmul.enabled():
+        sig["fp8_matmul"] = True
+    return sig
 
 
 def _rng_state() -> dict:

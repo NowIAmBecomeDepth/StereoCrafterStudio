@@ -112,5 +112,48 @@ class FlowFillTest(unittest.TestCase):
         self.assertLess(err[copy[t0] > 0].mean(), 3.0, "and it is the real picture, not a blur")
 
 
+class _Occluded(_TrueFlow):
+    """The pan, but frame `t0`'s round trips from the frames in `bad` fail (in columns `cols` only, when
+    given): something in those frames covers where t0's strip lands."""
+
+    def __init__(self, t0, bad, cols=None):
+        super().__init__()
+        self.t0, self.bad, self.cols = t0, set(bad), cols
+
+    def between(self, pairs, h, w):
+        out = super().between(pairs, h, w)
+        for j, (a, b) in enumerate(pairs):
+            if b == self.t0 and a in self.bad:
+                if self.cols is None:
+                    out[j, 0] += 9.0
+                else:
+                    out[j, 0, :, self.cols] += 9.0
+        return out
+
+
+class NearThingTest(unittest.TestCase):
+    """User, 2026-11-02, ch.1 smintroscenes00006103: a shot from a moving car, a pole passing close. The
+    pole showed in the strip a frame early and doubled (the steadying took a neighbour's picture where its
+    round trip failed), and as a dark shape two frames later (one frame 12 on was a pixel's only source)."""
+
+    t0 = 6
+
+    def _err(self, fill, frames, cols):
+        return float(np.abs(fill[self.t0, :, cols].astype(int) - frames[self.t0, :, cols].astype(int)).mean())
+
+    def test_the_steadying_keeps_to_the_round_trip(self):
+        frames = _pan()
+        frames[self.t0 + 2][:, 28:34] = 0                  # in that frame only: something dark, close
+        fill, copy, rose = _run(frames, _Occluded(self.t0, {self.t0 + 2}, cols=slice(28, 34)))
+        self.assertLess(self._err(fill, frames, slice(20, 24)), 6.0, "the dark thing isn't in frame 6's strip")
+
+    def test_a_lone_far_frame_is_not_copied(self):
+        frames = _pan()
+        far = self.t0 + 12
+        frames[far][:, 48:72] = 0                          # where frame 6's strip lands in it
+        fill, copy, rose = _run(frames, _Occluded(self.t0, set(range(N)) - {far}))
+        self.assertLess(self._err(fill, frames, slice(0, M)), 6.0, "frame 18 alone isn't frame 6's strip")
+
+
 if __name__ == "__main__":
     unittest.main()

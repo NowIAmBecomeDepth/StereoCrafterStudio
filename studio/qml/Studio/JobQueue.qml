@@ -178,6 +178,18 @@ Section {
             font.family: Theme.bodyFont
             font.pixelSize: Theme.smallSize
         },
+        // Refresh (a tester, 2026-11-02): the input folders read again -- clips added from
+        // outside Studio show up without changing a folder setting first. Every stage's list.
+        AccentButton {
+            objectName: "queueRefresh"
+            visible: !!queue.src
+            text: "Refresh"
+            kind: "ghost"
+            implicitHeight: 22
+            enabled: !queue.busy && !queue.moving
+            onClicked: queue.src.rescan()
+            HoverTip { tip: "Reads the input folders again, so clips added or removed outside Studio show up in the list." }
+        },
         // Show Finished (user, 2026-10-31): with Resume on, a finished clip leaves the list; this
         // lists those in finished/ again, dimmed, so one can be sent back to the stage before
         AccentButton {

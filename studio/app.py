@@ -307,6 +307,9 @@ def build(app: QGuiApplication):
         outcome.FINISH_LISTENERS[:] = [notifier.job_finished]
         objects["JobNotifier"] = notifier
         objects["Shell"].apply_app_icon(notifier)      # the one picked in the theme popout
+        # a trackpad pinch: the preview under it zooms, anywhere else the UI Scale steps (studio.pinch)
+        from .pinch import PinchRouter
+        objects["PinchRouter"] = PinchRouter(roots[0])
     logger.info("StereoCrafter Studio ready.")
     return engine, objects
 

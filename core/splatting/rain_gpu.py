@@ -214,10 +214,83 @@ _POOL = None
 _LOCAL = None
 
 
+#: SEA-RAFT runs at this share of the flow's half size (a quarter of the frame): 2026-11-02 bench on the
+#: Super Hero Stalker clips, 0.58 s a frame against 1.40 at half size, lined up nearly as well
+RAFT_SCALE = 0.5
+#: each frame pair's flow worked out once per batch (_flows); off only to compare
+PAIR_MEMO = True
+_RAFT = None
+_RAFT_LOCK = None
+_RAFT_MISSING_SAID = False
+
+
+def raft_ready() -> bool:
+    """SEA-RAFT's checkpoint is in the models folder (Settings > Studio > Models)."""
+    from core.removal import flow_fill
+    return flow_fill.available()
+
+
+def _raft_flows(ext, greys, t, ks):
+    """_flows with SEA-RAFT on the GPU: every pair in one batch, on the same opened grey DIS sees
+    (rain mostly gone from it), at RAFT_SCALE; returned as DIS returns them (half-size px, numpy)."""
+    global _RAFT, _RAFT_LOCK
+    import threading
+    from core.removal import flow_fill
+    if _RAFT_LOCK is None:
+        _RAFT_LOCK = threading.Lock()
+    h, w = greys[t].shape
+    n = len(ks)
+    g = torch.from_numpy(np.stack([greys[i] for i in [t] + list(ks)])).to(ext.ops.dev).float()[:, None]
+    g = F.interpolate(g, scale_factor=RAFT_SCALE, mode="area").expand(-1, 3, -1, -1)
+    a = torch.cat([g[[0] * n], g[1:]]).contiguous()
+    b = torch.cat([g[1:], g[[0] * n]]).contiguous()
+    with _RAFT_LOCK:                   # the preview's worker and a render never share it at once
+        if _RAFT is None:
+            _RAFT = flow_fill._Flow()
+        f = _RAFT(a, b)
+    fh, fw = f.shape[-2:]
+    f = F.interpolate(f, size=(h, w), mode="bilinear", align_corners=False)
+    f = torch.stack([f[:, 0] * (w / fw), f[:, 1] * (h / fh)], -1).cpu().numpy()
+    return {k: (np.ascontiguousarray(f[j]), np.ascontiguousarray(f[n + j])) for j, k in enumerate(ks)}
+
+
+def release_flow() -> None:
+    """Let SEA-RAFT go (a job starting, Release GPU Memory, the end of a batch)."""
+    global _RAFT
+    m, _RAFT = _RAFT, None
+    if m is not None:
+        m.release()
+
+
 def _flows(ext, greys, t, ks):
+    """Forward and backward flow between frame t and each neighbour. Within a batch each pair is
+    worked out once (user, 2026-11-02: "work out the speedup"): frame t's flow to k is k's flow back
+    to t, so centre k takes what centre t found -- half the pairs, the same flows."""
+    memo = getattr(ext, "_pairs", None)
+    if memo is None:
+        return _pair_flows(ext, greys, t, ks)
+    need = [k for k in ks if (t, k) not in memo]
+    if need:
+        for k, (f_tk, f_kt) in _pair_flows(ext, greys, t, need).items():
+            memo[(t, k)], memo[(k, t)] = f_tk, f_kt
+    out = {k: (memo[(t, k)], memo[(k, t)]) for k in ks}
+    for p in [p for p in memo if max(p) <= t]:       # centres go in order: no later one needs these
+        del memo[p]
+    return out
+
+
+def _pair_flows(ext, greys, t, ks):
     """Forward and backward DIS flow between frame t and each neighbour, the pairs on
-    worker threads (OpenCV releases the GIL; one DIS object per thread)."""
-    global _POOL, _LOCAL
+    worker threads (OpenCV releases the GIL; one DIS object per thread). Flow SEA-RAFT:
+    _raft_flows, or DIS when its checkpoint isn't there."""
+    global _POOL, _LOCAL, _RAFT_MISSING_SAID
+    if R.uses_raft(ext.s):
+        if raft_ready():
+            return _raft_flows(ext, greys, t, ks)
+        if not _RAFT_MISSING_SAID:
+            _RAFT_MISSING_SAID = True
+            R.logger.warning(
+                "Rain: SEA-RAFT isn't in the models folder (Settings > Studio > Models) -- using DIS")
     import threading
     from concurrent.futures import ThreadPoolExecutor
     if _POOL is None:
@@ -301,13 +374,14 @@ def background(ext, win_t: torch.Tensor, t: int, greys, quants=None):
         warped = F.grid_sample(img, grid, mode="bilinear", padding_mode="border", align_corners=True)
         stack.append(warped[0].permute(1, 2, 0).round().clamp(0, 255))   # OpenCV's 8-bit remap rounds
         valid.append(okF)
-    if R.RELIGHT and not ext.sparks:                          # R.RainExtractor._background's relight
+    if R.RELIGHT and not ext.sparks and R.lit_guards(ext.s):   # R.RainExtractor._background's relight
         for i in range(1, len(stack)):
             g = relight_gain(ops, stack[0], stack[i], valid[i], ext.scale)
             if g is not None:
                 stack[i] = (stack[i] * ops.resize(g, (H, W)).permute(1, 2, 0)).clamp(0, 255)
     ext.last_texture = None
-    if R.TEXTURE and not ext.sparks and len(stack) > 1 and getattr(ext.s, "preset", "downpour") != "mist":
+    if R.TEXTURE and not ext.sparks and R.lit_guards(ext.s) and len(stack) > 1 \
+            and getattr(ext.s, "preset", "downpour") != "mist":
         m = torch.stack([texture_match(ops, stack[0], stack[i], valid[i], ext.scale) for i in range(1, len(stack))])
         m = torch.where(torch.isnan(m), torch.full_like(m, float("inf")), m).amin(0)
         ext.last_texture = torch.where(torch.isinf(m), torch.zeros_like(m), m)
@@ -447,10 +521,11 @@ def sheet(ext, frame_u8, bg, res) -> Tuple[np.ndarray, np.ndarray]:
 def extract_lengths(ext, window: np.ndarray, centres: Sequence[int], keep_src: bool = False) -> List[tuple]:
     """R.RainExtractor._extract on the GPU: (rain, length, the light it was cut from or None)."""
     greys = [ext._flow_grey(f) for f in window] if ext.s.mode == "moving" else None
+    ext._pairs = {} if PAIR_MEMO else None           # this window's flows, each pair once (_flows)
     with torch.inference_mode():
         win_t = torch.from_numpy(np.ascontiguousarray(window)).to(ext.ops.dev)
         out = []
-        for t in centres:
+        for t in sorted(centres) if PAIR_MEMO else centres:
             if ext.sparks:
                 nb = background(ext, win_t, t, greys)
                 rain, length = sparks_of(ext, win_t[t], nb)
@@ -461,5 +536,7 @@ def extract_lengths(ext, window: np.ndarray, centres: Sequence[int], keep_src: b
             else:
                 rain, length = rain_of(ext, win_t[t], background(ext, win_t, t, greys))
             src = ext.last_src.float().cpu().numpy().astype(np.float32) if keep_src else None
-            out.append((rain, length, src))
-        return out
+            out.append((t, (rain, length, src)))
+        ext._pairs = None
+        order = {t: i for i, t in enumerate(centres)}
+        return [r for _, r in sorted(out, key=lambda x: order[x[0]])]
