@@ -173,9 +173,14 @@ VDA_L = Part("Video Depth Anything Large", "depth-anything/Video-Depth-Anything-
              "7aafbcb5c6af0bac741aad2b6471894fb4761afa", "VideoDepthAnything",
              (("video_depth_anything_vitl.pth", 1538392012),), key="vda_l")
 
+#: SEA-RAFT optical flow, its spring-M checkpoint (Edge Fill's Copy From Other Frames; user, 2026-11-02)
+SEA_RAFT = Part("SEA-RAFT (spring-M)", "MemorySlices/Tartan-C-T-TSKH-spring540x960-M",
+                "eb97ef34ba5d856c3fa2cdcd073150c057ac8b69", "SEA-RAFT",
+                (("model.safetensors", 78778760),), key="sea_raft", extras=(("README.md", 517),))
+
 PARTS: Dict[str, Part] = {p.key: p for p in (SVD, DEPTHCRAFTER, STEREOCRAFTER, WAN_VACE, STEREOCRAFTER2,
                                              STEREOCRAFTER2_FP8, SAM3, OMNISHOTCUT, DINOV3, SSCD,
-                                             VDA_S, VDA_B, VDA_L)}
+                                             VDA_S, VDA_B, VDA_L, SEA_RAFT)}
 
 #: The rows of the Models window, in the stages' order.
 MODELS: Tuple[Model, ...] = (
@@ -203,6 +208,10 @@ MODELS: Tuple[Model, ...] = (
     Model("sam3", "SAM 3", "Depth Map Editor", (SAM3,), gated=True, page="https://huggingface.co/facebook/sam3"),
     Model("rose", "ROSE", "Erase from Clip, Edge Fill", kind="rose", page="https://github.com/Kunbyte-AI/ROSE",
           note="Builds its own environment: Set Up ROSE in the Depth Map Editor's Erase panel."),
+    Model("sea_raft", "SEA-RAFT", "Edge Fill (Copy From Other Frames)", (SEA_RAFT,),
+          page="https://github.com/princeton-vl/SEA-RAFT", note="BSD 3-Clause.",
+          tip="Optical flow: Edge Fill copies the real picture into the strip from frames where a pan or a move "
+              "shows it, and ROSE fills only what no frame shows."),
     Model("omnishotcut", "OmniShotCut", "Scene Cut", (OMNISHOTCUT,), page="https://huggingface.co/uva-cv-lab/OmniShotCut"),
     Model("transnetv2", "TransNetV2", "Scene Cut", kind="bundled", page="https://github.com/soCzech/TransNetV2",
           note="Comes with Studio's packages (transnetv2-pytorch)."),

@@ -84,6 +84,19 @@ Splatting's standard warp.
 - From Forward-Warp (https://github.com/lizhihao6/Forward-Warp), as Tencent's StereoCrafter uses it; ported to
   plain PyTorch by irgadget (2025). MIT licence, Copyright (c) 2019 lizhihao6.
 
+## SEA-RAFT — `sea_raft/`
+
+Optical flow for Edge Fill's Copy From Other Frames (`core/removal/flow_fill.py`).
+
+- Upstream: https://github.com/princeton-vl/SEA-RAFT
+- Licence: BSD 3-Clause, Copyright (c) 2024 Princeton Vision & Learning Lab — `sea_raft/LICENSE`
+- Only the model's own files (`raft.py`, `extractor.py`, `layer.py`, `corr.py`, `update.py`, `utils.py`);
+  training, datasets and evaluation are not kept. Edits, marked at the top of each file: package imports, no
+  Hugging Face mixin (Studio loads the checkpoint itself), the encoders built without their ImageNet start
+  (the checkpoint overwrites it, and it would be a download), no scipy.
+- Its weights (the spring-M checkpoint, `MemorySlices/Tartan-C-T-TSKH-spring540x960-M`, BSD 3-Clause)
+  download from Settings > Studio > Models.
+
 ## Models
 
 None of these model weights are in this repository (the only one that is: Auto Convergence's, above): the installer or Studio downloads them, each under its own

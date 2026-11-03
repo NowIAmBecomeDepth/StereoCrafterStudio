@@ -1395,7 +1395,9 @@
      <span class="set">Output Folder</span> and <span class="set">Mask Folder</span>.</p>
   <div class="tip"><b>What it suits</b><span>Edge Fill does best on simple backgrounds with little movement.
      Walls, sky and plain objects -- a house, a bench, a cabinet -- carry on into the strip well. It can't
-     rebuild fine detail: a face or text in the strip comes out rough, so leave those clips unticked.</span></div>
+     rebuild fine detail: a face or text in the strip comes out rough, so leave those clips unticked -- unless
+     the camera pans or the subject moves, when <span class="set">Copy From Other Frames</span> brings the real
+     picture back, text and all.</span></div>
   <figure class="shot">
     <div class="frame"><div class="canvas"><img src="shots/37_edge_fill.webp" alt="The Edge Fill page with five clips"></div></div>
     <figcaption>Edge Fill on five merged clips from one chapter. Each still is the right eye at the frame where its strip is widest, with a red line where the strip ends and its width under it -- 26 or 27 px here, at the right eye's left edge. Two clips have no strip there, so only three are ticked; <span class="btn">Fill 3 Clips</span> refills them with ROSE.</figcaption>
@@ -1438,6 +1440,13 @@
     <li><span class="set">Right Edge Too</span>: Splatting leaves the strip on the right eye's left edge, so by
       default that is the only edge Edge Fill measures and fills. Tick it to look at the right eye's right edge
       as well, for a clip whose strip really is on that side; the clips are measured again when you change it.</li>
+    <li><span class="set">Copy From Other Frames</span> (on by default) runs before ROSE: when the camera pans
+      or the subject moves, the frames before or after often show what the strip hides, and the real picture
+      is copied in from them -- signs, text and edges come back as they were rather than invented. ROSE then
+      paints only what no frame shows. A copy is kept only when the motion checks out both ways, several frames
+      are averaged so the strip doesn't flicker, and a still shot is recognised in a few seconds and left to
+      ROSE. It adds about 0.8 s a frame and needs <b>SEA-RAFT</b> (79 MB) from
+      <b>Settings &gt; Studio &gt; Models</b>; without it, ROSE fills the whole strip as before.</li>
     <li><span class="set">Match Grain</span> gives the fill the film grain of the picture beside it, so the
       strip isn't smoother than the rest of the frame.</li>
     <li><span class="set">Match Detail</span> sharpens the fill to the picture's own fine detail: ROSE works

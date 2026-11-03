@@ -289,6 +289,10 @@ check("...no ROSE warning (ROSE is there)", not shown("fillEdgesNoRose"))
 check("...Resolution offers 560, 784 and Native (tiled), 560 picked", [str(s).split()[0] for s in (ef.property("sizes") or [])]
       == ["560", "784", "Native"] and str(ef.settings.property("size")).startswith("560"), str(ef.settings.property("size")))
 check("...Match Detail offered, on", bool(shown("fillEdgesDetail")) and ef.settings.property("detail") is True)
+check("...Copy From Other Frames offered, on, with its tip (user, 2026-11-02)",
+      bool(shown("fillEdgesCopyFrames")) and ef.settings.property("copy_frames") is True
+      and "SEA-RAFT" in str(shown("fillEdgesCopyFrames")[0].property("help")),
+      str(ef.settings.property("copy_frames")))
 check("...the note on what it suits: simple backgrounds, not faces or text (user, 2026-10-18)",
       bool(shown("fillEdgesSuits")) and "simple backgrounds" in shown("fillEdgesSuits")[0].property("text"))
 check("...Right Edge Too offered, off: the right eye's left edge only (user, 2026-10-18)",

@@ -73,6 +73,11 @@ HELP: Dict[str, str] = {
         "Sharpens ROSE's fill to the picture's own fine detail. ROSE works the edge smaller than the frame, "
         "so its fill comes back softer; the strength is measured per clip where ROSE repainted real picture "
         "(the band just past the strip) and is only used when the fill really is softer."),
+    "copy_frames": (
+        "Before ROSE paints, copies the real picture into the strip from the frames where a pan or a move "
+        "shows it -- signs, text and edges come back as they were, not invented -- and ROSE fills only what "
+        "no frame shows. A still shot shows nothing new: Edge Fill sees that in a few seconds and leaves "
+        "the strip to ROSE. Needs SEA-RAFT (Settings > Studio > Models, 79 MB); about 0.8 s a frame."),
     "fill": (
         "Refills the strip at the edge of each ticked clip with ROSE. Each clip's files are written again in "
         "their own format with only the strip changed. The originals are kept in edge_fill_originals beside "
@@ -546,6 +551,7 @@ class EdgeFillController(QObject):
         grain = bool(v.get("grain", True))
         detail = bool(v.get("detail", True))
         both_edges = bool(v.get("both_edges", False))
+        copy_frames = bool(v.get("copy_frames", True))
         height = S.height(v.get("size"))
         prefill = S.coerce("prefill", v.get("prefill"))
         # an H.264 / H.265 clip is written again with Merging's encoder settings (app.py sets .merging)
@@ -650,7 +656,7 @@ class EdgeFillController(QObject):
                     try:
                         r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain, settings=enc,
                                            rose_height=height, detail=detail, both_edges=both_edges,
-                                           prefill=prefill)
+                                           prefill=prefill, copy_frames=copy_frames)
                     except Stopped:
                         end_bar()
                         logger.info(f"  Stopped: {name} is as it was.")

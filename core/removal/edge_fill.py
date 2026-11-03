@@ -640,6 +640,12 @@ class _Edge:
     patch: Optional[np.ndarray] = None    # (n, h, keep, 3) uint16: what goes back
     runs: Optional[np.ndarray] = None     # (frames, mask rows): each row's hole reach, the mask's px
     ratio: float = 1.0                    # the mask's px -> the eye's
+    # Copy From Other Frames (flow_fill.py): the crop at full size, 8 bits, for the flow; then the copied
+    # fill, how much of it is taken over ROSE's (0-255), and where ROSE still paints -- all (n, h, mask)
+    full: Optional[np.ndarray] = None     # (n, h, crop, 3) uint8, mapped on disk
+    copied: Optional[np.ndarray] = None   # (n, h, mask, 3) uint8
+    copy: Optional[np.ndarray] = None     # (n, h, mask) uint8
+    rose: Optional[np.ndarray] = None     # (n, h, mask) bool
 
 
 def _eye_sources(group: Group, probes: Dict[str, Dict]) -> Dict[str, Tuple[str, int, int, int]]:
@@ -738,13 +744,32 @@ def detail_gain(real: List[np.ndarray], filled: List[np.ndarray], cols: Optional
     return round(best, 2)
 
 
+def _copy_ready() -> bool:
+    """Copy From Other Frames can run: SEA-RAFT downloaded and a CUDA card. Says why not when it can't."""
+    from . import flow_fill
+    if not flow_fill.available():
+        logger.info("  Copy From Other Frames is on but SEA-RAFT isn't downloaded (Settings > Studio > Models): "
+                    "ROSE fills the whole strip")
+        return False
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return True
+    except Exception:
+        pass
+    logger.info("  Copy From Other Frames needs an NVIDIA card: ROSE fills the whole strip")
+    return False
+
+
 def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
          steps: int = STEPS, grain: bool = True, settings: Optional[Dict] = None,
          strips: Optional[Dict] = None, rose_height: int = ROSE_HEIGHT, detail: bool = False,
-         both_edges: bool = False, prefill: str = "Blur") -> Dict:
+         both_edges: bool = False, prefill: str = "Blur", copy_frames: bool = True) -> Dict:
     """Refill the edge strips of one merged clip, its files rewritten in place -- each eye's usual edge
     (USUAL_EDGE), or every edge with a strip with `both_edges`. `prefill`: what ROSE sees under its
-    mask -- "Blur" (erase.prefill_frames) or "Stretched" (the last good column across it). Returns {"edges": [...], "files": [...]}
+    mask -- "Blur" (erase.prefill_frames) or "Stretched" (the last good column across it). `copy_frames`:
+    first copy the real picture into the strip from the frames that show it (flow_fill.py; needs
+    SEA-RAFT), ROSE filling only the rest. Returns {"edges": [...], "files": [...]}
     or {"skipped": why}. Raises E.Stopped, RuntimeError."""
     if not rose_env.ready():
         raise RuntimeError("ROSE isn't set up: Set Up ROSE in the Depth Map Editor's Erase first.")
@@ -795,6 +820,7 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
     if widest >= crop - 8:
         return {"skipped": f"The edge strip ({max(e.strip for e in edges)} px) is too wide for the frame."}
     rng = np.random.default_rng(int(time.time()))
+    use_flow = _copy_ready() if copy_frames else False
     sweep(group.folder)
     tmp = tempfile.mkdtemp(prefix=TEMP_PREFIX, dir=group.folder)
     # the frames whose grain and detail are measured: the only ones kept past the blend's width
@@ -813,6 +839,9 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
             # on disk, mapped: at Native the whole clip at full height ran to GBs in memory
             e.small = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_small.npy"), mode="w+",
                                                 dtype=np.uint8, shape=(n, rh, rw, 3))
+            if use_flow:            # Copy From Other Frames reads the crop at full size
+                e.full = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_full.npy"), mode="w+",
+                                                   dtype=np.uint8, shape=(n, h, e.crop, 3))
             x = x0 if e.edge == "left" else x0 + ew - e.crop
             got = 0
             for i, fr in enumerate(_crop_reader(path, x, e.crop, h, e.edge == "right")):
@@ -823,19 +852,44 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                 e.hi[i] = fr[:, :e.keep]
                 if i in picked:
                     e.sample[i] = fr[:, :e.need].copy()
-                e.small[i] = cv2.resize((fr >> 8).astype(np.uint8), (rw, rh), interpolation=cv2.INTER_AREA)
+                fr8 = (fr >> 8).astype(np.uint8)
+                if e.full is not None:
+                    e.full[i] = fr8
+                e.small[i] = cv2.resize(fr8, (rw, rh), interpolation=cv2.INTER_AREA)
                 got += 1
                 if got % 16 == 0:
                     progress(0.02 + 0.06 * (k + got / n) / len(edges), f"Reading the {e.eye} eye's {e.edge} edge")
             if got != n:
                 raise RuntimeError(f"Read {got} of {n} frames of {os.path.basename(path)}.")
 
+        # 1b. Copy From Other Frames: the real picture copied into each strip from the frames that show
+        # it; ROSE's frames get the copies and its mask shrinks to what no frame showed
+        rose_lo = 0.08
+        if use_flow:
+            from . import flow_fill
+            for k, e in enumerate(edges):
+                span = 0.17 / len(edges)
+                got_copy = flow_fill.propagate(e.full, e.mask, progress, stop, lo=0.08 + span * k, hi=0.08 + span * (k + 1))
+                if got_copy is not None:
+                    e.copied, e.copy, e.rose = got_copy
+                    _rh, _rw = e.small.shape[1:3]
+                    for i in range(n):
+                        if stop.is_set():
+                            raise E.Stopped()
+                        fr = np.array(e.full[i])
+                        strip = fr[:, :e.mask]
+                        keep_copy = ~e.rose[i]
+                        strip[keep_copy] = e.copied[i][keep_copy]
+                        e.small[i] = cv2.resize(fr, (_rw, _rh), interpolation=cv2.INTER_AREA)
+                e.full = None
+            rose_lo = 0.25
+
         # 2. ROSE: every edge's windows in one run (one model load)
         windows = E.plan_windows([True] * n, window=E.WINDOW, overlap=E.OVERLAP, context=0)
         overlap = E.OVERLAP
-        chunks, owner = [], []
+        chunks, owner, to_paint = [], [], []
         for k, e in enumerate(edges):
-            rw = e.small.shape[2]
+            rh_all, rw = e.small.shape[1:3]
             mw = int(math.ceil(e.mask * rw / float(e.crop)))
             for j, (a, length) in enumerate(windows):
                 for ti, (ta, tb) in enumerate(tiles):
@@ -843,19 +897,31 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                     for t in range(length):
                         frames[t] = e.small[min(a + t, n - 1)][ta:tb]
                     masks = np.zeros((length, tb - ta, rw), np.uint8)
-                    masks[:, :, :mw] = 255
+                    if e.rose is None:
+                        masks[:, :, :mw] = 255
+                    else:                   # only what no frame showed, at ROSE's size
+                        for t in range(length):
+                            whole = np.zeros((e.rose.shape[1], e.crop), np.uint8)
+                            whole[:, :e.mask] = e.rose[min(a + t, n - 1)]
+                            masks[t] = (cv2.resize(whole * 255, (rw, rh_all), interpolation=cv2.INTER_AREA)[ta:tb] > 0) * 255
                     if prefill == "Stretched":
-                        frames[:, :, :mw] = frames[:, :, mw:mw + 1]    # the last good column, stretched
+                        stretched = np.repeat(frames[:, :, mw:mw + 1], mw, axis=2)    # the last good column
+                        frames[:, :, :mw] = np.where(masks[:, :, :mw, None] > 0, stretched, frames[:, :, :mw])
                     else:
                         frames = E.prefill_frames(frames, masks > 0)    # a wide blur from beside the strip
                     fp, mp, op = (os.path.join(tmp, f"e{k}w{j}t{ti}_{s}.npy") for s in ("frames", "masks", "clean"))
                     np.save(fp, frames)
-                    np.save(mp, masks)
-                    chunks.append({"frames": fp, "masks": mp, "out": op})
+                    chunk = {"frames": fp, "masks": mp, "out": op}
+                    if masks.any():
+                        np.save(mp, masks)
+                        to_paint.append(chunk)
+                    else:                   # every pixel copied: nothing for ROSE, the frames are the fill
+                        np.save(op, frames)
+                    chunks.append(chunk)
                     owner.append((k, j, ti))
         job = {"rose_dir": str(rose_env.ROSE_DIR), "embeds": str(rose_env.EMBEDS),
                "size": [tiles[0][1] - tiles[0][0], rw],
-               "steps": int(steps), "seed": 42, "guidance": E.GUIDANCE, "chunks": chunks}
+               "steps": int(steps), "seed": 42, "guidance": E.GUIDANCE, "chunks": to_paint}
         job_path = os.path.join(tmp, "job.json")
         with open(job_path, "w", encoding="utf-8") as f:
             json.dump(job, f)
@@ -869,7 +935,10 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
         else:
             logger.info(f"  ROSE: {n} frames in {len(windows)} window(s) per edge at {rw}x{rh} "
                         f"(a {crop}-px crop at {scale:.2f}), {int(steps)} steps")
-        E._run_worker(job_path, len(chunks), int(steps), progress, stop, 0.08, 0.75, bars=True)
+        if to_paint:
+            E._run_worker(job_path, len(to_paint), int(steps), progress, stop, rose_lo, 0.75, bars=True)
+        else:
+            logger.info("  ROSE: nothing left to paint -- other frames showed the whole strip")
 
         # 3. + 4. each edge's fill at full size, grained, faded in
         for k, e in enumerate(edges):
@@ -973,10 +1042,14 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                 if plan is not None:
                     f = plan.add(f, rng)
                 f = sharpen(f, gain)
-                e.patch[i] = np.clip(orig * (1 - alpha) + f * 257.0 * alpha + 0.5, 0, 65535).astype(np.uint16)
+                if e.copy is not None:      # the copied picture over ROSE's, as far as it's trusted
+                    c = e.copy[i][:, :e.keep, None].astype(np.float32) / 255.0
+                    f = e.copied[i][:, :e.keep].astype(np.float32) * c + f * (1.0 - c)
+                e.patch[i] =np.clip(orig * (1 - alpha) + f * 257.0 * alpha + 0.5, 0, 65535).astype(np.uint16)
                 if i % 16 == 0:
                     progress(0.75 + 0.05 * (k + i / n) / len(edges), "Grain and blend")
             e.hi = None
+            e.copied = e.copy = e.rose = None
             if e.edge == "right":
                 e.patch = np.ascontiguousarray(e.patch[:, :, ::-1])
             cleaned.clear()
@@ -1035,7 +1108,8 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
         rec = _record(group.folder)
         for path in group.files.values():         # the untouched ones too: the clip is done
             rec[os.path.basename(path)] = {
-                "file": _file_id(path), "steps": int(steps), "grain": bool(grain), "mask": os.path.basename(mask_path),
+                "file": _file_id(path), "steps": int(steps), "grain": bool(grain), "copy": bool(use_flow),
+                "mask": os.path.basename(mask_path),
                 "edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges],
                 "date": time.strftime("%Y-%m-%d %H:%M")}
             if path in written or path in refills:  # its kept original, tied to it (kept_original)
@@ -1046,6 +1120,7 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
     finally:
         for e in edges:                       # the mapped frames let go, so their file can go
             e.small = None
+            e.full = None
         shutil.rmtree(tmp, ignore_errors=True)
 
 

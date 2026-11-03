@@ -29,6 +29,9 @@ BOOLS: Dict[str, bool] = {
     # Right Edge Too (user, 2026-10-18): the strip is looked for on the right eye's left edge, where
     # Splatting leaves it; on, its right edge too
     "both_edges": False,
+    # Copy From Other Frames (user, 2026-11-02): the real picture copied into the strip from the frames
+    # where a pan or a move shows it (SEA-RAFT flow, core/removal/flow_fill.py); ROSE fills the rest
+    "copy_frames": True,
 }
 DEFAULTS: Dict[str, Any] = {**STRINGS, **INTS, **BOOLS}
 

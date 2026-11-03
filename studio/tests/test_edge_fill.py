@@ -74,6 +74,9 @@ def _fake_worker(job_path, n_chunks, steps, progress, stop, lo, hi, bars=False):
 
 class EdgeFillTest(unittest.TestCase):
     def setUp(self):
+        # Copy From Other Frames off: these test ROSE's own fill (CopyFramesTest turns it on)
+        self._no_copy = mock.patch.object(F, "_copy_ready", lambda: False)
+        self._no_copy.start()
         self.tmp = tempfile.mkdtemp()
         self.out = os.path.join(self.tmp, "merged")
         self.masks = os.path.join(self.tmp, "splats")
@@ -93,6 +96,7 @@ class EdgeFillTest(unittest.TestCase):
         _fake_worker.calls = []
 
     def tearDown(self):
+        self._no_copy.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_finds_the_clip_and_its_mask(self):
@@ -543,6 +547,84 @@ class SweepBFixesTest(EdgeFillTest.__base__):
         with mock.patch.object(F, "tile_rows", lambda h: orig(h, 96, 32)), self.assertRaises(E.Stopped):
             self._fill(g, progress=progress, stop=stop, rose_height=0)
         self.assertIn("Matching colour", said)
+
+
+COPY = (30, 220, 60)            # what the stand-in Copy From Other Frames copies in
+
+
+class CopyFramesTest(EdgeFillTest.__base__):
+    """Copy From Other Frames (user, 2026-11-02; flow_fill.py): the real picture copied into the strip
+    first, ROSE painting only what no frame showed. The copy is stood in for: the strip's top half
+    copied (COPY), its bottom half left to ROSE (FILL)."""
+
+    setUp = EdgeFillTest.setUp
+    tearDown = EdgeFillTest.tearDown
+
+    def _run(self, propagate):
+        self.seen = []                  # what ROSE was given (its folder is gone after the fill)
+
+        def worker(job_path, *a, **k):
+            with open(job_path, encoding="utf-8") as f:
+                for c in json.load(f)["chunks"]:
+                    self.seen.append((np.load(c["frames"]), np.load(c["masks"]) > 0))
+            _fake_worker(job_path, *a, **k)
+        g = F.find_groups(self.out)[0]
+        mask = F.find_mask(g, self.masks)
+        from core.removal import flow_fill
+        with mock.patch.object(E, "_run_worker", worker), \
+                mock.patch.object(F.rose_env, "ready", lambda: True), \
+                mock.patch.object(F, "_copy_ready", lambda: True), \
+                mock.patch.object(flow_fill, "propagate", propagate), \
+                mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
+            r = F.fill(g, mask, lambda *a: None, threading.Event(), steps=4, grain=False, settings={},
+                       copy_frames=True)
+        return g, r
+
+    @staticmethod
+    def _top_half(frames, hidden, *a, **k):
+        n, h = frames.shape[:2]
+        fill = np.empty((n, h, hidden, 3), np.uint8)
+        fill[:] = COPY
+        copy = np.zeros((n, h, hidden), np.uint8)
+        copy[:, : h // 2] = 255
+        rose = np.zeros((n, h, hidden), bool)
+        rose[:, h // 2:] = True
+        return fill, copy, rose
+
+    def test_rose_paints_only_what_no_frame_showed(self):
+        g, r = self._run(self._top_half)
+        self.assertTrue(self.seen)
+        for fr, m in self.seen:
+            h = m.shape[1]
+            self.assertFalse(m[:, : h // 2 - 2].any(), "no ROSE mask where the strip was copied")
+            self.assertTrue(m[:, h // 2 + 2:, :4].all(), "ROSE's mask where no frame showed the strip")
+            top = fr[:, 4: h // 2 - 4, :3].reshape(-1, 3).mean(0)
+            self.assertLess(np.abs(top - COPY).max(), 12, "ROSE sees the copies, not a blur")
+        after = list(E._reader(g.files["R"], W, H, "rgb24"))
+        strip = r["edges"][0]["strip"]
+        for i in (0, N - 1):
+            a = after[i].astype(int)
+            top = a[4: H // 2 - 8, : strip - 2].reshape(-1, 3).mean(0)
+            low = a[H // 2 + 8: H - 4, : strip - 2].reshape(-1, 3).mean(0)
+            self.assertLess(np.abs(top - COPY).max(), 25, f"frame {i}: the copied rows are the copy")
+            self.assertLess(np.abs(low - FILL).max(), 25, f"frame {i}: the rest is ROSE's")
+        self.assertTrue(F._record(self.out)[os.path.basename(g.files["R"])]["copy"])
+
+    def test_a_strip_copied_whole_needs_no_rose(self):
+        def whole(frames, hidden, *a, **k):
+            fill, copy, rose = self._top_half(frames, hidden)
+            copy[:] = 255
+            rose[:] = False
+            return fill, copy, rose
+        g, r = self._run(whole)
+        self.assertEqual(_fake_worker.calls, [], "nothing left for ROSE: it isn't started")
+        a = list(E._reader(g.files["R"], W, H, "rgb24"))[N // 2].astype(int)
+        self.assertLess(np.abs(a[4:H - 4, : r["edges"][0]["strip"] - 2].reshape(-1, 3).mean(0) - COPY).max(), 25)
+
+    def test_a_static_shot_leaves_the_strip_to_rose(self):
+        g, r = self._run(lambda *a, **k: None)
+        m = self.seen[0][1]
+        self.assertTrue(m[:, :, :4].all(), "no copies: ROSE's mask is the whole strip, as before")
 
 
 class NativeTilesTest(EdgeFillTest.__base__):

@@ -184,6 +184,14 @@ Item {
                 text: "Right Edge Too"
                 help: page.help("both_edges")
             }
+            // user, 2026-11-02: the real picture from other frames first, ROSE for the rest
+            CheckField {
+                objectName: "fillEdgesCopyFrames"
+                store: page.st
+                key: "copy_frames"
+                text: "Copy From Other Frames"
+                help: page.help("copy_frames")
+            }
             FieldRow {
                 label: "Steps"; labelWidth: 110
                 help: page.help("steps")
