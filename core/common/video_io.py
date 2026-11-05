@@ -1625,9 +1625,21 @@ def start_ffmpeg_pipe_process(
     # pixels with the wrong matrix (dark / color-shifted output). BT.2020 content
     # (HDR-tagged sources) gets the bt2020 matrix instead.
     out_matrix = "bt2020" if color_tags_mode.startswith("bt.2020") else "bt709"
+    # Auto (or Off) copies the source's tags below, so convert with the matrix they name: an HDR10
+    # source was converted with BT.709 and tagged bt2020nc, every player decoding it colour-shifted
+    # (user, 2026-11-05: merged output oversaturated).
+    if not color_tags_mode.startswith("bt.709") and "2020" in str((video_stream_info or {}).get("color_space") or ""):
+        out_matrix = "bt2020"
     # pad_to_16_9 was previously accepted and ignored here -- the GUI checkbox
     # saved it and passed it in, and nothing ever built a filter from it.
-    cmd.extend(["-vf", _build_output_filters(content_width, content_height, out_matrix, pad_to_16_9)])
+    # A Color Tags choice other than Auto / Off names the output's tags outright (user, 2026-11-05: a
+    # tester's SDR picture came through tagged BT.2020 PQ from the inpainted clip and played
+    # oversaturated; picking BT.709 L changed nothing, the source's tags were copied whatever was chosen).
+    forced_tags = _FORCED_COLOR_TAGS.get(color_tags_mode)
+    if forced_tags:
+        out_matrix = "bt2020" if forced_tags["color_space"].startswith("bt2020") else "bt709"
+    out_range = forced_tags["color_range"] if forced_tags else "tv"
+    cmd.extend(["-vf", _build_output_filters(content_width, content_height, out_matrix, pad_to_16_9, out_range)])
 
     cmd.extend(["-c:v", codec])
 
@@ -1677,6 +1689,8 @@ def start_ffmpeg_pipe_process(
         ("color_range", "-color_range"),
     ]:
         val = (video_stream_info.get(k) if video_stream_info else None) or _tag_defaults.get(k)
+        if forced_tags:
+            val = forced_tags[k]
         if val:
             cmd.extend([f, val])
 
@@ -1689,8 +1703,22 @@ def start_ffmpeg_pipe_process(
                             creationflags=_NO_WINDOW)
 
 
+#: the tags a Color Tags choice other than Auto / Off writes (the dropdown's values, lower-cased)
+_FORCED_COLOR_TAGS = {
+    mode: {"color_primaries": prim, "transfer_characteristics": trc, "color_space": space, "color_range": rng}
+    for mode, prim, trc, space, rng in (
+        ("bt.709", "bt709", "bt709", "bt709", "tv"),
+        ("bt.709 l", "bt709", "bt709", "bt709", "tv"),
+        ("bt.709 f", "bt709", "bt709", "bt709", "pc"),
+        ("bt.2020", "bt2020", "smpte2084", "bt2020nc", "tv"),
+        ("bt.2020 pq", "bt2020", "smpte2084", "bt2020nc", "tv"),
+        ("bt.2020 hlg", "bt2020", "arib-std-b67", "bt2020nc", "tv"),
+    )
+}
+
+
 def _build_output_filters(
-    content_width: int, content_height: int, out_matrix: str, pad_to_16_9: bool
+    content_width: int, content_height: int, out_matrix: str, pad_to_16_9: bool, out_range: str = "tv"
 ) -> str:
     """Build the -vf chain shared by both encoder paths.
 
@@ -1701,7 +1729,7 @@ def _build_output_filters(
     so appending a second one would silently discard the colour conversion and
     produce dark / colour-shifted output.
     """
-    filters = [f"scale=out_color_matrix={out_matrix}:out_range=tv"]
+    filters = [f"scale=out_color_matrix={out_matrix}:out_range={out_range}"]
     if pad_to_16_9 and content_width > 0 and content_height > 0:
         target_w, target_h = content_width, round(content_width * 9 / 16)
         if target_h < content_height:

@@ -171,6 +171,37 @@ class TransferTagTests(unittest.TestCase):
         cmd = popen.call_args[0][0]
         self.assertEqual(cmd[cmd.index("-color_trc") + 1], "smpte2084", " ".join(map(str, cmd)))
 
+    def test_auto_tags_convert_with_the_matrix_they_tag(self):
+        """user, 2026-11-05: an HDR10 source merged under Color Tags Auto came out tagged bt2020nc
+        but converted to YUV with the BT.709 matrix -- every player decoded it colour-shifted."""
+        from unittest import mock
+        info = V.get_video_stream_info(str(self.clip))
+        from core.common import encoding_utils as E
+        with mock.patch.object(E, "nvenc_available", lambda *a, **k: False), mock.patch.object(V.subprocess, "Popen") as popen:
+            V.start_ffmpeg_pipe_process(64, 48, str(self.clip.with_name("out.mp4")), 12.0, video_stream_info=info,
+                                        encoding_options={"color_tags": "Auto", "encoder": "CPU"})
+        cmd = popen.call_args[0][0]
+        self.assertEqual(cmd[cmd.index("-colorspace") + 1], "bt2020nc", " ".join(map(str, cmd)))
+        self.assertIn("out_color_matrix=bt2020", cmd[cmd.index("-vf") + 1])
+
+    def test_a_color_tags_choice_sets_the_tags(self):
+        """user, 2026-11-05: SDR picture tagged BT.2020 PQ upstream played oversaturated, and Merging's
+        BT.709 L still copied the source's PQ tags."""
+        from unittest import mock
+        from core.common import encoding_utils as E
+        info = V.get_video_stream_info(str(self.clip))
+        for mode, want, rng in (("BT.709 L", ("bt709", "bt709", "bt709", "tv"), "tv"),
+                                ("BT.709 F", ("bt709", "bt709", "bt709", "pc"), "pc")):
+            with mock.patch.object(E, "nvenc_available", lambda *a, **k: False), mock.patch.object(V.subprocess, "Popen") as popen:
+                V.start_ffmpeg_pipe_process(64, 48, str(self.clip.with_name("out.mp4")), 12.0, video_stream_info=info,
+                                            encoding_options={"color_tags": mode, "encoder": "CPU"})
+            cmd = popen.call_args[0][0]
+            vf = cmd[cmd.index("-vf") + 1]
+            self.assertIn(f"out_color_matrix=bt709:out_range={rng}", vf, mode)
+            self.assertIn("color_primaries=bt709:color_trc=bt709", vf, mode)   # with_color_tags puts them here
+            got = tuple(cmd[cmd.index(f) + 1] for f in ("-colorspace", "-color_range"))
+            self.assertEqual(got, (want[2], want[3]), mode)
+
 
 class DepthBitScaleTests(unittest.TestCase):
     """bug sweep 2026-10-09 A11: the 10-bit depth reader decided shift-or-scale
