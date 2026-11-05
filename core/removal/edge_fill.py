@@ -100,6 +100,8 @@ STRIPS = ".edge_fill_strips.json"
 #: The rows' reach is spread over this many rows and frames (each way) before the blend: a
 #: notch a row or a frame wide in the mask is no reason for a notch in the fill.
 ROW_SPREAD, FRAME_SPREAD = 4, 1
+#: frames a clip may decode short of its packet count and still be filled (the tail it never shows)
+SHORT_TAIL = 3
 ORIGINALS_DIR = "edge_fill_originals"   # each clip's unfilled original, a refill's source (2026-10-26)
 
 Progress = Callable[[float, str], None]
@@ -643,6 +645,7 @@ class _Edge:
     patch: Optional[np.ndarray] = None    # (n, h, keep, 3) uint16: what goes back
     runs: Optional[np.ndarray] = None     # (frames, mask rows): each row's hole reach, the mask's px
     ratio: float = 1.0                    # the mask's px -> the eye's
+    got: int = 0                          # frames read of its file
     # Copy From Other Frames (flow_fill.py): the crop at full size, 8 bits, for the flow; then the copied
     # fill, how much of it is taken over ROSE's (0-255), and where ROSE still paints -- all (n, h, mask)
     full: Optional[np.ndarray] = None     # (n, h, crop, 3) uint8, mapped on disk
@@ -869,8 +872,22 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                 got += 1
                 if got % 16 == 0:
                     progress(0.02 + 0.06 * (k + got / n) / len(edges), f"Reading the {e.eye} eye's {e.edge} edge")
-            if got != n:
+            if got < n - SHORT_TAIL or got == 0:
                 raise RuntimeError(f"Read {got} of {n} frames of {os.path.basename(path)}.")
+            e.got = got
+        # A clip that decodes a frame or two short of its packet count (user, 2026-11-05: an NVENC
+        # 1_1920_merged_full_sbs.mp4 read 94 of 95) is filled for the frames it has: they are all
+        # ffmpeg ever shows of it, and _write writes back what decodes.
+        short = min(e.got for e in edges)
+        if short < n:
+            logger.info(f"  {group.name} decodes {short} of its {n} frames: filling those {short}.")
+            n = short
+            for e in edges:
+                e.hi, e.small = e.hi[:n], e.small[:n]
+                if e.full is not None:
+                    e.full = e.full[:n]
+            pick = pick[pick < n]
+            picked = set(int(i) for i in pick)
 
         # 1b. Copy From Other Frames: the real picture copied into each strip from the frames that show
         # it; ROSE's frames get the copies and its mask shrinks to what no frame showed

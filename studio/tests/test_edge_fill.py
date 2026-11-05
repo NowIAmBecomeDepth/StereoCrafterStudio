@@ -288,6 +288,34 @@ class EdgeFillTest(unittest.TestCase):
         self.assertFalse([n for n in os.listdir(self.out) if n.startswith(".edgefill_")], "its temp folder is gone")
 
 
+class ShortClipTest(EdgeFillTest):
+    """user, 2026-11-05: a full-SBS-only merge (1_1920_merged_full_sbs.mp4, NVENC) decoded 94 frames of
+    its 95 packets and Edge Fill stopped: "Read 94 of 95 frames"."""
+
+    def test_a_clip_a_frame_short_of_its_count_is_filled(self):
+        for k in ("L", "R"):
+            os.remove(os.path.join(self.out, f"shot_{W}_merged_full_sbs_{k}.mov"))
+        g = F.find_groups(self.out)[0]
+        self.assertEqual(sorted(g.files), ["sbs"])
+        import studio.merge_all as MA
+        real = MA.probe
+        def one_more(path):
+            p = dict(real(path))
+            p["frames"] += 1
+            return p
+        with (mock.patch.object(E, "_run_worker", _fake_worker),
+              mock.patch.object(F.rose_env, "ready", lambda: True),
+              mock.patch.object(MA, "probe", one_more),
+              mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False)):
+            r = F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=4,
+                       grain=False, settings={}, inpainter="rose")
+        self.assertEqual(r.get("edges", [{}])[0].get("eye"), "R", r)
+        after = list(E._reader(g.files["sbs"], 2 * W, H, "rgb24"))
+        self.assertEqual(len(after), N)
+        fill = after[N - 1].astype(int)[:, W:W + r["edges"][0]["strip"] - 2].reshape(-1, 3).mean(axis=0)
+        self.assertLess(np.abs(fill - FILL).max(), 25, "the last frame's strip is filled too")
+
+
 class SweepFixesTest(EdgeFillTest.__base__):
     """Bug sweep 2026-10-14: each test fails on the code before its fix (c6a6c6e)."""
 
