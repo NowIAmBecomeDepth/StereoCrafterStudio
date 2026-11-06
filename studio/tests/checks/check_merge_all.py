@@ -169,6 +169,11 @@ check("all merged: the dialog offers Merge", until(lambda: dlg.property("phase")
 check("...and says where it goes", "Movie - 3D Full SBS.mkv" in (shown("mergeAllReady")[0].property("text") if shown("mergeAllReady") else ""))
 dlg.close(); pump(0.4)
 
+# no project open (a tester, 2026-11-06): the button still works -- it joins the Output folder's clips
+shell.setProperty("projectFolder", ""); pump(0.4)
+check("no project: Merge All is still clickable", bool(shown("mgMergeAll")) and shown("mgMergeAll")[0].property("enabled"))
+shell.setProperty("projectFolder", P.as_posix()); pump(0.4)
+
 # Encoding Options: the Merge All tab
 enc = next(o for o in win.findChildren(QObject) if o.metaObject().className().startswith("EncodingDialog")
            and o.property("mergeAll"))

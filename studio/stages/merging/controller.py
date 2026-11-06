@@ -71,7 +71,7 @@ _HELP_FALLBACKS = {
         "video (the layout, codec and soundtrack are in Settings > Encoding Options > Merge All). It first checks "
         "that every scene Scene Cut made has a merged output; any that don't are listed, to send on to the stage "
         "each still needs, to play, or to merge anyway with black in their place. For a TV show: the episode "
-        "Merging is on."),
+        "Merging is on. With no project open: the merged clips in the Output Folder, in scene-number order."),
     "mergeall_layout": (
         "Full SBS: both eyes at full width, side by side. Half SBS: both squeezed into one normal-width frame, "
         "as most 3D TVs read side-by-side. L and R files: a whole-movie file for each eye."),

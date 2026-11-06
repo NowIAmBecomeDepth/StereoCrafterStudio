@@ -1522,7 +1522,8 @@ Item {
                 objectName: "mgMergeAll"
                 text: "Merge All SBS to 1 Video"
                 kind: "outline"
-                enabled: page.idle && page.mg.hasProject
+                // no project: it joins the Output folder's merged clips (a tester, 2026-11-03/06)
+                enabled: page.idle
                 onClicked: mergeAllDlg.begin()
                 HoverTip { tip: page.help("merge_all") }
             },
