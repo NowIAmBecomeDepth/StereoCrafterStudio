@@ -200,7 +200,7 @@ ApplicationWindow {
     color: Theme.ground
 
     // v1 calls the last tab "Extra" (unified_gui/shell.py BONUS_TITLE).
-    // "Depth Map" (user, 2026-10-25): its two models, DepthCrafter and VDA, are its sub tabs
+    // "Depth Map" (user, 2026-10-25): its models, DepthCrafter, VDA and DVD (2026-11-07), are its sub tabs, with Blend
     readonly property var stageNames: ["Depth Map", "Splatting", "Inpainting", "Merging", "Extra"]
     // where each stage is in the manual (F1, and its section of Settings --
     // user, 2026-10-04); Extra: the tool showing
@@ -212,6 +212,10 @@ ApplicationWindow {
         }
         if (i === 0 && stage.pages && stage.pages[0] && stage.pages[0].engine === 1)
             return "part2.html#vda"          // DepthCrafter's Video Depth Anything tab
+        if (i === 0 && stage.pages && stage.pages[0] && stage.pages[0].engine === 2)
+            return "part2.html#dvd"          // its DVD tab
+        if (i === 0 && stage.pages && stage.pages[0] && stage.pages[0].engine === 3)
+            return "part2.html#blend"        // its Blend tab
         return ["part2.html#depthcrafter", "part2.html#splatting", "part2.html#inpainting",
                 "part2.html#merging"][i] || ""
     }
@@ -404,7 +408,8 @@ ApplicationWindow {
 
     // Every stage that runs jobs, as the status bar and the close guard name it.
     readonly property var jobStages: [
-        { name: "DepthCrafter", ctl: DepthCrafter }, { name: "Video Depth Anything", ctl: VDA },
+        { name: "DepthCrafter", ctl: DepthCrafter }, { name: "Video Depth Anything", ctl: VDA }, { name: "DVD", ctl: DVD },
+        { name: "Blend", ctl: Blend },
         { name: "Splatting", ctl: Splatting },
         { name: "Inpainting", ctl: Inpainting }, { name: "Inpainting V2", ctl: InpaintingV2 },
         { name: "Merging", ctl: Merging }, { name: "Scene Cut", ctl: SceneCut },
@@ -487,7 +492,7 @@ ApplicationWindow {
             property string tip: "Writes every stage's settings to disk now (they are also saved when Studio closes)."
             // every stage (audit 2026-09-28, minor: only DepthCrafter + Inpainting)
             onTriggered: {
-                DepthCrafter.save(); VDA.save(); Splatting.save(); Inpainting.save(); InpaintingV2.save()
+                DepthCrafter.save(); VDA.save(); DVD.save(); Blend.save(); Splatting.save(); Inpainting.save(); InpaintingV2.save()
                 Merging.save(); SceneCut.save(); DepthEdit.save(); Shell.save()
                 Theme.toast("success", "Settings saved", "Every stage's settings are on disk.")
             }
@@ -603,7 +608,7 @@ ApplicationWindow {
             onActivated: (i) => stage.show(i, false)
             // Extra's tools drop down on hover; a click on Extra still opens the one last used (user, 2026-10-18).
             // Depth Map's two models too (user, 2026-10-25), its click the tab last used.
-            menus: ({ 0: ["DepthCrafter", "VDA"], 4: ["Scene Cut", "Depth Map Editor", "Edge Fill"] })
+            menus: ({ 0: ["DepthCrafter", "VDA", "DVD", "Blend"], 4: ["Scene Cut", "Depth Map Editor", "Edge Fill"] })
             onMenuPicked: (i, item) => {
                 if (i === 0) p0.engine = item
                 else if (i === 4) p4.tool = item

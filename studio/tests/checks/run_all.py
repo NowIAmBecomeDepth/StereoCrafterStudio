@@ -47,7 +47,8 @@ SOLO = {"check_splat_preview_3b.py", "check_splat_single.py",
 #: other), beside ROSE's ~5 GB and a real erase, on one card -- an OOM or a
 #: timing miss that isn't a regression. They run one at a time, after the pool.
 GPU_HEAVY = {"check_sam3_directions.py", "check_sam3_vram.py", "check_erase_rose.py",
-             "check_depthedit_erase.py"}
+             "check_depthedit_erase.py",
+             "check_dvd.py"}                # DVD: ~4 GB of weights on the card, a real run
 SOLO |= GPU_HEAVY
 #: A check's exit code for "couldn't run here" (_fixtures.SKIP_CODE).
 SKIP_CODE = 3

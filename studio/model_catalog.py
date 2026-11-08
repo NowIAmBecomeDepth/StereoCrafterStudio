@@ -173,6 +173,11 @@ VDA_L = Part("Video Depth Anything Large", "depth-anything/Video-Depth-Anything-
              "7aafbcb5c6af0bac741aad2b6471894fb4761afa", "VideoDepthAnything",
              (("video_depth_anything_vitl.pth", 1538392012),), key="vda_l")
 
+#: DVD (Depth Map's DVD tab; user, 2026-11-07): one checkpoint holding the Wan 2.1 1.3B DiT with DVD's LoRA
+#: and the VAE -- nothing else is needed (no Wan base weights, no T5: the prompt is always empty)
+DVD = Part("DVD v1.1", "FayeHongfeiZhang/DVD", "769534dec2d77f8da3667719568fbe57fe69cd9b", "DVD",
+           (("dvd_1.1.safetensors", 4491827302),), key="dvd")
+
 #: SEA-RAFT optical flow, its spring-M checkpoint (Edge Fill's Copy From Other Frames; user, 2026-11-02)
 SEA_RAFT = Part("SEA-RAFT (spring-M)", "MemorySlices/Tartan-C-T-TSKH-spring540x960-M",
                 "eb97ef34ba5d856c3fa2cdcd073150c057ac8b69", "SEA-RAFT",
@@ -194,9 +199,22 @@ MINIMAX_NET = Part("MiniMax-Remover transformer code", "", "", "MiniMax-Remover"
                    url="https://raw.githubusercontent.com/zibojia/MiniMax-Remover/28e12b450d8a72a7547b86940a4985e6ad90d75b/transformer_minimax_remover.py",
                    sha256="251aa2de588c9716ee1629270f079ca67cde72dc5948990cf6ddf6920ee769b1")
 
+#: AllTracker (aharley/alltracker, MIT), Edge Fill's Copy From Other Frames (user, 2026-11-07; core/removal/track_fill)
+ALLTRACKER = Part("AllTracker", "aharley/alltracker", "c8ba31225828cab9ec512d0627f0f826e641a877", "AllTracker",
+                  (("alltracker.pth", 66005722),), key="alltracker", extras=(("README.md", 238),))
+
+#: CLIP ViT-B/32 (open_clip's laion400m_e32 release), Splatting's Auto 3D (Thomas's patch; user, 2026-11-07):
+#: core/splatting/auto_estimate reads its image half
+AUTO3D = Part("CLIP ViT-B/32 (laion400m)", "", "", "AutoStrength",
+              (("vit_b_32-quickgelu-laion400m_e32-46683a32.pt", 605159845),), key="auto3d",
+              url="https://github.com/mlfoundations/open_clip/releases/download/v0.2-weights/"
+                  "vit_b_32-quickgelu-laion400m_e32-46683a32.pt",
+              sha256="46683a32721d5c68911153698992361285d20ca690bb4f317c11e45c03d798fa")
+
 PARTS: Dict[str, Part] = {p.key: p for p in (SVD, DEPTHCRAFTER, STEREOCRAFTER, WAN_VACE, STEREOCRAFTER2,
                                              STEREOCRAFTER2_FP8, SAM3, OMNISHOTCUT, DINOV3, SSCD,
-                                             VDA_S, VDA_B, VDA_L, SEA_RAFT, MINIMAX, MINIMAX_PIPE, MINIMAX_NET)}
+                                             VDA_S, VDA_B, VDA_L, DVD, SEA_RAFT, MINIMAX, MINIMAX_PIPE, MINIMAX_NET,
+                                             AUTO3D, ALLTRACKER)}
 
 #: The rows of the Models window, in the stages' order.
 MODELS: Tuple[Model, ...] = (
@@ -209,6 +227,8 @@ MODELS: Tuple[Model, ...] = (
           note="CC-BY-NC-4.0: non-commercial use only."),
     Model("vda_l", "Video Depth Anything Large", "DepthCrafter (VDA)", (VDA_L,),
           page="https://huggingface.co/depth-anything/Video-Depth-Anything-Large",
+          note="CC-BY-NC-4.0: non-commercial use only."),
+    Model("dvd", "DVD", "DepthCrafter (DVD)", (DVD,), page="https://huggingface.co/FayeHongfeiZhang/DVD",
           note="CC-BY-NC-4.0: non-commercial use only."),
     Model("svd", "Stable Video Diffusion 1.1", "DepthCrafter, Inpainting", (SVD,), gated=True,
           page="https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1",
@@ -224,6 +244,14 @@ MODELS: Tuple[Model, ...] = (
     Model("sam3", "SAM 3", "Depth Map Editor", (SAM3,), gated=True, page="https://huggingface.co/facebook/sam3"),
     Model("rose", "ROSE", "Erase from Clip, Edge Fill", kind="rose", page="https://github.com/Kunbyte-AI/ROSE",
           note="Builds its own environment: Set Up ROSE in the Depth Map Editor's Erase panel."),
+    Model("auto3d", "CLIP ViT-B/32", "Splatting (Auto 3D)", (AUTO3D,),
+          page="https://github.com/mlfoundations/open_clip", note="open_clip's laion400m_e32 release (MIT).",
+          tip="Auto 3D: looks at each clip and says how close its shot is, so a wide shot gets less 3D and a "
+              "close-up more. Without it Auto 3D uses a rougher estimate from the depth map."),
+    Model("alltracker", "AllTracker", "Edge Fill (Copy From Other Frames)", (ALLTRACKER,),
+          page="https://github.com/aharley/alltracker", note="MIT.",
+          tip="Edge Fill's Copy With: follows every pixel of the frames that show the strip's picture into the "
+              "strip. Sharper and steadier than SEA-RAFT on the test pans; needs about 6 GB of graphics memory."),
     Model("sea_raft", "SEA-RAFT", "Edge Fill (Copy From Other Frames)", (SEA_RAFT,),
           page="https://github.com/princeton-vl/SEA-RAFT", note="BSD 3-Clause.",
           tip="Optical flow: Edge Fill copies the real picture into the strip from frames where a pan or a move "

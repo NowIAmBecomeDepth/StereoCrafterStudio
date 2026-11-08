@@ -46,6 +46,13 @@ var GROUPS = [
         "A clip done? Right-click its row in Upcoming Jobs and choose Send to Splatting to take just that clip on."
     ] },
     // DepthCrafter's Video Depth Anything tab (user, 2026-10-25)
+    // Depth Map's Blend tab (user, 2026-10-26)
+    { key: "blend", title: "Blend", tips: [
+        "DepthCrafter steady but soft, VDA sharp? Layout + Detail keeps DepthCrafter's depth and adds VDA's edges.",
+        "Blend writes where Splatting reads; the maps it replaces move into DepthCrafter / VDA folders beside it, so nothing is lost.",
+        "Depth range drifting through a shot? Align Per frame refits the two maps as it goes.",
+        "Scrub the preview's frame slider to check the blend on the shot's hardest frames before you run it."
+    ] },
     { key: "vda", title: "Video Depth Anything", tips: [
         "Video Depth Anything is far faster than DepthCrafter: try it first, and keep DepthCrafter for the shots it gets wrong.",
         "Replacing a DepthCrafter map? The old one moves into a DepthCrafter folder beside it, and Splatting shows the new one at once.",
@@ -54,6 +61,15 @@ var GROUPS = [
         "Input Size sets the detail: 518 is what the model is trained at, higher keeps finer edges and costs memory.",
         "A long shot whose depth range really changes? Normalise with EMA lets the range follow it, as iw3 does.",
         "Short on VRAM? Pick a smaller Model or a lower Input Size; Online mode needs the same memory however long the clip."
+    ] },
+    // Depth Map's DVD tab (user, 2026-11-07)
+    { key: "dvd", title: "DVD", tips: [
+        "DVD gives the same map every time for the same clip and settings: one pass a window, no random sampling.",
+        "Replacing a DepthCrafter or VDA map? The old one moves into its own folder beside it, and Splatting shows the new one at once.",
+        "Right-click a clip in Splatting's Upcoming Jobs and choose Rerun with DVD to redo just that clip's depth.",
+        "Input Size 480 is what DVD is trained at; higher keeps finer edges and costs time and memory.",
+        "Depth jumping between windows? Raise Overlap: each window is fitted to the last over those frames.",
+        "DVD's weights are for non-commercial use only (CC-BY-NC-4.0)."
     ] },
     { key: "splatting", title: "Splatting", tips: [
         "Double-click the preview to zoom in on that spot; double-click again to see the whole frame.",

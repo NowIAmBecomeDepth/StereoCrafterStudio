@@ -3861,6 +3861,8 @@ class InpaintingEngine:
                 )
             from core.common.clip_names import natural_key  # v2: clips in number order, as Upcoming Jobs lists them (user, 2026-10-29)
             input_videos.sort(key=lambda p: natural_key(os.path.basename(p)))
+            from core.common.video_io import is_frame_break_mask  # v2: a Frame Break mask is no clip (2026-11-03)
+            input_videos = [p for p in input_videos if not is_frame_break_mask(p)]
             _only = getattr(self, "only_videos", None)  # v2: Process Selected
             if _only:
                 _keys = {os.path.normcase(os.path.abspath(p)) for p in _only}

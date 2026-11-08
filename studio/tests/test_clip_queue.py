@@ -226,19 +226,23 @@ class SplatFxTests(unittest.TestCase):
             side.write_text(json.dumps({"keyframe_track": True}))
             cache = {}
             vals = {"input_depth_maps": str(d)}
-            self.assertEqual(Q.splat_fx(vals, depths, cache), [[True, False, False, True, False, False, False, False, False], [False] * 9])
+            # ten flags a clip: the tenth a DVD map (2026-11-07, 6743699)
+            self.assertEqual(Q.splat_fx(vals, depths, cache),
+                             [[True, False, False, True, False, False, False, False, False, False], [False] * 10])
             side.write_text(json.dumps({"boost_amount": 0.5}))
             os.utime(side, (1, 2_000_000_000))
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, True, True, False, False, False, False, False])
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0],
+                             [False, False, True, True, False, False, False, False, False, False])
             # Particles on (user, 2026-10-08): the seventh flag
             side.write_text(json.dumps({"rain_mode": "moving"}))
             os.utime(side, (1, 2_000_000_100))
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False, False, False, True, False, False, True, False, False])
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0],
+                             [False, False, False, True, False, False, True, False, False, False])
             side.write_text(json.dumps({"rain_mode": "off"}))
             os.utime(side, (1, 2_000_000_200))
             self.assertFalse(Q.splat_fx(vals, depths, cache)[0][6])
             side.unlink()
-            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False] * 9)
+            self.assertEqual(Q.splat_fx(vals, depths, cache)[0], [False] * 10)
 
     def test_rain_badge_only_from_a_saved_sidecar(self):
         """user, 2026-10-10: Rain turned on in the page lit the badge on every clip (bug sweep

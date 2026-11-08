@@ -1773,7 +1773,7 @@ class WanInpaintRunner:
             return [
                 os.path.join(input_path, name)
                 for name in sorted(os.listdir(input_path), key=natural_key)  # v2: in number order
-                if name.lower().endswith(VIDEO_EXTENSIONS)
+                if name.lower().endswith(VIDEO_EXTENSIONS) and not name.lower().endswith("_framebreak.mkv")  # v2
             ]
         return []
 

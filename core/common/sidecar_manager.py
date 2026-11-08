@@ -299,21 +299,72 @@ def find_sidecar_in_folder(folder: str, core_name: str) -> Optional[str]:
     return None
 
 
+#: Splatting's Frame Break, per clip in its depth map's sidecar; Merging lays the bars on (user, 2026-11-03)
+FRAME_BREAK_KEYS = ("frame_break_bars", "frame_break_thresh", "frame_break_erode_left", "frame_break_erode_right",
+                    "frame_break_erode_global", "frame_break_edge_blur")
+DEPTH_SIDECAR_SUFFIX = "_depth.fssidecar"
+
+
+def _raw_sidecar(path: Optional[str]) -> dict:
+    if not path:
+        return {}
+    try:
+        from core.common.atomic_json import read_json
+        data = read_json(path)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def find_depth_sidecar(core_name: str, folders: Optional[List[str]]) -> Optional[str]:
+    """<clip>_depth.fssidecar in Splatting's depth folders -- or their finished/ (a map retired once or
+    twice; goblinbridgeattack00149667's sat in finished/finished) or Multi-Map's sidecars/."""
+    for folder in folders or []:
+        if not folder:
+            continue
+        if os.path.isfile(folder):
+            folder = os.path.dirname(folder)
+        for sub in ("", "finished", os.path.join("finished", "finished"), "sidecars"):
+            path = os.path.join(folder, sub, core_name + DEPTH_SIDECAR_SUFFIX)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def frame_break_settings(core_name: str, own_path: Optional[str], depth_folders: Optional[List[str]]) -> dict:
+    """The clip's Frame Break: from its own sidecar where that sets it, else from its depth map's, where
+    Splatting saves it (user, 2026-11-03: goblinbridgeattack00149667 had bars 0.226 there, but Merging read
+    only the Inpainted folder's sidecar -- grain_amount alone -- and merged without bars). Read raw:
+    load_sidecar_data keeps only SIDECAR_KEY_MAP's keys, and Frame Break isn't one of them."""
+    src = _raw_sidecar(own_path)
+    if "frame_break_bars" not in src:
+        src = _raw_sidecar(find_depth_sidecar(core_name, depth_folders))
+    out = {}
+    for k in FRAME_BREAK_KEYS:
+        if k in src:
+            try:
+                out[k] = float(src[k])
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
 def read_clip_sidecar(
-    sidecar_manager: SidecarConfigManager, video_path: str, core_name: str, search_folders: Optional[List[str]] = None
+    sidecar_manager: SidecarConfigManager, video_path: str, core_name: str, search_folders: Optional[List[str]] = None,
+    depth_folders: Optional[List[str]] = None,
 ) -> dict:
-    """Reads the sidecar file for a clip, checking multiple locations."""
-    if search_folders:
-        for folder in search_folders:
-            sidecar_path = find_sidecar_in_folder(folder, core_name)
-            if sidecar_path:
-                return sidecar_manager.load_sidecar_data(sidecar_path)
-
-    sidecar_path = find_sidecar_file(video_path)
-    if sidecar_path:
-        return sidecar_manager.load_sidecar_data(sidecar_path)
-
-    return sidecar_manager._get_defaults()
+    """Reads the sidecar file for a clip, checking multiple locations. `depth_folders`: Splatting's depth
+    map folders, for the clip's Frame Break (frame_break_settings)."""
+    sidecar_path = None
+    for folder in search_folders or []:
+        sidecar_path = find_sidecar_in_folder(folder, core_name)
+        if sidecar_path:
+            break
+    if not sidecar_path:
+        sidecar_path = find_sidecar_file(video_path)
+    data = sidecar_manager.load_sidecar_data(sidecar_path) if sidecar_path else sidecar_manager._get_defaults()
+    data.update(frame_break_settings(core_name, sidecar_path, depth_folders))
+    return data
 
 
 def find_video_by_core_name(folder: str, core_name: str) -> Optional[str]:

@@ -186,8 +186,9 @@
 <section class="section" id="depthcrafter">
   <h2><span class="num">7</span> Depth Map: DepthCrafter <a class="anchor" href="#depthcrafter">#</a></h2>
 
-  <p><b>Depth Map</b> is the first numbered stage. It has two tabs, one per model: <b>DepthCrafter</b>,
-     described here, and <a href="#vda">VDA</a> (Video Depth Anything), described at the end of this section.
+  <p><b>Depth Map</b> is the first numbered stage. It has a tab per model: <b>DepthCrafter</b>,
+     described here, and <a href="#vda">VDA</a> (Video Depth Anything) and <a href="#dvd">DVD</a>, described at the
+     end of this section, with <a href="#blend">Blend</a>, which mixes two of their maps.
      <b>DepthCrafter</b> looks at each clip and makes its
      <b>depth map</b>: a black-and-white video of the same shot where <b>white is near and black is
      far</b>. Everything after it builds the 3D from this map, so a good depth map matters more than
@@ -480,6 +481,106 @@
      then the encode, with frames done, speed and time left.</p>
   <div class="note"><b>Good to know</b><span>Large at 518 needs about 12 GB of graphics memory on a
      1920&times;800 clip. Short on memory? Pick a smaller Model or a lower Input Size.</span></div>
+  <h3 id="dvd">DVD (the DVD tab)</h3>
+  <p>The third tab, <b>DVD</b> (Deterministic Video Depth), makes depth maps with another model: Wan 2.1, a
+     video model, turned into a depth estimator. It looks at a window of frames at once and gives their depth in a
+     single pass, with no random sampling, so the same clip with the same settings always gives the same map. Its
+     maps have sharp edges and steady depth. It is slower than VDA and quicker than DepthCrafter: about 1.6 frames
+     a second on a 1920&times;800 clip at the default size.</p>
+  <p>It works like the VDA tab: its own <span class="set">Input Folder/File</span> and
+     <span class="set">Output Folder</span>, Upcoming Jobs and <span class="set">Resume</span>; videos only. Its
+     maps go where DepthCrafter's go, under the same name.</p>
+  <table class="keys">
+    <tr><td><b>Model</b></td><td>DVD v1.1, one 4.5 GB download: <span class="btn">Download Weights</span>
+      appears on the tab while it isn't there, or use Settings &gt; Studio &gt; Models. Its weights are for
+      <b>non-commercial use only</b> (their licence, CC-BY-NC-4.0).</td></tr>
+    <tr><td><b>Input Size</b></td><td>The short side of the picture the model looks at, a multiple of 16: type
+      one, or pick from the list on the button beside the box. 480 is what it's trained at. Higher keeps finer
+      detail and needs more time and memory. The map is written at this size; Splatting scales it to its
+      own. Not used while <span class="set">Early Downsample</span> is on.</td></tr>
+    <tr><td><b>Width</b></td><td>The width of the picture the model looks at, a multiple of 16; 640 by default.
+      With <span class="set">Early Downsample</span> off it only changes clips narrower than 4:3: the picture is
+      made at least this wide.</td></tr>
+    <tr><td><b>Early Downsample</b></td><td>On: the picture is made <span class="set">Width</span> wide and as
+      tall as the clip's shape gives, so a 1920&times;800 clip runs at 640&times;272 instead of 1152&times;480.
+      Much quicker and needs far less memory, but the map has less detail. Off by default.</td></tr>
+    <tr><td><b>Window</b></td><td>How many frames the model sees at once: 9 to 81, the list on the button in
+      steps of 9. Longer windows keep the depth steadier through the clip. 81 is the model's own
+      default.</td></tr>
+    <tr><td><b>Overlap</b></td><td>The frames each window shares with the one before. Each window's depth is
+      fitted to the last over these frames and faded across them, so the joins don't show. More is steadier
+      and slower; 9 is the model's own default.</td></tr>
+    <tr><td><b>TensorRT</b></td><td>Runs the part of DVD that turns frames into the model's own form and back
+      (most of its time) through NVIDIA TensorRT: about 1.6 times as fast. The first clip at a new size waits about
+      10 minutes while TensorRT prepares it; that is kept and reused. The depth comes out very slightly different
+      from the normal way (about one level in a thousand). Needs NVIDIA TensorRT installed once, from Settings &gt;
+      Studio &gt; Models. Off by default.</td></tr>
+    <tr><td><b>Normalise</b></td><td>As on the VDA tab: <b>Whole clip</b> or <b>EMA</b>.</td></tr>
+  </table>
+  <p><b>Replacing another map.</b> A DepthCrafter or VDA map of the clip already in the output folder moves into a
+     <code>DepthCrafter</code> or <code>VDA</code> folder inside it, and the new map takes its place, with a
+     <b>DVD</b> badge on the clip in Splatting's list. A later DVD run of the same clip replaces its own earlier
+     map, and a VDA run over a DVD map moves it into a <code>DVD</code> folder.</p>
+  <p>In Splatting, right-click a clip in Upcoming Jobs and choose <b>Rerun with DVD</b>: this tab opens with that
+     clip as its input and the clip's depth-map folder as its output. Press <span class="btn">Start</span>. The
+     console's <b>Depth Map</b> tab shows each clip's progress.</p>
+  <div class="note"><b>Good to know</b><span>On a card with 12 GB of graphics memory or less, DVD moves part of
+     itself into the computer's memory while it isn't needed, so it fits; this costs a fraction of a second a
+     window. When a frame is still too big for the card, DVD encodes and decodes it in overlapping tiles, blended
+     where they meet, and says so in the log -- a little slower, and the seams don't show. A 12 GB card runs
+     Input Size 480 whole, with or without TensorRT. An 8 GB card runs 480 in tiles, with or without TensorRT,
+     and 720 too; at 720 leave TensorRT off on an 8 GB card, as it is close to full.</span></div>
+  <h3 id="blend">Blend (the fourth tab)</h3>
+  <p>Once a clip has both a DepthCrafter map and a VDA map, the <b>Blend</b> tab mixes them into one. No model is
+     involved: it's done pixel by pixel on the two maps, so it takes seconds. A common use is DepthCrafter's
+     steady overall depth with VDA's sharper edges. Set <span class="set">Other Map</span> to <b>DVD</b> to blend
+     DepthCrafter's map with DVD's instead; everything below then means DVD where it says VDA.</p>
+  <p>Point <span class="set">Depth Maps Folder</span> at Splatting's depth-map folder (or press
+     <span class="btn">Same as Splatting</span>). The tab lists every clip that has both maps there -- the one
+     Splatting reads, and the other in the <code>DepthCrafter</code> or <code>VDA</code> folder that VDA's rerun
+     moved it into. The blend goes where Splatting reads the clip's map, and the map it replaces moves into its own
+     folder, so Splatting shows the blend at once and nothing is lost. A later blend replaces the earlier one.</p>
+  <table class="keys">
+    <tr><td><b>Mode</b></td><td><b>Mix</b> averages the two maps, by <span class="set">Mix</span> (0 is all
+      DepthCrafter, 1 all VDA). <b>Layout + Detail</b> keeps the <span class="set">Base</span> map's broad depth
+      and adds the other map's fine detail: edges and small shapes. <span class="set">Detail Size</span> sets how
+      big a feature counts as detail, <span class="set">Detail</span> how strongly it's added.</td></tr>
+    <tr><td><b>Base</b></td><td>The two models scale depth differently, so the other map is fitted onto the Base
+      first. In Mix the blend keeps the Base map's depth range; in Layout + Detail its broad depth.</td></tr>
+    <tr><td><b>Mix by Depth</b></td><td>Mix only. Instead of one Mix, <span class="set">Near Mix</span> for what is
+      close and <span class="set">Far Mix</span> for what is far, changing at <span class="set">Split</span> (the Base
+      map's depth, 1 nearest) over <span class="set">Softness</span>. For example VDA's sharper edges on people up
+      close and DepthCrafter's steadier background.</td></tr>
+    <tr><td><b>Edge Keep</b></td><td>Layout + Detail only. Keeps big depth steps, like an outline against the
+      background, out of the detail, so they leave no halo beside them. 0 is the plain blur.</td></tr>
+    <tr><td><b>Detail Limit %</b>, <b>Noise Floor %</b></td><td>Layout + Detail only. The Limit eases off detail
+      bigger than that share of the depth range, so colour texture or shimmer can't show as strong relief; the
+      Floor drops wiggles smaller than its share. 0 turns each off.</td></tr>
+    <tr><td><b>Edge Band px</b></td><td>Takes the other map in a strip along the frame's edges, fading out over
+      that many pixels. DepthCrafter's specks sit along the left and top edges, and a 20-40 px band hides them.
+      <span class="set">Band Edges</span> picks left and top, left only, or all four. 0 is off.</td></tr>
+    <tr><td><b>Smoothing</b></td><td>Layout + Detail only. Evens out the other map's detail over that many frames
+      each side, so its shimmer doesn't come through. Only small frame-to-frame changes are averaged, so a moving
+      edge doesn't trail. 0 is off.</td></tr>
+    <tr><td><b>Black Point</b>, <b>White Point</b>, <b>Gamma</b></td><td>Levels on the finished blend: the depth
+      that becomes the farthest and the nearest, and Gamma above 1 to bring the middle depths nearer (below 1 to
+      push them back).</td></tr>
+    <tr><td><b>Align</b></td><td><b>Per clip</b>: one fit for the whole clip, steady. <b>Per frame</b>: refitted
+      as the shot goes, eased over about half a second, for shots whose depth range changes. <b>Off</b>: the maps
+      as they are.</td></tr>
+    <tr><td><b>Output Size</b></td><td>The larger map's size, or DepthCrafter's or VDA's. Splatting scales the
+      map to its own.</td></tr>
+  </table>
+  <p>The <b>Preview</b> shows one frame as DepthCrafter | VDA | Blend, the fitted map marked; pick the clip and
+     scrub to the frame. The first look at a clip measures the fit once, which takes a moment; after that every
+     frame and setting shows straight away. <span class="btn">Blend All</span> blends every clip listed,
+     <span class="btn">Blend This Clip</span> the one in the preview; the console's Depth Map tab shows the
+     progress.</p>
+  <p>Tick <span class="set">Own Settings</span> beside the clip in the preview to give that clip settings of its
+     own: the panel then reads <b>Blend: &lt;clip&gt; only</b> and changes only that clip, while the others keep
+     the shared ones. The list marks such clips <i>(own settings)</i>, and untick to put a clip back on the shared
+     settings. They're kept in <code>blend_clips.json</code> in the depth-map folder. Other Map is always
+     shared.</p>
 </section>
 
 <!-- ======================================================================== -->
@@ -535,8 +636,9 @@
      the <b>8-bit / 10-bit</b> buttons that set it in one click, and <span class="set">Multi-Map</span>
      (<a href="#splat-sidecars">8f</a>).</p>
   <p><b>Upcoming Jobs</b> lists the chapter's clips. Click a clip to load it into the preview; right-click it
-     for <b>Splat This Clip Now</b>, <b>Rerun in DepthCrafter</b> or <b>Rerun with
-     <a href="#vda">Video Depth Anything</a></b> (see <a href="part4.html">Upcoming Jobs</a>).</p>
+     for <b>Splat This Clip Now</b>, <b>Rerun in DepthCrafter</b>, <b>Rerun with
+     <a href="#vda">Video Depth Anything</a></b> or <b>Rerun with <a href="#dvd">DVD</a></b> (see
+     <a href="part4.html">Upcoming Jobs</a>).</p>
   <figure class="shot" style="max-width:420px">
     <div class="frame"><div class="canvas"><img src="shots/16_splat_queue.webp" alt="Upcoming Jobs"></div></div>
     <figcaption>Each clip shows a still, its length, and two bars that fill as its full-size (H) and
@@ -549,7 +651,7 @@
       <code>finished</code> without converting them, for clips you've decided not to use.</li>
     <li><b>Little badges</b> on a clip show what's set for it: a sidecar, Pop Out Boost, Keyframes,
       Frame Break, Rain (three blue streaks), a depth map edited in the Depth Map Editor (a pencil), a depth
-      map made by <a href="#vda">Video Depth Anything</a> (<b>VDA</b>), or
+      map made by <a href="#vda">Video Depth Anything</a> (<b>VDA</b>) or by <a href="#dvd">DVD</a> (<b>DVD</b>), or
       a saved Detect Text mask (a <b>T</b>), or an object taken out with Erase from Clip (a violet circle
       struck through -- Merging's list shows it too, where Put Back lays it back). The sidecar's badge sits
       beside the progress bars; the others on a line under the clip's name, so a row with any of them is a little
@@ -906,6 +1008,15 @@
      <b>Mesh Warp</b> preview. <span class="btn">Encoding Options…</span> sets how the files are saved;
      the defaults are high quality.</p>
   <ul>
+    <li><span class="set">Auto 3D</span> gives every clip in a batch its own <span class="set">Disparity</span>
+      from how close its shot is: a wide landscape gets less 3D, a close-up more. A small model (CLIP,
+      in <b>Settings &gt; Studio &gt; Models</b>) looks at every 6th frame before the clip renders, which takes a
+      second or two. <span class="set">Min</span> is what the widest shots get, <span class="set">Max</span> the
+      closest, and <span class="set">Mid</span> a medium shot (a person from the waist up). The result goes
+      into the clip's sidecar, so the preview and Merging show it, and running the clip again with the same
+      Min, Mid and Max reuses it. It replaces a Disparity you set by hand, so untick it to keep yours. It
+      gives one value per clip: a clip that cuts from a wide shot to a close-up gets the average. Without
+      the model, a rougher estimate from the depth map is used.</li>
     <li><span class="set">Full Res CRF</span> and <span class="set">Low Res CRF</span> set the quality of
       each result (lower is better quality and bigger files).</li>
     <li><span class="set">Enable DNxHR</span> saves the full-size result as DNxHR (a <code>.mov</code>
@@ -1427,8 +1538,8 @@
       the strip, at the frame where it's widest, with a red line where the strip ends and its width under
       it -- so you can see which clips have a dark bar. A clip with no strip, or one already filled, is left
       unticked. <b>Select All</b> ticks every clip with a strip (<b>Deselect All</b> unticks them). Click a
-      still to tick or untick it; right-click it for <b>Fill Just This Clip</b>, or to <b>Play</b> the clip in
-      your default player -- the eye with the bar first -- and watch the whole thing. The <b>Thumbnails</b>
+      still to tick or untick it; right-click it for <b>Fill Just This Clip</b>, or <b>Play Right Eye Blend</b> to
+      watch the eye with the strip in your default player, start to finish. The <b>Thumbnails</b>
       slider (or its <b>&minus;</b> / <b>+</b>) makes the stills bigger or smaller, fewer or more to a row.
       Each clip's strip is measured once and remembered; it is measured again only when the clip's splat
       mask changes. <b>Refresh</b> looks through the folders again. While another stage's job runs the
@@ -1438,6 +1549,16 @@
       with its progress bars, on the console's Extra tab. It works during a fill too.</li>
     <li>To fill one clip from Merging's <b>Upcoming Jobs</b>, right-click it there and pick
       <b>Fill Edges</b>: its merged clip is filled straight away (once it has been merged).</li>
+    <li>A filled clip's right-click also has <b>Play Original Right Eye</b>: its file from before the fill,
+      kept in <code>edge_fill_originals</code>, in your default player, to compare with
+      <b>Play Right Eye Blend</b>.</li>
+    <li><span class="set">Method</span> is how the strip is dealt with. <b>Fill</b> (the default) has the
+      Inpainter paint it, with the settings below. The two quick ones need no model and take one pass per
+      file: <b>Black Bar</b> paints the strip black, and <b>Zoom</b> crops it off and scales the rest back
+      up to the frame, losing a little of the top and bottom too so the picture keeps its shape. Both do
+      the same to both eyes, so the eyes still line up, and with a Dual Eye splat both sides are covered.
+      Each clip is covered by its own measured strip, so Zoom can zoom one clip a little more than the next.
+      The originals are kept as for a fill, so a clip can be filled or covered again another way.</li>
     <li><span class="set">Inpainter</span> is what paints the strip. <b>MiniMax-Remover</b> (the default) was
       tested against <b>ROSE</b>, the one Edge Fill began with, on eight shots with their real edge hidden: its fill
       met the picture beside it more closely on all eight and flickered less on seven -- the most on pans --
@@ -1466,8 +1587,23 @@
       is copied in from them -- signs, text and edges come back as they were rather than invented. ROSE then
       paints only what no frame shows. A copy is kept only when the motion checks out both ways, several frames
       are averaged so the strip doesn't flicker, and a still shot is recognised in a few seconds and left to
-      ROSE. It adds about 0.8 s a frame and needs <b>SEA-RAFT</b> (79 MB) from
-      <b>Settings &gt; Studio &gt; Models</b>; without it, ROSE fills the whole strip as before.</li>
+      ROSE. It adds about half a second a frame and needs <b>AllTracker</b> (66 MB) or <b>SEA-RAFT</b> (79 MB)
+      from <b>Settings &gt; Studio &gt; Models</b>; without either, ROSE fills the whole strip as before.</li>
+    <li><span class="set">Depth Aware</span> (on by default) leaves what is nearer than the background alone. A
+      person or object passing over the frame's edge is real picture there, because Splatting moved it over the
+      edge, so the fill, its fade and the copies from other frames stop at it instead of painting over it (a name
+      plate on someone walking into frame used to come out smeared). Depth comes from the clip's depth map in the
+      <span class="set">Depth Maps Folder</span> (left empty, Splatting's Input Depth Maps; picking a chapter fills
+      it in), moved into the right eye as Splatting moved the picture -- it is steady from frame to frame. A clip
+      with no map, or a map that doesn't line up with its two eyes, has its depth measured from the eyes instead,
+      which can flicker at a subject's outline. It adds a few seconds a clip.</li>
+    <li><span class="set">Copy With</span> picks which finds the real picture. <b>AllTracker</b> (the default)
+      follows every pixel of the frames that show it into the strip; tested on eight pans with the edge hidden,
+      it came out sharper on seven and flickered less, and it doesn't copy across a cut. It needs about 6 GB
+      of graphics memory. <b>SEA-RAFT</b> borrows the motion beside the strip and needs about 1 GB. When the
+      one picked isn't downloaded, the other is used. Either way, what was copied for a clip is kept in memory
+      while Studio is open: filling the same clip again (another Inpainter, Steps or Resolution) skips this step.
+      Changing the clip, its strip or Depth Aware copies afresh; closing Studio forgets it all.</li>
     <li><span class="set">Match Grain</span> gives the fill the film grain of the picture beside it, so the
       strip isn't smoother than the rest of the frame.</li>
     <li><span class="set">Match Detail</span> sharpens the fill to the picture's own fine detail: ROSE works

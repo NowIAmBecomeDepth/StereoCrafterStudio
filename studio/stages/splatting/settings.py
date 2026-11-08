@@ -72,6 +72,12 @@ DEFAULTS: Dict[str, Any] = {
     "strict_ffmpeg_decode": True,       # user, 2026-10-18: the ffmpeg box
     "flip_horizontal": False,
     "auto_convergence_mode": "Off",
+    # Auto 3D (Thomas's patch; user, 2026-11-07): each clip's Disparity from how close its shot is,
+    # Min..Max with Mid at a medium shot (its own box: the dial loads each clip's sidecar value)
+    "auto_strength": False,
+    "auto_strength_min": "10.0",
+    "auto_strength_mid": "40.0",
+    "auto_strength_max": "80.0",
     # output / encoding
     "output_crf": "23",
     "output_crf_full": "23",
@@ -193,7 +199,8 @@ NUMERIC = {"max_disp", "zero_disparity_anchor", "process_length", "batch_size", 
            "output_crf_low", "depth_gamma", "depth_dilate_size_x", "depth_dilate_size_y", "depth_blur_size_x",
            "depth_blur_size_y", "depth_dilate_left", "depth_blur_left", "depth_blur_left_mix", "border_width",
            "border_bias", "auto_border_L", "auto_border_R", "mesh_warp_view_bias",
-           "mesh_warp_dolly_zoom", "mesh_warp_extrusion_scale", "mesh_warp_preview_density"}
+           "mesh_warp_dolly_zoom", "mesh_warp_extrusion_scale", "mesh_warp_preview_density",
+           "auto_strength_min", "auto_strength_mid", "auto_strength_max"}
 
 #: ...of which these are whole numbers (the render's int fields): "2.5" is
 #: refused as it is typed (audit 2026-09-28, minor).

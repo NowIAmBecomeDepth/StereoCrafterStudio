@@ -47,12 +47,12 @@ logger = logging.getLogger("studio.send_back")
 
 #: The stages each stage can send a clip back to (its kind -> target kinds).
 PREV = {
-    "splatting": ("depthcrafter", "vda"),
+    "splatting": ("depthcrafter", "vda", "dvd"),
     "inpainting": ("splatting",),
     "inpainting_v2": ("splatting",),
     "merging": ("inpainting", "inpainting_v2"),
 }
-TITLES = {"depthcrafter": "DepthCrafter", "vda": "Video Depth Anything", "splatting": "Splatting",
+TITLES = {"depthcrafter": "DepthCrafter", "vda": "Video Depth Anything", "dvd": "DVD", "splatting": "Splatting",
           "inpainting": "Inpainting", "inpainting_v2": "Inpainting V2"}
 #: The folder old copies go into, beside where they were.
 REPLACED = "replaced"

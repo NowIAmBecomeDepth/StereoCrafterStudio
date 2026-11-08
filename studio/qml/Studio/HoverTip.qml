@@ -104,7 +104,9 @@ Item {
             color: Theme.fg
             font.family: Theme.bodyFont
             font.pixelSize: 13
-            wrapMode: Text.WordWrap
+            // a word wider than the tip (a file name: Edge Fill's tiles, user 2026-11-03) breaks
+            // inside; WordWrap alone let it run past the edge
+            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
         }
         background: Rectangle {
             radius: 8

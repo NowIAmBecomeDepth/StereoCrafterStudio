@@ -142,6 +142,7 @@ class SplattingTest(_Base):
         with mock.patch.object(ctl, "_prepare", return_value=(object(), settings)), \
                 mock.patch.object(ctl, "_begin", lambda p, s, *a, **k: begun.update(s=s)):
             ctl._single_test = ""
+            ctl._phase, ctl._singles_asked = C.Phase.PREPARING, 1     # as _start_single leaves it
             ctl._on_single_ready({"video": str(self.clip), "depth": str(self.clip)})
         return begun["s"], ctl
 

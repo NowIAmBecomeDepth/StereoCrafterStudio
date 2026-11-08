@@ -84,7 +84,7 @@ class _RunnerHooks:
         self.ctl._sigWake.emit()
 
     def running(self, on):
-        self.ctl._set_busy(bool(on))
+        self.ctl._runner_running(bool(on))
 
     def claim(self):
         return self.ctl._claim()
@@ -100,6 +100,18 @@ class _RunnerHooks:
     def toast(self, kind, title, text):
         """How a batch ended (outcome.verdict); _processing_done runs on the UI thread."""
         self.ctl.toast.emit(str(kind), str(title), str(text))
+
+
+class Phase:
+    """Inpainting V2's run, one state at a time (user, 2026-11-07). The first Start imports
+    the Wan libraries (seconds), and that counted as idle: Stop was greyed out and did
+    nothing, and the run started when the import landed (check_v2_scenecut_run_state)."""
+    IDLE = "idle"
+    LOADING = "loading"            # a Start waits for engine.py's import
+    RUNNING = "running"            # the runner says it runs
+
+    #: where each state may go; anything else is logged
+    NEXT = {IDLE: (LOADING, RUNNING), LOADING: (RUNNING, IDLE), RUNNING: (IDLE,)}
 
 
 class InpaintingV2Controller(QObject):
@@ -139,9 +151,9 @@ class InpaintingV2Controller(QObject):
         self._stop_after = threading.Event()    # Stop After Clip
         self._runner_values: Dict[str, Any] = {}
         self._module = None
-        self._loading = False
+        self._loading = False             # engine.py's import in flight
         self._load_error = ""
-        self._busy = False
+        self._phase = Phase.IDLE
         self._status = "Ready"
         self._progress = 0.0
         # Upcoming Jobs (user, 2026-10-11: as V1 has): the videos a Start would process
@@ -360,18 +372,57 @@ class InpaintingV2Controller(QObject):
 
     # ---- run state -----------------------------------------------------------------
 
-    busy = Property(bool, lambda self: self._busy, notify=stateChanged)
+    busy = Property(bool, lambda self: self._phase != Phase.IDLE, notify=stateChanged)
+
+    @property
+    def _busy(self) -> bool:
+        """Not idle: a Start waiting on the import, or the run."""
+        return self._phase != Phase.IDLE
+
+    @_busy.setter
+    def _busy(self, on: bool) -> None:
+        # the checks' fake_busy only: a run that looks like it runs, no side effects
+        self._phase = Phase.RUNNING if on else Phase.IDLE
+
+    def _go(self, to: str) -> None:
+        """The one place the run's state changes. The clip list is held from the Start on; back
+        to idle, the run's ends are tied up here (Stop After Clip, the stats, the picks, save)."""
+        was = self._phase
+        if to == was:
+            return
+        if to not in Phase.NEXT[was]:
+            logger.warning("Inpainting V2: %s -> %s was not expected", was, to)
+        logger.debug("Inpainting V2: %s -> %s", was, to)
+        self._phase = to
+        if to == Phase.IDLE:            # a run's Stop After Clip ends with it
+            self._stop_after.clear()
+            self.stopAfterClipChanged.emit()
+        self.queue.hold(to != Phase.IDLE)   # the list stays as it is while the job runs
+        self.stateChanged.emit()
+        self.infoChanged.emit()
+        if to == Phase.IDLE:
+            self._stop_stats()
+            self._only = None
+            self.save()
+
+    def _runner_running(self, on: bool) -> None:
+        """The runner's running(on)."""
+        if on:
+            self._go(Phase.RUNNING)
+        elif self._phase == Phase.RUNNING:
+            self._go(Phase.IDLE)
 
     # ---- Stop After Clip: finish the clip being inpainted, then end the batch ----------
 
     stopAfterClipChanged = Signal()
     stopAfterClip = Property(bool, lambda self: self._stop_after.is_set(), notify=stopAfterClipChanged)
     #: the running batch has more than one clip (the button's only use)
-    multiClip = Property(bool, lambda self: self._busy and self._runner is not None and self._runner._batch_total > 1, notify=stateChanged)
+    multiClip = Property(bool, lambda self: self._phase == Phase.RUNNING and self._runner is not None
+                         and self._runner._batch_total > 1, notify=stateChanged)
 
     @Slot()
     def toggleStopAfterClip(self) -> None:
-        if not self._busy:
+        if self._phase != Phase.RUNNING:
             return
         if self._stop_after.is_set():
             self._stop_after.clear()
@@ -386,7 +437,7 @@ class InpaintingV2Controller(QObject):
 
     def _clip_name(self) -> str:
         """The clip being inpainted, from the status ("[2/5] clip.mp4  denoise ..."), "" between."""
-        m = re.match(r"^\[\d+/\d+\] (.+?)(?:  |$)", self._status or "") if self._busy else None
+        m = re.match(r"^\[\d+/\d+\] (.+?)(?:  |$)", self._status or "") if self._phase == Phase.RUNNING else None
         return m.group(1) if m else ""
     clipName = Property(str, _clip_name, notify=infoChanged)
     progress = Property(float, lambda self: self._progress, notify=infoChanged)   # 0..100, as v1
@@ -402,21 +453,10 @@ class InpaintingV2Controller(QObject):
             self._progress = float(value or 0.0)
             self.infoChanged.emit()
 
-    def _set_busy(self, on: bool) -> None:
-        if on != self._busy:
-            self._busy = on
-            if not on:      # a run's Stop After Clip ends with it
-                self._stop_after.clear()
-                self.stopAfterClipChanged.emit()
-            self.queue.hold(on)             # the list stays as it is while the job runs
-            self.stateChanged.emit()
-            if not on:
-                self._stop_stats()
-                self._only = None
-                self.save()
-
     def is_busy(self) -> bool:
-        return self._loading or bool(self._runner is not None and self._runner.is_busy())
+        # an import still landing after a Stop is no job: it holds no GPU and starts nothing
+        # (Start refuses on _loading itself until it has landed)
+        return self._phase != Phase.IDLE or bool(self._runner is not None and self._runner.is_busy())
 
     def holds_gpu(self) -> bool:
         return bool(self._runner is not None and self._runner.holds_gpu())
@@ -472,10 +512,11 @@ class InpaintingV2Controller(QObject):
             return
         self.save()
         if self._module is None:
-            # First Start: the Wan libraries take seconds to import.
+            # First Start: the Wan libraries take seconds to import -- the Start is busy from
+            # here, so Stop can call it off before anything runs
             self._loading = True
-            self.stateChanged.emit()
             self._on_status("Loading the Wan VACE libraries...")
+            self._go(Phase.LOADING)
 
             def load():
                 try:
@@ -497,6 +538,8 @@ class InpaintingV2Controller(QObject):
             # v1's shell tab: V1 is unaffected, and this says why V2 is not there.
             self._load_error = f"{type(result).__name__}: {result}"
             self._on_status("Inpainting V2 could not be loaded.")
+            if self._phase == Phase.LOADING:      # the Start waiting on it ends
+                self._go(Phase.IDLE)
             self.message.emit(
                 "error", "Inpainting V2 (Wan VACE)",
                 "This engine could not be loaded. V1 is unaffected and remains usable on the other sub-tab.\n\n"
@@ -508,7 +551,8 @@ class InpaintingV2Controller(QObject):
         # v1 _configure_logging: pinned at INFO, so model-load and per-chunk
         # lines reach the console whatever the root level.
         result.logger.setLevel(logging.INFO)
-        self._start_now()
+        if self._phase == Phase.LOADING:          # not Stopped while it loaded
+            self._start_now()
 
     def _ensure_runner(self):
         if self._runner is None:
@@ -540,8 +584,11 @@ class InpaintingV2Controller(QObject):
         self._runner_values["_encoding"] = self._encoding_settings()
         self._start_stats()
         runner.start_processing()          # v1: validate, claim, start the worker
-        if not self._busy:                 # refused (validation, the claim): no run to report
-            self._stop_stats()
+        if self._phase != Phase.RUNNING:   # refused (validation, the claim): no run to report
+            if self._phase == Phase.LOADING:
+                self._go(Phase.IDLE)       # (the stats go with it)
+            else:
+                self._stop_stats()
             return
         stats = self.job_stats
         if stats is not None:              # the batch's ETA beside the clip's, as V1's
@@ -592,6 +639,12 @@ class InpaintingV2Controller(QObject):
 
     @Slot()
     def stop(self) -> None:
+        if self._phase == Phase.LOADING:
+            # the Wan libraries still importing: nothing runs yet, so nothing will
+            logger.info("Inpainting V2: stopped before the batch started (the engine was loading).")
+            self._on_status("Stopped before the batch started.")
+            self._go(Phase.IDLE)
+            return
         if self._runner is not None and self._runner.is_busy():
             self._runner.stop_processing()
 

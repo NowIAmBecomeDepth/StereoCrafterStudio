@@ -440,12 +440,17 @@ pv.jumpTo(2); settle(); pv.jumpTo(1); settle()
 keep_tall(2000)
 _lg = find(sq, lambda c: c.objectName() == "jobQueueLegend")
 _li = [c for c in find_all(sq, lambda c: c.objectName() == "jobQueueLegendItem")]
-check("...a legend of the nine badges under the list (user, 2026-10-03; Particles 2026-10-08; Object removed 2026-10-16; VDA 2026-10-25)", _lg is not None and _lg.isVisible() and len(_li) == 9
+check("...a legend of the ten badges under the list (user, 2026-10-03; Particles 2026-10-08; Object removed 2026-10-16; VDA 2026-10-25; DVD 2026-11-07)", _lg is not None and _lg.isVisible() and len(_li) == 10
       and _lg.mapToItem(sq, QPointF(0, 0)).y() >= find(sq, lambda c: c.objectName() == "jobQueueList").mapToItem(sq, QPointF(0, 0)).y()
       + find(sq, lambda c: c.objectName() == "jobQueueList").height() - 0.5
       and _lg.mapToItem(sq, QPointF(0, _lg.height())).y() <= sq.height() + 0.5,
       f"{len(_li)} items; box {sq.height():.0f}, room {sq.property('listRoom') or 0:.0f}, min row {sq.property('minList') or 0:.0f}, "
       f"legend {_lg.property('implicitHeight'):.0f} / {_lg.height():.0f}" if _lg is not None else "no legend")
+# a DVD map's pill says DVD (user, 2026-11-07: Splatting's list showed VDA on DVD maps -- the pill read parent.kind)
+_pills = sorted(str(c.property("text")) for it in _li
+                for c in find_all(it, lambda c: c.property("text") in ("VDA", "DVD") and c.metaObject().className() != "QQuickTextMetrics"
+                                           and c.isVisible()))   # every badge has the pill, shown on VDA / DVD
+check("...the VDA and DVD maps' badges say VDA and DVD", _pills == ["DVD", "VDA"], str(_pills))
 # squeezed (user, 2026-10-24: "the splat clip list gets cut off on the bottom when the little indicators
 # are on any of the clips"): a badge row is taller than a plain one, and the legend sat under a list
 # kept at one plain row -- both ran out of the box. Now nothing shown runs past its bottom.

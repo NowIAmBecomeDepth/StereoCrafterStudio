@@ -43,7 +43,7 @@ import time
 import queue
 import re
 from core.common.video_io import start_ffmpeg_pipe_process, start_ffmpeg_pipe_process_dnxhr
-from core.common.video_io import resolve_frame_break_mask, FFmpegGrayPipeReader
+from core.common.video_io import resolve_frame_break_mask, find_frame_break_mask, FFmpegGrayPipeReader  # v2: see gen PATCHES
 from core.common.encoding_utils import get_encoder_codec
 from core.common.cli_utils import set_logger_level, draw_progress_bar
 
@@ -917,7 +917,8 @@ class MergingEngine:
             # Fields may hold a FILE (single-clip workflow) or a folder; the
             # sidecar finder needs a folder, so normalize a file to its dir.
             search_folders.append(os.path.dirname(_field) if os.path.isfile(_field) else _field)
-        return read_clip_sidecar(self.sidecar_manager, video_path, core_name, search_folders)
+        return read_clip_sidecar(self.sidecar_manager, video_path, core_name, search_folders,
+                                 depth_folders=getattr(self, "depth_sidecar_folders", None))  # v2: Frame Break
 
     # -- v1 MergingGUI._update_border_info (merging_gui.py:2379)
     def _update_border_info(self, left_border: float, right_border: float):
@@ -2111,7 +2112,7 @@ class MergingEngine:
                 if fb_bars > 0.0:
                     _fb_source_path = dual_splat_path if is_dual_eye_sbs else splatted_file_path
                     if _fb_source_path:
-                        _fb_mask_path = resolve_frame_break_mask(_fb_source_path)
+                        _fb_mask_path = find_frame_break_mask(_fb_source_path)  # v2: also where the splat was
                         if os.path.exists(_fb_mask_path):
                             try:
                                 fb_mask_reader = FFmpegGrayPipeReader(

@@ -76,6 +76,8 @@ from .platform_win import Backdrop, WindowFrame  # noqa: E402
 from .shell import StudioShell  # noqa: E402
 from .stages.depthcrafter.controller import DepthCrafterController  # noqa: E402
 from .stages.vda.controller import VdaController  # noqa: E402
+from .stages.dvd.controller import DvdController  # noqa: E402
+from .stages.blend.controller import BlendController  # noqa: E402
 from .stages.inpainting.controller import InpaintingController  # noqa: E402
 from .stages.inpainting_v2.controller import InpaintingV2Controller  # noqa: E402
 from .stages.merging.controller import MergingController  # noqa: E402
@@ -142,6 +144,8 @@ def build(app: QGuiApplication):
     backdrop = Backdrop()
     depthcrafter = DepthCrafterController(shell)
     vda = VdaController(shell)          # DepthCrafter's VDA tab (user, 2026-10-25)
+    dvd = DvdController(shell)          # ...and its DVD tab (user, 2026-11-07)
+    blend = BlendController(shell)      # ...and its Blend tab: the two maps into one (user, 2026-10-26)
     inpainting = InpaintingController(shell)
     inpainting_v2 = InpaintingV2Controller(shell, sibling=inpainting)
     inpainting.sibling = inpainting_v2
@@ -151,9 +155,13 @@ def build(app: QGuiApplication):
     scenecut = SceneCutController(shell)
     depthedit = DepthEditController(shell)
     depthedit.splatting = splatting      # the editor's 3D view renders through Splatting's preview
+    merging.splatting = splatting        # its Depth Maps: each clip's Frame Break is in its depth map's sidecar
     vda.splatting = splatting            # a re-run clip is shown afresh there when its new map lands
+    dvd.splatting = splatting
+    blend.splatting = splatting          # its folder (Same as Splatting), its list after a blend
     edgefill = EdgeFillController(shell)
     edgefill.merging = merging           # an H.264 / H.265 clip is written again with Merging's encoder settings
+    edgefill.splatting = splatting       # Depth Aware's depth maps when its own folder is empty
     # Put Back's Depth Map (user, 2026-10-15; core.removal.putback): the clean clip's depth map and
     # Splatting's settings for it -- its geometry, as Splatting rendered it
     def _putback_geometry(core_name):
@@ -187,7 +195,9 @@ def build(app: QGuiApplication):
     # VDA: an id of its own, so GpuJobs keeps it from running beside DepthCrafter (one id never refuses
     # itself); it logs to DepthCrafter's console tab (log_model: the id's first part)
     for stage_id, name, ctl in (("depthcrafter", "DepthCrafter", depthcrafter),
-                                ("depthcrafter_vda", "Video Depth Anything", vda), ("splatting", "Splatting", splatting),
+                                ("depthcrafter_vda", "Video Depth Anything", vda), ("depthcrafter_dvd", "DVD", dvd),
+                                ("depthcrafter_blend", "Blend", blend),
+                                ("splatting", "Splatting", splatting),
                                 ("inpainting", "Inpainting", inpainting), ("inpainting", "Inpainting V2", inpainting_v2),
                                 ("merging", "Merging", merging), ("scenecut", "Scene Cut", scenecut),
                                 ("depthedit", "Depth Map Editor", depthedit), ("edgefill", "Edge Fill", edgefill)):
@@ -265,7 +275,7 @@ def build(app: QGuiApplication):
     objects = {"Shell": shell, "Backdrop": backdrop, "WinFrame": frame, "ConsoleFrame": console_frame,
                "ConsoleBackdrop": console_backdrop,
                "Log": logs.tab("all"), "Logs": logs, "Updater": updater,
-               "DepthCrafter": depthcrafter, "VDA": vda, "Inpainting": inpainting, "InpaintingV2": inpainting_v2,
+               "DepthCrafter": depthcrafter, "VDA": vda, "DVD": dvd, "Blend": blend, "Inpainting": inpainting, "InpaintingV2": inpainting_v2,
                "Splatting": splatting, "Merging": merging, "SceneCut": scenecut,
                "DepthEdit": depthedit, "EdgeFill": edgefill, "Beginner": beginner, "GpuJobs": jobs,
                "JobStats": job_stats, "Vram": vram, "Folders": folders, "Glasses3D": glasses, "Models": models}
@@ -315,7 +325,7 @@ def build(app: QGuiApplication):
 
 
 #: Each job stage's Stop now slot (audit #13): the one the page's Stop runs.
-_STOP_NOW = {"DepthCrafter": "cancel", "VDA": "stop", "SceneCut": "abort", "Splatting": "stop", "Inpainting": "stop",
+_STOP_NOW = {"DepthCrafter": "cancel", "VDA": "stop", "DVD": "stop", "Blend": "stop", "SceneCut": "abort", "Splatting": "stop", "Inpainting": "stop",
              "InpaintingV2": "stop", "InpaintingM2S": "stop", "Merging": "stop", "EdgeFill": "stop"}
 
 
@@ -445,7 +455,7 @@ def main() -> int:
         # every stage after it, and the shell's own save
         # Edge Fill first: it waits for its fill (ROSE ended, the clip's files as they were), well
         # inside the exit watchdog, before the slower stages' shutdowns (bug sweep 2026-10-14b)
-        for name in ("EdgeFill", "Vram", "DepthCrafter", "VDA", "Inpainting", "InpaintingV2", "InpaintingM2S", "Splatting",
+        for name in ("EdgeFill", "Vram", "DepthCrafter", "VDA", "DVD", "Blend", "Inpainting", "InpaintingV2", "InpaintingM2S", "Splatting",
                      "Merging", "SceneCut", "DepthEdit", "Models"):
             if name not in objects:         # a personal/ engine this install doesn't have
                 continue

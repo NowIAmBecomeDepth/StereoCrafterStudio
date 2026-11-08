@@ -127,6 +127,23 @@ def _load_help() -> Dict[str, str]:
     return texts
 
 
+class Phase:
+    """Splatting's run, one state at a time (user, 2026-11-07). It was _busy plus
+    the Stop event plus the thread, and Stop while Single prepared was cleared by
+    the start (the clip rendered), Stop while the preview let go waited for the
+    release, a stopped Test Render left the next batch marked a test, and Stop
+    After Clip showed during the release (check_splat_run_state)."""
+    IDLE = "idle"
+    PREPARING = "preparing"        # Single: the preview reads its clip (singleReady follows)
+    RELEASING = "releasing"        # the preview lets go of the GPU, then the batch starts
+    RUNNING = "running"            # the batch thread runs
+
+    #: where each state may go; anything else is logged. A Map / Splat Test
+    #: keeps the preview, so it goes straight from PREPARING to RUNNING.
+    NEXT = {IDLE: (PREPARING, RELEASING), PREPARING: (RELEASING, RUNNING, IDLE),
+            RELEASING: (RUNNING, IDLE), RUNNING: (IDLE,)}
+
+
 class SplattingController(QObject):
     stateChanged = Signal()
     infoChanged = Signal()
@@ -169,7 +186,9 @@ class SplattingController(QObject):
         self._save_timer.timeout.connect(self.save)
 
         # run state -- v1 check_queue's fields
-        self._busy = False
+        self._phase = Phase.IDLE
+        self._run = 0                   # which start the phase belongs to (a stopped one's release drops)
+        self._singles_asked = self._singles_answered = 0   # Single's asks of the preview, and its answers
         self._status = "Ready"
         self._done = 0
         self._total = 0
@@ -601,8 +620,41 @@ class SplattingController(QObject):
 
     # ---- run state -------------------------------------------------------------
 
-    busy = Property(bool, lambda self: self._busy, notify=stateChanged)
+    busy = Property(bool, lambda self: self._phase != Phase.IDLE, notify=stateChanged)
     status = Property(str, lambda self: self._status, notify=infoChanged)
+
+    @property
+    def _busy(self) -> bool:
+        """Not idle: a start on its way in, or the batch."""
+        return self._phase != Phase.IDLE
+
+    @_busy.setter
+    def _busy(self, on: bool) -> None:
+        # the checks' fake_busy only: a job that looks like it runs, no side effects
+        self._phase = Phase.RUNNING if on else Phase.IDLE
+
+    def _go(self, to: str) -> None:
+        """The one place the run's state changes. Back to idle, the run's ends are
+        tied up here: Stop After Clip and the Test Render mark cleared, settings
+        saved, the preview back if it let go (the clip list follows stateChanged).
+        Callers set the status first."""
+        was = self._phase
+        if to == was:
+            return
+        if to not in Phase.NEXT[was]:
+            logger.warning("Splatting: %s -> %s was not expected", was, to)
+        logger.debug("Splatting: %s -> %s", was, to)
+        self._phase = to
+        if to == Phase.IDLE:
+            self._stop_after.clear()
+            self._test_render = False
+            self.stopAfterClipChanged.emit()
+        self.stateChanged.emit()
+        self.infoChanged.emit()
+        if to == Phase.IDLE:
+            self.save()
+            if was in (Phase.RELEASING, Phase.RUNNING):
+                self.preview.restore_after_job()
     #: in hundredths of a task: whole passes done, plus how far the one under
     #: way is (its frames of the clip's), so the bar moves within a pass
     progressDone = Property(int, lambda self: int(round(100 * min(self._total, self._done + self._pass_frac))),
@@ -622,11 +674,12 @@ class SplattingController(QObject):
     stopAfterClipChanged = Signal()
     stopAfterClip = Property(bool, lambda self: self._stop_after.is_set(), notify=stopAfterClipChanged)
     #: the running batch has more than one clip (the button's only use)
-    multiClip = Property(bool, lambda self: self._busy and self._clip_total > 1, notify=infoChanged)
+    multiClip = Property(bool, lambda self: self._phase == Phase.RUNNING and self._clip_total > 1,
+                         notify=infoChanged)
 
     @Slot()
     def toggleStopAfterClip(self) -> None:
-        if not self._busy:
+        if self._phase != Phase.RUNNING:
             return
         if self._stop_after.is_set():
             self._stop_after.clear()
@@ -674,18 +727,19 @@ class SplattingController(QObject):
 
     def _begin(self, processor, settings, values, from_idx, to_idx, release: bool = True) -> None:
         self._run_values = values
-        self._stop.clear()
-        self._busy = True           # Start is taken: no second one while the preview lets go
+        self._run += 1
+        me = self._run
         self._clear_run_info()
         self._status = "Releasing the preview's GPU memory..." if release else "Starting processing..."
-        self.stateChanged.emit()
-        self.infoChanged.emit()
         if release:
             # The batch gets the GPU to itself: the preview's readers, cached
-            # frames and CUDA tensors go first, then the run starts.
-            self.preview.release_for_job(lambda: self._launch(processor, settings, from_idx, to_idx))
+            # frames and CUDA tensors go first, then the run starts. Start is
+            # taken from here: no second one while the preview lets go.
+            self._go(Phase.RELEASING)
+            self.preview.release_for_job(lambda: self._launch(me, processor, settings, from_idx, to_idx))
         else:
-            self._launch(processor, settings, from_idx, to_idx)
+            self.infoChanged.emit()
+            self._launch(me, processor, settings, from_idx, to_idx)
 
     def _claim(self) -> bool:
         """v1 _claim_job: the shell's request_job (studio/gpu_jobs.py)."""
@@ -790,12 +844,11 @@ class SplattingController(QObject):
         if not self._claim():
             return
         test = "map" if self._map_test else ("splat" if self._splat_test else "")
-        self._busy = True
         self._clear_run_info()
         self._status = "Preparing single-clip processing..."
-        self.stateChanged.emit()
-        self.infoChanged.emit()
         self._single_test = test
+        self._go(Phase.PREPARING)
+        self._singles_asked += 1
         self.preview.prepare_single(test)
 
     @Slot(str)
@@ -834,18 +887,21 @@ class SplattingController(QObject):
         return os.path.dirname(folder) if os.path.isfile(folder) else folder
 
     def _on_single_ready(self, info: Dict[str, Any]) -> None:
-        self._busy = False
+        # the preview answers in the order it was asked: only the last ask's answer, and
+        # only while it still waits, starts anything (a Single stopped meanwhile doesn't)
+        self._singles_answered += 1
+        if self._singles_answered != self._singles_asked or self._phase != Phase.PREPARING:
+            return
         if info.get("error") or not info.get("video") or not info.get("depth"):
-            self._test_render = False
-            self.stateChanged.emit()
-            self._set_status("Ready")
+            self._status = "Ready"
+            self._go(Phase.IDLE)
             self.toast.emit("error", "Process Single Clip",
                             info.get("error") or "Could not get both video and depth map paths from previewer.")
             return
         values = S.normalise(self._values())
         prepared = self._prepare(values)
         if prepared is None:
-            self.stateChanged.emit()
+            self._go(Phase.IDLE)
             return
         processor, settings = prepared
         video, depth = info["video"], info["depth"]
@@ -872,18 +928,11 @@ class SplattingController(QObject):
         self._set_status(f"Starting single-clip processing for: {os.path.basename(video)}")
         self._begin(processor, settings, values, *S.processing_range(values), release=not test)
 
-    def _launch(self, processor, settings, from_idx, to_idx) -> None:
-        if self._stop.is_set():     # Stop pressed while the preview was letting go
-            self._stop.clear()
-            self._busy = False
-            self._status = "Processing stopped"
-            self.stateChanged.emit()
-            self.infoChanged.emit()
-            self.preview.restore_after_job()
-            return
+    def _launch(self, me, processor, settings, from_idx, to_idx) -> None:
+        if self._run != me or self._phase not in (Phase.RELEASING, Phase.PREPARING):
+            return                  # Stop pressed while the preview was letting go (or a newer start)
         self._stop.clear()
         self._drain_stale()
-        self._busy = True
         self._outcome = None
         self._stop_after.clear()
         self._clip_total = 0
@@ -902,8 +951,7 @@ class SplattingController(QObject):
         self._reset_passes()
         self._info = {k: "N/A" for k in INFO_KEYS}
         self._status = "Starting processing..."
-        self.stateChanged.emit()
-        self.infoChanged.emit()
+        self._go(Phase.RUNNING)
 
         def work():
             try:
@@ -922,8 +970,12 @@ class SplattingController(QObject):
 
     @Slot()
     def stop(self) -> None:
-        """v1 stop_processing."""
-        if self._busy:
+        """v1 stop_processing. On the way in nothing has started, so nothing runs: idle at once."""
+        if self._phase in (Phase.PREPARING, Phase.RELEASING):
+            logger.info("Splatting: stopped before the batch started (%s).", self._phase)
+            self._status = "Processing stopped"
+            self._go(Phase.IDLE)
+        elif self._phase == Phase.RUNNING:
             self._stop.set()
             self._set_status("Stopping...")
 
@@ -999,7 +1051,7 @@ class SplattingController(QObject):
             self.infoChanged.emit()
         # v1's safety net: a worker that died without "finished" must not
         # leave the stage busy for good.
-        if self._busy and (self._thread is None or not self._thread.is_alive()) and self._queue.empty():
+        if self._phase == Phase.RUNNING and (self._thread is None or not self._thread.is_alive()) and self._queue.empty():
             self._finish(died=True)
 
     def _clear_run_info(self) -> None:
@@ -1033,23 +1085,17 @@ class SplattingController(QObject):
             # list marks it done as the job ends
             self._pass_done = [True, True]
             self.infoChanged.emit()
-        self._busy = False
         self._thread = None
         self._jobs = []
         self._done, self._pass_frac = 0, 0.0
         halted = self._stop_after.is_set()
-        self._stop_after.clear()
-        self.stopAfterClipChanged.emit()
         if died:
             self._status = "Processing stopped unexpectedly. See console."
         elif stopped:
             self._status = "Processing stopped"
         else:
             self._status = "Processing finished"
-        self.stateChanged.emit()
-        self.infoChanged.emit()
-        self.save()
-        self.preview.restore_after_job()
+        self._go(Phase.IDLE)
         # v1 recorded the handoff on ANY finish, a stopped batch included; a
         # stopped batch's output is partial, so here only a completed one
         # is offered to Inpainting -- and only when it produced something

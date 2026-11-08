@@ -102,6 +102,26 @@ for t in live:
     fails += not ok
     print(f"{'OK ' if ok else 'BAD'} {pw:.0f}x{ph:.0f} early={early} shown={shown} covers={covers} afterClick={after_click} left={gone}  {t.property('tip')[:50]!r}")
 
+# A word wider than the tip -- a file name, as Edge Fill's tiles show them (user, 2026-11-03: "..._L.mov" ran
+# past the tip's right edge) -- breaks inside it: the text stays within the bubble.
+t0 = live[0]
+_old_tip = t0.property("tip")
+t0.setProperty("tip", "smintroscenes00005857_1920_merged_full_sbs\nsmintroscenes00005857_1920_merged_full_sbs_L.mov\n"
+                      "smintroscenes00005857_1920_merged_full_sbs_R.mov\nClick to tick or untick.")
+row = t0.parentItem()
+pt = row.mapToScene(QPointF(20, row.height() / 2)).toPoint()
+QTest.mouseMove(win, QPoint(5, 5)); QTest.qWait(250)
+QTest.mouseMove(win, pt); QTest.qWait(1000)
+pop = t0.property("popup")
+ci = pop.property("contentItem") if pop is not None else None
+inside = bool(t0.property("showing")) and ci is not None and ci.property("contentWidth") <= ci.width() + 0.5 \
+    and pop.property("width") <= 340
+fails += not inside
+print(f"{'OK ' if inside else 'BAD'} a long file name stays inside the tip: text "
+      f"{ci.property('contentWidth') if ci is not None else '?'} in {ci.width() if ci is not None else '?'}")
+QTest.mouseMove(win, QPoint(5, 5)); QTest.qWait(250)
+t0.setProperty("tip", _old_tip)
+
 after = hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None
 print("last_jobs.json unchanged:", before == after)
 print("FAILS", fails)

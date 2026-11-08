@@ -199,9 +199,9 @@ tm = next(o for o in win.findChildren(QObject) if o.objectName() == "fillEdgesTi
 check("...a right-click on a tile offers Fill Just This Clip", tm.property("visible") and tm.property("name") == f"take_{W}_merged_full_sbs",
       str(tm.property("name")))
 plays = shown("fillEdgesPlay")
-check("...and Play for each of its files, the eye with the bar first", [str(o.property("text")).split()[1] for o in plays]
-      == [f"take_{W}_merged_full_sbs_R.mov", f"take_{W}_merged_full_sbs_L.mov"]
-      and "the eye with the bar" in str(plays[0].property("text")), str([o.property("text") for o in plays]))
+# one entry, the eye with the bar (user, 2026-11-03: "play right eye blend", the left eye is just the source)
+check("...and Play Right Eye Blend only, no left eye", [str(o.property("text")) for o in plays] == ["Play Right Eye Blend"],
+      str([o.property("text") for o in plays]))
 opened = []
 import studio.shell as _sh
 _sh.os.startfile = lambda p: opened.append(p)
@@ -296,6 +296,21 @@ check("...Copy From Other Frames offered, on, with its tip (user, 2026-11-02)",
       bool(shown("fillEdgesCopyFrames")) and ef.settings.property("copy_frames") is True
       and "SEA-RAFT" in str(shown("fillEdgesCopyFrames")[0].property("help")),
       str(ef.settings.property("copy_frames")))
+check("...Copy With offered under it: AllTracker (the default) or SEA-RAFT (user, 2026-11-07)",
+      bool(shown("fillEdgesCopyWith")) and list(ef.property("copiers") or []) == ["AllTracker", "SEA-RAFT"]
+      and ef.settings.property("copy_with") == "AllTracker", str(ef.property("copiers")))
+ef.settings.setProperty("copy_frames", False); pump(0.3)
+check("...and hidden while Copy From Other Frames is off", not shown("fillEdgesCopyWith"))
+check("...Depth Aware offered, on (user, 2026-11-07)", bool(shown("fillEdgesDepthAware"))
+      and ef.settings.property("depth_aware") is True)
+check("...its Depth Maps Folder offered; empty, Splatting's Input Depth Maps is used", bool(shown("edgeFillDepth"))
+      and ef.depth_folder() == (os.path.abspath(str(objs["Splatting"].settings.value("input_depth_maps") or ""))
+                               if str(objs["Splatting"].settings.value("input_depth_maps") or "").strip() else ""),
+      ef.depth_folder())
+# off for the fills below: these clips' right eye is the left eye unshifted (a real splat shifts the background
+# by the hole's width), so all of it would read as near -- test_edge_fill's DepthAwareTest has a real pair
+ef.settings.setProperty("depth_aware", False); pump(0.2)
+ef.settings.setProperty("copy_frames", True); pump(0.3)
 check("...the note on what it suits: simple backgrounds, not faces or text (user, 2026-10-18)",
       bool(shown("fillEdgesSuits")) and "simple backgrounds" in shown("fillEdgesSuits")[0].property("text"))
 check("...Right Edge Too offered, off: the right eye's left edge only (user, 2026-10-18)",
@@ -303,6 +318,18 @@ check("...Right Edge Too offered, off: the right eye's left edge only (user, 202
 check("...Inpainter offered: MiniMax-Remover first, then ROSE (user, 2026-11-03)",
       bool(shown("fillEdgesInpainter")) and list(ef.property("inpainters") or []) == ["MiniMax-Remover", "ROSE"],
       str(ef.property("inpainters")))
+check("...Method offered: Fill (the default), Black Bar, Zoom (user, 2026-11-07)",
+      bool(shown("fillEdgesMethod")) and list(ef.property("methods") or []) == ["Fill", "Black Bar", "Zoom"]
+      and ef.settings.property("method") == "Fill", f"{ef.property('methods')} {ef.settings.property('method')}")
+for _m in ("Black Bar", "Zoom"):
+    ef.settings.setProperty("method", _m); pump(0.3)
+    check(f"...{_m} hides the fill's settings, keeps Right Edge Too, Fill still offered",
+          not any(shown(n) for n in ("fillEdgesInpainter", "fillEdgesCopyFrames", "fillEdgesSteps", "fillEdgesMmrSteps",
+                                     "fillEdgesSize", "fillEdgesPrefill", "fillEdgesGrain", "fillEdgesDetail"))
+          and bool(shown("fillEdgesBothEdges")) and shown("fillEdgesGo")[0].property("enabled"))
+ef.settings.setProperty("method", "Fill"); pump(0.3)
+check("...Fill shows them again", all(shown(n) for n in ("fillEdgesInpainter", "fillEdgesCopyFrames", "fillEdgesSize",
+                                                          "fillEdgesGrain", "fillEdgesDetail")))
 ef.settings.setProperty("inpainter", "MiniMax-Remover"); pump(0.3)
 check("...MiniMax-Remover hides Steps and Pre-fill (its own 6 steps; it blanks the strip itself)",
       not shown("fillEdgesSteps") and not shown("fillEdgesPrefill"))
@@ -375,6 +402,17 @@ check("...and its still is asked for again: a new URL, not Qt's cached pre-fill 
       until(lambda: shown("fillEdgesThumb") and shown("fillEdgesThumb")[0].property("source").toString() != still_before, 10),
       still_before)
 check("...not ticked", picked() == [], str(picked()))
+# its unfilled original, playable from its menu (user, 2026-11-07)
+QTest.mouseClick(win, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier,
+                 shown("fillEdgesTile")[0].mapToScene(QPointF(shown("fillEdgesTile")[0].width() / 2, 8)).toPoint())
+pump(0.4)
+_plays = shown("fillEdgesPlay")
+check("...its right-click plays the original right eye too", [str(o.property("text")) for o in _plays]
+      == ["Play Right Eye Blend", "Play Original Right Eye"]
+      and F.ORIGINALS_DIR in str(_plays[1].property("modelData")["path"] if hasattr(_plays[1].property("modelData"), "__getitem__") else
+                                 _plays[1].property("modelData").toVariant()["path"]),
+      str([o.property("text") for o in _plays]))
+QTest.keyClick(win, Qt.Key.Key_Escape); pump(0.3)
 # filled this run: green, as the clip lists show a finished row (user, 2026-10-18); the other tile not
 from PySide6.QtGui import QColor as _QC
 _tiles = shown("fillEdgesTile")
@@ -460,7 +498,7 @@ until(lambda: page.property("phase") == "list", 20)
 # no look during another stage's job: it waits, then looks (sweep 2026-10-14)
 sc = objs["SceneCut"]
 n_meas = len(measured)
-sc._busy, sc._loading, sc._then = True, True, (lambda *a: None)
+sc._busy = True                 # a Scene Cut run (its run state: Phase, 2026-11-07)
 sc.stateChanged.emit(); pump(0.4)
 click(shown("edgeFillRefresh")[0]); pump(1.0)
 check("another stage's job running: Refresh waits instead of looking", page.property("phase") == "waiting"
@@ -469,7 +507,7 @@ check("...the waiting line names the stage, and Fill is off (sweep 2026-10-14b)"
       ("Scene Cut" in str(shown("edgeFillWaiting")[0].property("text")) and bool(shown("fillEdgesGo"))
        and not shown("fillEdgesGo")[0].property("enabled")) if shown("edgeFillWaiting") else False,
       str(shown("edgeFillWaiting")[0].property("text")) if shown("edgeFillWaiting") else "")
-sc._busy, sc._loading, sc._then = False, False, None
+sc._busy = False
 sc.stateChanged.emit()
 check("...and looks once that job ends", until(lambda: page.property("phase") == "list", 20), page.property("phase"))
 check("...Fill back on when clips are ticked", bool(shown("fillEdgesGo"))
@@ -568,6 +606,27 @@ until(lambda: not ef.property("busy"), 120); pump(0.8)
 check("Merging's Fill Edges pressed during a fill: its folders after it",
       os.path.normcase(str(ef.settings.property("merged_folder")).replace("/", "\\")) == os.path.normcase(OUT)
       and ef.property("chapterNum") == -1, f"{ef.settings.property('merged_folder')} {ef.property('chapterNum')}")
+
+# Black Bar (user, 2026-11-07): no inpainter run, both eyes blacked alike, the files rewritten
+unfill()
+until(lambda: page.property("phase") == "list", 20)
+ef.settings.setProperty("method", "Black Bar"); pump(0.3)
+n4, jobs4 = len(toasts), len(jobs_seen)
+take_l = os.path.join(OUT, f"take_{W}_merged_full_sbs_L.mov")
+l_before = F._file_id(take_l)
+ef.fillClip(f"C:/x/take_{W}_inpainted_right_eye.mp4", OUT, MASKS)
+until(lambda: ef.property("busy"), 10)
+until(lambda: not ef.property("busy"), 120); pump(0.8)
+_bars = [list(E._reader(os.path.join(OUT, f"take_{W}_merged_full_sbs_{e}.mov"), W, H, "rgb24")) for e in "LR"]
+check("Black Bar: no inpainter ran, the left eye's file rewritten too", len(jobs_seen) == jobs4
+      and F._file_id(take_l) != l_before, f"{len(jobs_seen) - jobs4} runs")
+check("...the strip black on both eyes, the picture past it kept",
+      all(len(fr) == N and max(int(f[:, :STRIP].max()) for f in fr) < 24
+          and min(float(f[:, STRIP + 10:].mean()) for f in fr) > 60 for fr in _bars))
+check("...its toast says black bar, both eyes", any(k == "success" and "black bar" in m and "both eyes" in m
+                                                     for k, _t, m in toasts[n4:]), str(toasts[n4:]))
+ef.settings.setProperty("method", "Fill"); pump(0.3)
+unfill()
 
 check("Merging no longer has Fill Edges' settings", all(mg.settings.property(k) is None for k in
       ("edgefill_steps", "edgefill_size", "edgefill_grain", "edgefill_tile")))

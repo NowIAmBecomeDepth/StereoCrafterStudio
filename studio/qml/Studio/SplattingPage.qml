@@ -294,6 +294,11 @@ Item {
         if (VDA.busy) { Theme.toast("warning", "Video Depth Anything is busy", "Wait for its job to finish, then try again."); return }
         splatQueue.sendBack(path, "vda", VDA, 0, 1)
     }
+    // ...or through DVD (user, 2026-11-07), the same way: Depth Map's DVD tab, the clip loaded
+    function rerunWithDvd(path) {
+        if (DVD.busy) { Theme.toast("warning", "DVD is busy", "Wait for its job to finish, then try again."); return }
+        splatQueue.sendBack(path, "dvd", DVD, 0, 2)
+    }
 
     // Edit Depth Map: this clip's depth map, straight into the Depth Map Editor
     // (its render offers the way back) -- the button and Ctrl+M
@@ -679,6 +684,22 @@ ChangeFoldersButton {
                             // Choosing a mode applies its cached anchor, or runs the pre-pass on the preview clip.
                             onActivated: if (page.pv.loaded) Qt.callLater(page.pv.autoConvergeModeChosen)
                         }
+                    }
+                    // Auto 3D (Thomas's patch; user, 2026-11-07): each clip's Disparity from how close its shot is
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        SpCheck { objectName: "autoStrength"; key: "auto_strength"; text: "Auto 3D"; help: page.help("auto_strength") }
+                        Item { Layout.fillWidth: true }
+                        Caption { text: "Min:"; visible: !!page.st.auto_strength }
+                        SpBox { objectName: "autoStrengthMin"; key: "auto_strength_min"; boxWidth: 54; visible: !!page.st.auto_strength
+                                HoverTip { tip: page.help("auto_strength_min") } }
+                        Caption { text: "Mid:"; visible: !!page.st.auto_strength }
+                        SpBox { objectName: "autoStrengthMid"; key: "auto_strength_mid"; boxWidth: 54; visible: !!page.st.auto_strength
+                                HoverTip { tip: page.help("auto_strength_mid") } }
+                        Caption { text: "Max:"; visible: !!page.st.auto_strength }
+                        SpBox { objectName: "autoStrengthMax"; key: "auto_strength_max"; boxWidth: 54; visible: !!page.st.auto_strength
+                                HoverTip { tip: page.help("auto_strength_max") } }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -2101,12 +2122,14 @@ No button lit means custom "
                 rowActions: [{ id: "splat", text: "Splat This Clip Now" }, { id: "test", text: "Test Render" },
                              { id: "rerun", text: "Rerun in DepthCrafter", back: true },
                              { id: "rerunVda", text: "Rerun with Video Depth Anything", back: true },
+                             { id: "rerunDvd", text: "Rerun with DVD", back: true },
                              { id: "send", text: "Send to Inpainting", whenDone: true }]
                 onRowAction: (id, path) => {
                     if (id === "splat") page.sp.startClip(path)
                     else if (id === "test") page.sp.testClip(path)      // into Test Renders (user, 2026-10-15)
                     else if (id === "rerun") page.rerunInDepthCrafter(path)
                     else if (id === "rerunVda") page.rerunWithVda(path)
+                    else if (id === "rerunDvd") page.rerunWithDvd(path)
                     else if (id === "send") sendOn(path, page.sp, "inpainting", Inpainting, 2)
                 }
                 busy: page.sp.busy
@@ -2125,7 +2148,7 @@ No button lit means custom "
                 countText: String(page.sp.clipCount || "—")
                 countHelp: "Which clip of the batch is being splatted, and how many there are in total."
                 // what the badges mean, under the list (user, 2026-10-03)
-                legendKinds: ["sidecar", "edited", "vda", "text", "keyframe", "break", "pop", "particles", "erased"]
+                legendKinds: ["sidecar", "edited", "vda", "dvd", "text", "keyframe", "break", "pop", "particles", "erased"]
             }
         }
     }

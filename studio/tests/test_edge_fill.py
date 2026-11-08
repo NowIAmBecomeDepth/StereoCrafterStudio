@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import cv2
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
@@ -75,8 +76,12 @@ def _fake_worker(job_path, n_chunks, steps, progress, stop, lo, hi, bars=False):
 class EdgeFillTest(unittest.TestCase):
     def setUp(self):
         # Copy From Other Frames off: these test ROSE's own fill (CopyFramesTest turns it on)
-        self._no_copy = mock.patch.object(F, "_copy_ready", lambda: False)
+        self._no_copy = mock.patch.object(F, "_copy_ready", lambda *a: None)
         self._no_copy.start()
+        # Depth Aware off: these clips' right eye is the left eye unshifted (a real splat shifts the background
+        # by the hole's width), so all of it would read as near (DepthAwareTest has a real pair)
+        self._no_depth = mock.patch.object(F, "near_map", lambda *a, **k: None)
+        self._no_depth.start()
         self.tmp = tempfile.mkdtemp()
         self.out = os.path.join(self.tmp, "merged")
         self.masks = os.path.join(self.tmp, "splats")
@@ -97,6 +102,7 @@ class EdgeFillTest(unittest.TestCase):
 
     def tearDown(self):
         self._no_copy.stop()
+        self._no_depth.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_finds_the_clip_and_its_mask(self):
@@ -601,7 +607,7 @@ class CopyFramesTest(EdgeFillTest.__base__):
         from core.removal import flow_fill
         with mock.patch.object(E, "_run_worker", worker), \
                 mock.patch.object(F.rose_env, "ready", lambda: True), \
-                mock.patch.object(F, "_copy_ready", lambda: True), \
+                mock.patch.object(F, "_copy_ready", lambda *a: flow_fill), \
                 mock.patch.object(flow_fill, "propagate", propagate), \
                 mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
             r = F.fill(g, mask, lambda *a: None, threading.Event(), steps=4, grain=False, settings={},
@@ -884,6 +890,155 @@ class UsualEdgeFillTest(EdgeFillTest.__base__):
     def test_right_edge_too_fills_it(self):
         r = self.run_fill(True)
         self.assertEqual([(e["eye"], e["edge"]) for e in r["edges"]], [("R", "right")])
+
+
+class DepthAwareTest(unittest.TestCase):
+    """Depth Aware (user, 2026-11-07; depth_guard.py): a near subject crossing the right eye's left edge is real
+    picture there -- Splatting moved it over the edge, so its rows have no hole -- and the fill's pad and fade
+    past each row's hole must leave it (ch.3 BACKTOFORMULA00017844: the general's name plate was painted over).
+    A real stereo pair: the background shifted SHIFT px right in the right eye (its hole SHIFT wide), a block
+    in front shifted the other way, covering the edge on its rows."""
+
+    SHIFT, BLOCK_ROWS, BLOCK_W, BLOCK_SHIFT = 20, slice(40, 90), 70, 8
+
+    def _scene(self, i):
+        rng = np.random.default_rng(5)
+        wide = W + 64
+        base = rng.uniform(40, 215, (H // 6 + 2, wide // 6 + 2, 3)).astype(np.float32)
+        img = cv2.resize(base, (wide, H), interpolation=cv2.INTER_CUBIC)
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    def _pair(self, i):
+        scene = self._scene(i)
+        left = scene[:, 32:32 + W].copy()
+        right = scene[:, 32 - self.SHIFT:32 - self.SHIFT + W].copy()        # the background moved right
+        right[:, :self.SHIFT] = (20, 10, 40)                                  # its hole: the old dark bar
+        block = np.zeros((H, self.BLOCK_W + self.BLOCK_SHIFT, 3), np.uint8)
+        yy, xx = np.mgrid[0:H, 0:block.shape[1]]
+        block[...] = np.stack([(xx * 7) % 200 + 30, (yy * 5) % 180 + 40, ((xx + yy) * 3) % 160 + 60], -1)
+        rows = self.BLOCK_ROWS
+        left[rows, :self.BLOCK_W] = block[rows, self.BLOCK_SHIFT:self.BLOCK_SHIFT + self.BLOCK_W]
+        right[rows, :self.BLOCK_W - self.BLOCK_SHIFT] = block[rows, 2 * self.BLOCK_SHIFT:self.BLOCK_SHIFT + self.BLOCK_W]
+        return left, right
+
+    def setUp(self):
+        self._no_copy = mock.patch.object(F, "_copy_ready", lambda *a: None)
+        self._no_copy.start()
+        self.tmp = tempfile.mkdtemp()
+        self.out = os.path.join(self.tmp, "merged")
+        self.masks = os.path.join(self.tmp, "splats")
+        os.makedirs(self.out)
+        os.makedirs(self.masks)
+        pairs = [self._pair(i) for i in range(N)]
+        self.right = [r for _l, r in pairs]
+        dnx = ["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"]
+        _encode(os.path.join(self.out, f"shot_{W}_merged_full_sbs_L.mov"), [l for l, _r in pairs], dnx)
+        _encode(os.path.join(self.out, f"shot_{W}_merged_full_sbs_R.mov"), self.right, dnx)
+        mask = np.zeros((H, W, 3), np.uint8)
+        mask[:, :self.SHIFT] = 255
+        mask[self.BLOCK_ROWS] = 0                     # the block covers the edge -- but for a sliver, as Splatting
+        mask[self.BLOCK_ROWS, :4] = 255               # leaves at a near subject's edge, which lets the fade in
+        _encode(os.path.join(self.masks, f"shot_{W}_splatted2.mkv"),
+                [np.hstack([mask, r]) for r in self.right], ["-c:v", "ffv1", "-pix_fmt", "bgr0"])
+        _fake_worker.calls = []
+
+    def tearDown(self):
+        self._no_copy.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fill(self, depth, depth_folder=""):
+        g = F.find_groups(self.out)[0]
+        self.before = list(E._reader(g.files["R"], W, H, "rgb24"))             # as decoded: the codec's loss apart
+        with mock.patch.object(E, "_run_worker", _fake_worker), mock.patch.object(F.rose_env, "ready", lambda: True), \
+                mock.patch("core.common.recycle_bin.send_to_recycle_bin", lambda p: False):
+            F.fill(g, F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=4, grain=False,
+                   settings={}, depth_aware=depth, depth_folder=depth_folder)
+        return list(E._reader(g.files["R"], W, H, "rgb24"))
+
+    # the depth map's own depths: Splatting moved d = BG_D by SHIFT and d = NEAR_D by -BLOCK_SHIFT
+    BG_D, NEAR_D = 0.2, 0.7
+
+    def _depth_map(self, lined_up=True, sub="finished"):
+        folder = os.path.join(self.tmp, "depth")
+        os.makedirs(os.path.join(folder, sub), exist_ok=True)
+        frames = []
+        rng = np.random.default_rng(1)
+        for _i in range(N):
+            d = np.full((H, W), self.BG_D, np.float32)
+            d[self.BLOCK_ROWS, :self.BLOCK_W] = self.NEAR_D
+            if not lined_up:                                 # some other clip's map
+                d = rng.uniform(0.0, 1.0, (H // 8, W // 8)).astype(np.float32).repeat(8, 0).repeat(8, 1)
+            frames.append((d * 65535).astype(np.uint16))
+        p = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray16le", "-s", f"{W}x{H}",
+                              "-r", "24", "-i", "-", "-c:v", "ffv1", "-pix_fmt", "gray16le",
+                              os.path.join(folder, sub, "shot_depth.mkv")], stdin=subprocess.PIPE)
+        p.stdin.write(b"".join(f.tobytes() for f in frames))
+        p.stdin.close()
+        assert p.wait() == 0
+        return folder
+
+    def test_the_depth_map_is_found_where_splatting_keeps_it(self):
+        g = F.find_groups(self.out)[0]
+        folder = self._depth_map(sub="finished")
+        self.assertTrue(F.find_depth(g, folder).endswith(os.path.join("finished", "shot_depth.mkv")))
+        self.assertIsNone(F.find_depth(g, os.path.join(self.tmp, "nowhere")))
+        self.assertIsNone(F.find_depth(g, ""))
+
+    def test_with_the_depth_map_the_subject_is_left_alone(self):
+        from core.removal import depth_guard as G
+        folder = self._depth_map()
+        used = []
+        real_fit = G.depth_shift_fit
+
+        def fit(*a, **k):
+            got = real_fit(*a, **k)
+            used.append(got)
+            return got
+        with mock.patch.object(G, "depth_shift_fit", fit), \
+                mock.patch.object(G, "near_maps", side_effect=AssertionError("measured from the eyes")):
+            after = self._fill(True, folder)
+        a, b = used[0]
+        self.assertAlmostEqual(a * self.BG_D + b, self.SHIFT, delta=1.5, msg="the fit: the background's shift")
+        self.assertAlmostEqual(a * self.NEAR_D + b, -self.BLOCK_SHIFT, delta=1.5, msg="...and the block's")
+        self.assertLess(self._block_hurt(after), 3.0, "the block's picture kept")
+
+    def test_a_map_that_doesnt_line_up_falls_back_to_the_eyes(self):
+        from core.removal import depth_guard as G
+        folder = self._depth_map(lined_up=False)
+        calls = []
+        real = G.near_maps
+        with mock.patch.object(G, "near_maps", lambda *a, **k: calls.append(1) or real(*a, **k)):
+            after = self._fill(True, folder)
+        self.assertEqual(calls, [1], "measured from the two eyes instead")
+        self.assertLess(self._block_hurt(after), 3.0)
+
+    def _block_hurt(self, frames):
+        """how far the block's pixels just past the edge moved: the fill's pad and fade zone on its rows"""
+        rows, zone = slice(self.BLOCK_ROWS.start + 6, self.BLOCK_ROWS.stop - 6), slice(4, 40)
+        return max(float(np.abs(f[rows, zone].astype(int) - r[rows, zone].astype(int)).mean())
+                   for f, r in zip(frames[2:-2], self.before[2:-2]))
+
+    def test_a_near_subject_at_the_edge_is_left_alone(self):
+        after = self._fill(True)
+        self.assertLess(self._block_hurt(after), 3.0, "the block's picture kept")
+        bg = slice(0, self.BLOCK_ROWS.start - 10)
+        strip = np.mean([np.abs(f[bg, 2:self.SHIFT - 2].astype(int) - np.array(FILL)).mean() for f in after[2:-2]])
+        self.assertLess(strip, 25.0, "the background's hole is still filled")
+
+    def test_without_it_the_fill_runs_onto_the_subject(self):
+        self.assertGreater(self._block_hurt(self._fill(False)), 10.0)
+
+    def test_near_maps_tell_the_block_from_the_background(self):
+        from core.removal import depth_guard as G
+        pairs = [self._pair(i) for i in range(3)]
+        left = np.stack([l for l, _r in pairs])
+        right = np.stack([r for _l, r in pairs])
+        near = G.near_maps(right, np.concatenate([left, np.zeros((3, H, 64, 3), np.uint8)], 2),
+                           np.full(3, float(self.SHIFT)), 64)
+        rows = slice(self.BLOCK_ROWS.start + 6, self.BLOCK_ROWS.stop - 6)
+        self.assertGreater((near[:, rows, 10:self.BLOCK_W - 20] > 127).mean(), 0.9, "the block is near")
+        self.assertLess((near[:, :self.BLOCK_ROWS.start - 10, self.SHIFT + 10:W - 20] > 127).mean(), 0.05,
+                        "the background isn't")
 
 
 class MiniMaxInpainterTest(unittest.TestCase):

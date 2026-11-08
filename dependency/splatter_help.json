@@ -90,5 +90,9 @@
   "splat_backend": "Which implementation warps the image itself. SC is StereoCrafter's own splatting. M2S warps from the raw depth map instead, so the picture changes and not just the mask. M2S+Fix runs SC first and hands both results to the M2S tear fixer.",
   "hybrid_mask_sensitivity": "Threshold on the SC mask, 0 to 100. 100 keeps it whole and behaves like SC; lower keeps only the strong, white holes and drops the faint grey haze. It never adds mask area. Applies to Hybrid and to Dual.",
   "hybrid_mask_taper": "After the sensitivity threshold cuts, restore a few pixels of the original grey around whatever survived, so the cut does not end on a hard step.",
-  "m2s_fix_strength": "How strongly the M2S tear fixer corrects, 0.50 to 2.00. Only used by M2S+Fix. 1.00 is the backend default."
+  "m2s_fix_strength": "How strongly the M2S tear fixer corrects, 0.50 to 2.00. Only used by M2S+Fix. 1.00 is the backend default.",
+  "auto_strength": "Auto 3D: every clip in the batch gets its own Disparity from how close its shot is -- a wide landscape less 3D, a close-up more (Rowan3D's Auto 3D Strength from iw3). A small model (CLIP) looks at every 6th frame before the clip renders. The result is saved in the clip's sidecar, so the preview, a re-run and Merging use it, and a re-run with the same Min / Mid / Max reuses it. It replaces a Disparity you set by hand: untick it to keep yours. One value per clip -- a clip that cuts from a wide shot to a close-up gets the average. Needs CLIP in Settings > Studio > Models; without it a rougher estimate from the depth map is used.",
+  "auto_strength_min": "Auto 3D: the Disparity the widest shots (a landscape, a skyline) get.",
+  "auto_strength_mid": "Auto 3D: the Disparity a medium shot gets (a person from the waist up). Wider shots go towards Min, closer ones towards Max.",
+  "auto_strength_max": "Auto 3D: the Disparity the closest shots (a face filling the frame, macro) get."
 }

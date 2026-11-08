@@ -42,9 +42,20 @@ from . import settings as S
 logger = logging.getLogger("studio.stages.edgefill")
 
 HELP: Dict[str, str] = {
+    "method": (
+        "How the strip is dealt with. Fill: the Inpainter paints it (the settings below). Black Bar: the strip "
+        "is painted black -- on both eyes, the same width, so the two still match. Zoom: the strip is cropped "
+        "off both eyes and the rest scaled back up to the frame, a little of the top and bottom going too, "
+        "so the shape stays. Black Bar and Zoom need no models and take one quick pass; each clip is covered "
+        "by its own measured strip, so Zoom's amount can differ from clip to clip."),
     "merged_folder": (
         "The merged clips to look at and fill: Full SBS files and / or their _L / _R eyes, as Merging writes "
         "them (<clip>_<width>_merged_full_sbs...)."),
+    "depth_folder": (
+        "The clips' depth maps (Splatting's depth-map folder): Depth Aware reads each clip's map from here -- "
+        "<clip>_depth.mp4, or in its finished folder -- to tell what is near the strip. Left empty, Splatting's "
+        "Input Depth Maps folder is used; a clip with no map has its depth measured from its two eyes instead "
+        "(less steady). Picking a chapter fills it in."),
     "mask_folder": (
         "The clips' splats from Splatting (<clip>_<width>_splatted2...), here or in its finished folder: each "
         "one's mask says how wide the strip at the frame's edge is, row by row."),
@@ -83,11 +94,23 @@ HELP: Dict[str, str] = {
         "Sharpens the Inpainter's fill to the picture's own fine detail. It works the edge smaller than the frame, "
         "so its fill comes back softer; the strength is measured per clip where it repainted real picture "
         "(the band just past the strip) and is only used when the fill really is softer."),
+    "copy_with": (
+        "What finds the real picture in other frames. AllTracker (the default) follows every pixel of the "
+        "frames that show the strip's picture into the strip: tested on eight pans with the edge hidden, it "
+        "came out sharper on seven and flickered less, and is a little quicker -- but it needs about 6 GB of "
+        "graphics memory. SEA-RAFT borrows the motion beside the strip; 1 GB. Each downloads in Settings > "
+        "Studio > Models; when the one picked isn't there the other is used."),
+    "depth_aware": (
+        "Leaves what is nearer than the background alone: a person or object passing over the frame's edge is "
+        "real picture there (Splatting moved it over the edge), so the fill, its fade and the copies from other "
+        "frames stop at it instead of painting over it. Depth is measured from the merged left and right eyes "
+        "beside the strip; it adds a few seconds a clip."),
     "copy_frames": (
         "Before ROSE paints, copies the real picture into the strip from the frames where a pan or a move "
         "shows it -- signs, text and edges come back as they were, not invented -- and ROSE fills only what "
         "no frame shows. A still shot shows nothing new: Edge Fill sees that in a few seconds and leaves "
-        "the strip to ROSE. Needs SEA-RAFT (Settings > Studio > Models, 79 MB); about 0.8 s a frame."),
+        "the strip to ROSE. Needs AllTracker (66 MB) or SEA-RAFT (79 MB) from Settings > Studio > Models -- "
+        "Copy With picks which; about 0.5 s a frame."),
     "fill": (
         "Refills the strip at the edge of each ticked clip with the Inpainter. Each clip's files are written again in "
         "their own format with only the strip changed. The originals are kept in edge_fill_originals beside "
@@ -179,7 +202,7 @@ class EdgeFillController(QObject):
         if hasattr(shell, "projectChanged"):
             shell.projectChanged.connect(self.refreshChapters)
             from studio import project_memory
-            project_memory.attach(self, "edgefill", shell, ("merged_folder", "mask_folder"))
+            project_memory.attach(self, "edgefill", shell, ("merged_folder", "mask_folder", "depth_folder"))
             shell.projectChanged.connect(lambda: QTimer.singleShot(0, self._follow_project))
             # project_memory restores the folders without a signal: the page looks again
             shell.projectChanged.connect(lambda: QTimer.singleShot(0, self.foldersChanged.emit))
@@ -192,6 +215,8 @@ class EdgeFillController(QObject):
     sizes = Property("QVariantList", lambda self: list(S.SIZES), constant=True)
     prefills = Property("QVariantList", lambda self: list(S.PREFILLS), constant=True)
     inpainters = Property("QVariantList", lambda self: list(S.INPAINTERS), constant=True)
+    methods = Property("QVariantList", lambda self: list(S.METHODS), constant=True)
+    copiers = Property("QVariantList", lambda self: list(S.COPIERS), constant=True)
     mmrSteps = Property("QVariantList", lambda self: list(S.MMR_STEPS), constant=True)
 
     def _values(self) -> Dict[str, Any]:
@@ -220,6 +245,17 @@ class EdgeFillController(QObject):
     @Slot()
     def save(self) -> None:
         settings_store.save("edgefill", S.normalise(self._values()))
+
+    def depth_folder(self) -> str:
+        """Depth Aware's depth maps: the page's folder, else Splatting's Input Depth Maps (its folder, when it
+        names one map)."""
+        folder = str(self._map.value("depth_folder") or "").strip()
+        if not folder:
+            sp = getattr(self, "splatting", None)
+            folder = str(sp.settings.value("input_depth_maps") or "").strip() if sp is not None else ""
+            if os.path.isfile(folder):
+                folder = os.path.dirname(folder)
+        return os.path.abspath(folder) if folder else ""
 
     def _folders(self):
         v = self._values()
@@ -313,6 +349,11 @@ class EdgeFillController(QObject):
                 if paths.get(role):
                     self._map.insert(key, paths[role].replace("\\", "/"))
                     self._on_value_changed(key, self._map.value(key))
+            # Depth Aware's depth maps: the chapter's (Splatting's own Depth folder)
+            depth = (self._shell.stagePaths("splatting", num, name) or {}).get("depth")
+            if depth:
+                self._map.insert("depth_folder", depth.replace("\\", "/"))
+                self._on_value_changed("depth_folder", self._map.value("depth_folder"))
         finally:
             self._chapter_applying = False
         self._chapter_num = num
@@ -468,12 +509,18 @@ class EdgeFillController(QObject):
                 return str(os.stat(path).st_mtime_ns)    # text: a QML int is 32-bit (it overflowed)
             except OSError:
                 return "0"
+        def original(path):      # its unfilled original, kept beside it (user, 2026-11-07: play the old one too)
+            from core.removal import edge_fill
+            kept = edge_fill.kept_original(path)
+            return kept.replace("\\", "/") if kept else ""
         if eye in g.files:
-            return {"thumb": g.files[eye].replace("\\", "/"), "part": "whole", "ver": ver(g.files[eye])}
+            return {"thumb": g.files[eye].replace("\\", "/"), "part": "whole", "ver": ver(g.files[eye]),
+                    "original": original(g.files[eye])}
         sbs = g.files.get("sbs")
         if sbs:
-            return {"thumb": sbs.replace("\\", "/"), "part": "left" if eye == "L" else "right", "ver": ver(sbs)}
-        return {"thumb": "", "part": "whole", "ver": "0"}
+            return {"thumb": sbs.replace("\\", "/"), "part": "left" if eye == "L" else "right", "ver": ver(sbs),
+                    "original": original(sbs)}
+        return {"thumb": "", "part": "whole", "ver": "0", "original": ""}
 
     @Slot(object)
     def _on_scanned(self, info) -> None:
@@ -538,7 +585,9 @@ class EdgeFillController(QObject):
         if edge_fill.find_mask(g, masks) is None:
             self.toast.emit("warning", "No splat mask", f"{g.name}: its splat mask isn't in the Mask folder.")
             return
-        if S.coerce("inpainter", self._values().get("inpainter")) == "MiniMax-Remover":
+        if S.coerce("method", self._values().get("method")) != "Fill":
+            pass                                 # Black Bar / Zoom need no model
+        elif S.coerce("inpainter", self._values().get("inpainter")) == "MiniMax-Remover":
             if not minimax_env.available():
                 self.toast.emit("warning", "MiniMax-Remover isn't downloaded", minimax_env.missing_message())
                 return
@@ -568,9 +617,13 @@ class EdgeFillController(QObject):
         detail = bool(v.get("detail", True))
         both_edges = bool(v.get("both_edges", False))
         copy_frames = bool(v.get("copy_frames", True))
+        copier = S.coerce("copy_with", v.get("copy_with"))
+        depth_aware = bool(v.get("depth_aware", True))
+        depth_folder = self.depth_folder()
         height = S.height(v.get("size"))
         prefill = S.coerce("prefill", v.get("prefill"))
         inpainter = S.coerce("inpainter", v.get("inpainter"))
+        method = S.coerce("method", v.get("method"))     # Fill, or a cover: Black Bar / Zoom
         if inpainter == "MiniMax-Remover":           # its own Steps: 6 or 12
             steps = int(S.coerce("mmr_steps", v.get("mmr_steps")))
         # an H.264 / H.265 clip is written again with Merging's encoder settings (app.py sets .merging)
@@ -607,7 +660,7 @@ class EdgeFillController(QObject):
             # 0-0.08 reading, ROSE up to 0.75, then the rest.
             # Copy From Other Frames its own bar (2026-11-03: its lines drew in "Blend + write")
             STRETCH = {"read": (0.0, 0.08, "Reading edges"), "copy": (0.08, 0.25, "Copy from frames"),
-                       "finish": (0.75, 1.0, "Blend + write")}
+                       "finish": (0.75, 1.0, "Blend + write"), "cover": (0.08, 1.0, method)}
             bar = {"open": False, "phase": None, "t0": 0.0}
 
             def end_bar():
@@ -623,6 +676,8 @@ class EdgeFillController(QObject):
                     return "rose"
                 if text.startswith("Copy From Other Frames"):
                     return "copy"
+                if method != "Fill" and text.startswith(method):     # cover(): one pass per file
+                    return "cover"
                 return "read" if frac < 0.08 else "finish"
 
             def draw_bar(frac, text):
@@ -650,8 +705,11 @@ class EdgeFillController(QObject):
             size = str(v.get("size") or "").split(" ")[0] or str(height)
             how = (f"MiniMax-Remover, {steps} steps, size {size}" if inpainter == "MiniMax-Remover"
                    else f"{steps} steps, size {size}, pre-fill {prefill.lower()}")
-            logger.info(f"=== Edge Fill: {len(names)} clip(s); {how}, "
-                        f"grain {'on' if grain else 'off'}, detail {'on' if detail else 'off'} ===")
+            if method != "Fill":
+                logger.info(f"=== Edge Fill: {len(names)} clip(s); {method}, both eyes ===")
+            else:
+                logger.info(f"=== Edge Fill: {len(names)} clip(s); {how}, "
+                            f"grain {'on' if grain else 'off'}, detail {'on' if detail else 'off'} ===")
             try:
                 from studio.gpu_jobs import wait_for_gpu
                 wait_for_gpu(self)
@@ -681,9 +739,16 @@ class EdgeFillController(QObject):
                         # (log_model.parse_bar)
                         draw_bar(frac, text)
                     try:
-                        r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain, settings=enc,
-                                           rose_height=height, detail=detail, both_edges=both_edges,
-                                           prefill=prefill, copy_frames=copy_frames, inpainter=inpainter)
+                        if method != "Fill":
+                            r = edge_fill.cover(g, mask, progress, self._stop, method=method, settings=enc,
+                                                both_edges=both_edges)
+                        else:
+                            r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain,
+                                               settings=enc, rose_height=height, detail=detail,
+                                               both_edges=both_edges, prefill=prefill, copy_frames=copy_frames,
+                                               copier=copier, depth_aware=depth_aware,
+                                               depth_folder=depth_folder,
+                                               inpainter=inpainter)
                     except Stopped:
                         end_bar()
                         logger.info(f"  Stopped: {name} is as it was.")
@@ -698,9 +763,14 @@ class EdgeFillController(QObject):
                         result["skipped"].append(f"{name}: {r['skipped']}")
                         logger.info(f"  Skipped: {r['skipped']}")
                     else:
-                        result["filled"].append(name + ": " + ", ".join(
-                            f"{e['eye']} eye {e['edge']} edge {e['strip']} px" for e in r["edges"]))
-                        logger.info(f"  Filled in {format_duration(time.monotonic() - started)}.")
+                        if r.get("method"):          # a cover: both eyes alike
+                            result["filled"].append(f"{name}: {r['method'].lower()}, " + ", ".join(
+                                f"{e['edge']} edge {e['strip']} px" for e in r["edges"]) + ", both eyes")
+                        else:
+                            result["filled"].append(name + ": " + ", ".join(
+                                f"{e['eye']} eye {e['edge']} edge {e['strip']} px" for e in r["edges"]))
+                        logger.info(f"  {'Covered' if r.get('method') else 'Filled'} in "
+                                    f"{format_duration(time.monotonic() - started)}.")
                         self._sigFilled.emit(name)
             except Exception as e:
                 logger.exception("Edge Fill failed")

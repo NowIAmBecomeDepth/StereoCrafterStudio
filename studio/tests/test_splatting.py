@@ -451,6 +451,8 @@ class ControllerTests(unittest.TestCase):
         depth.write_bytes(b"d")
         begun = []
         self.ctl._begin = lambda processor, settings, *a, **k: begun.append(settings)
+        from studio.stages.splatting.controller import Phase
+        self.ctl._phase, self.ctl._singles_asked = Phase.PREPARING, 1    # as _start_single leaves it
         self.ctl._on_single_ready({"video": str(video), "depth": str(depth)})
         self.assertEqual(len(begun), 1, "the single-clip run started")
         st = begun[0]

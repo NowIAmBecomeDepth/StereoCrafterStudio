@@ -31,7 +31,9 @@ Item {
     readonly property bool idle: !ef.busy
     // the Inpainter (user, 2026-11-03): ROSE, or MiniMax-Remover -- Steps and Pre-fill are ROSE's only
     readonly property bool mmr: st.inpainter === "MiniMax-Remover"
-    readonly property bool ready: mmr ? !!info.minimax : !!info.rose
+    // the Method (user, 2026-11-07): Fill, or a cover -- Black Bar / Zoom, no model, no fill settings
+    readonly property bool covering: st.method === "Black Bar" || st.method === "Zoom"
+    readonly property bool ready: covering || (mmr ? !!info.minimax : !!info.rose)
 
     property var info: ({})
     property string phase: "none"          // none | scanning | waiting | error | list
@@ -48,8 +50,14 @@ Item {
     readonly property int leftWidth: 330
 
     function help(k) { return page.ef.help[k] || "" }
+    // the grid's scroll through a look again at the same folder (user, 2026-11-07: after every fill the
+    // grid jumped to the top) -- a look hides the grid and empties it, so the place is put back once the
+    // tiles are there again; another folder starts at the top
+    property real keepY: -1
+    property string keepFolder: ""
     function look() {
         if (!page.active || !page.idle) return
+        if (page.phase === "list") { page.keepY = list.contentY; page.keepFolder = page.info.folder || "" }
         if (page.otherJob) { page.waitingFor = ef.otherStage(); page.phase = "waiting"; return }
         page.phase = "scanning"
         page.ef.scan()
@@ -97,7 +105,10 @@ Item {
             if (result.waiting) { page.waitingFor = result.waiting; page.phase = "waiting"; return }
             const before = page.info.folder
             page.info = result
+            list.restoreY = !result.error && page.keepY > 0 && page.keepFolder === (result.folder || "") ? page.keepY : -1
+            page.keepY = -1
             page.phase = result.error ? "error" : "list"
+            list.restoreScroll()
             // a new folder: its ready clips ticked; the same one again: the ticks kept (filled ones dropped)
             const ready = (result.clips || []).filter(c => c.state === "ready").map(c => c.name)
             page.picked = before === result.folder ? page.picked.filter(n => ready.indexOf(n) >= 0) : ready
@@ -120,6 +131,12 @@ Item {
         title: "Select the folder of merged clips"
         currentFolder: Shell.pathToUrl(page.st.merged_folder || "")
         onAccepted: page.st.merged_folder = Shell.urlToPath(selectedFolder).replace(/\\/g, "/")
+    }
+    FolderPicker {
+        id: depthDlg
+        title: "Select the folder of depth maps"
+        currentFolder: Shell.pathToUrl(page.st.depth_folder || "")
+        onAccepted: page.st.depth_folder = Shell.urlToPath(selectedFolder).replace(/\\/g, "/")
     }
     FolderPicker {
         id: maskDlg
@@ -175,12 +192,36 @@ Item {
                     AccentButton { text: "Browse..."; kind: "outline"; onClicked: maskDlg.open() }
                 }
             }
+            // Depth Aware's depth maps (user, 2026-11-07): empty, Splatting's Input Depth Maps
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                Text { text: "Depth Maps Folder"; color: Theme.fg; font.family: Theme.bodyFont; font.pixelSize: Theme.bodySize
+                       HoverTip { tip: page.help("depth_folder") } }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    TextBox { objectName: "edgeFillDepth"; store: page.st; owner: page.ef; key: "depth_folder"; numeric: false; Layout.fillWidth: true }
+                    AccentButton { text: "Browse..."; kind: "outline"; onClicked: depthDlg.open() }
+                }
+            }
         }
 
         Section {
             title: "Fill Settings"
             enabled: page.idle
             FieldRow {
+                label: "Method"; labelWidth: 110
+                help: page.help("method")
+                Dropdown {
+                    objectName: "fillEdgesMethod"
+                    store: page.st; key: "method"
+                    model: page.ef.methods
+                    boxWidth: 190
+                }
+            }
+            FieldRow {
+                visible: !page.covering
                 label: "Inpainter"; labelWidth: 110
                 help: page.help("inpainter")
                 Dropdown {
@@ -197,17 +238,39 @@ Item {
                 text: "Right Edge Too"
                 help: page.help("both_edges")
             }
+            // user, 2026-11-07: what is nearer than the background beside the strip is left alone
+            CheckField {
+                visible: !page.covering
+                objectName: "fillEdgesDepthAware"
+                store: page.st
+                key: "depth_aware"
+                text: "Depth Aware"
+                help: page.help("depth_aware")
+            }
             // user, 2026-11-02: the real picture from other frames first, ROSE for the rest
             CheckField {
+                visible: !page.covering
                 objectName: "fillEdgesCopyFrames"
                 store: page.st
                 key: "copy_frames"
                 text: "Copy From Other Frames"
                 help: page.help("copy_frames")
             }
+            // what copies from other frames: AllTracker or SEA-RAFT (user, 2026-11-07)
+            FieldRow {
+                visible: !page.covering && !!page.st.copy_frames
+                label: "Copy With"; labelWidth: 110
+                help: page.help("copy_with")
+                Dropdown {
+                    objectName: "fillEdgesCopyWith"
+                    store: page.st; key: "copy_with"
+                    model: page.ef.copiers
+                    boxWidth: 190
+                }
+            }
             // MiniMax-Remover's own Steps, 6 or 12 (user, 2026-11-03)
             FieldRow {
-                visible: page.mmr
+                visible: page.mmr && !page.covering
                 label: "Steps"; labelWidth: 110
                 help: page.help("mmr_steps")
                 Dropdown {
@@ -218,12 +281,13 @@ Item {
                 }
             }
             FieldRow {
-                visible: !page.mmr
+                visible: !page.mmr && !page.covering
                 label: "Steps"; labelWidth: 110
                 help: page.help("steps")
                 TextBox { objectName: "fillEdgesSteps"; store: page.st; owner: page.ef; key: "steps"; boxWidth: 80 }
             }
             FieldRow {
+                visible: !page.covering
                 label: "Resolution"; labelWidth: 110
                 help: page.help("size")
                 Dropdown {
@@ -234,7 +298,7 @@ Item {
                 }
             }
             FieldRow {
-                visible: !page.mmr
+                visible: !page.mmr && !page.covering
                 label: "Pre-fill"; labelWidth: 110
                 help: page.help("prefill")
                 Dropdown {
@@ -245,6 +309,7 @@ Item {
                 }
             }
             CheckField {
+                visible: !page.covering
                 objectName: "fillEdgesGrain"
                 store: page.st
                 key: "grain"
@@ -252,6 +317,7 @@ Item {
                 help: page.help("grain")
             }
             CheckField {
+                visible: !page.covering
                 objectName: "fillEdgesDetail"
                 store: page.st
                 key: "detail"
@@ -464,6 +530,18 @@ Item {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: SlimScrollBar {}
+            // where a look at the same folder left the grid (page.keepY), put back as the tiles come in
+            property real restoreY: -1
+            function restoreScroll() {
+                if (restoreY < 0 || !visible) return
+                const most = Math.max(0, contentHeight - height)
+                contentY = Math.min(restoreY, most)
+                if (most >= restoreY) restoreY = -1          // all the way there: done
+            }
+            onContentHeightChanged: restoreScroll()
+            onVisibleChanged: restoreScroll()
+            // the user scrolls first: theirs wins
+            onMovementStarted: restoreY = -1
             Flow {
                 id: grid
                 objectName: "fillEdgesGrid"
@@ -487,6 +565,7 @@ Item {
                         readonly property var m: page.measured[modelData.name] || null
                         // the eye with the strip, at its widest frame once measured
                         readonly property string thumb: m && m.thumb ? m.thumb : (modelData.thumb || "")
+                        readonly property string original: m && m.thumb ? (m.original || "") : (modelData.original || "")
                         readonly property string part: m && m.thumb ? m.part : (modelData.part || "whole")
                         readonly property int frame: m && m.thumb ? m.frame : -1
                         // the file's version: a filled clip's still is asked for again (Qt caches by URL)
@@ -494,10 +573,14 @@ Item {
                         width: grid.tileW
                         height: col.implicitHeight + 12
                         radius: 8
-                        color: finished ? Theme.alpha(Theme.success, tileHover.hovered ? 0.22 : 0.16)
+                        // stronger than the lists' 0.16 (user, 2026-11-07: too dim to tell from the rest --
+                        // the still covers most of the tile, so only its edge and label carry the green),
+                        // and a green edge unless the tick's accent edge is on
+                        color: finished ? Theme.alpha(Theme.success, tileHover.hovered ? 0.48 : 0.40)
                              : Theme.alpha(Theme.fg, tileHover.hovered && can ? 0.09 : 0.05)
-                        border.width: ticked ? 2 : 1
-                        border.color: ticked ? Theme.accent : Theme.alpha(Theme.fg, 0.08)
+                        border.width: ticked || finished ? 2 : 1
+                        border.color: ticked ? Theme.accent : finished ? Theme.alpha(Theme.success, 0.85)
+                                    : Theme.alpha(Theme.fg, 0.08)
                         opacity: can ? 1 : Theme.dim(0.55)
 
                         ColumnLayout {
@@ -580,13 +663,15 @@ Item {
                             onTapped: {
                                 tileMenu.name = tile.modelData.name
                                 tileMenu.can = tile.can
-                                // the clip's files to play (user, 2026-10-14: see the whole clip, bar and
-                                // all): the one the still shows -- the eye with the bar -- first
+                                // the eye with the bar, to play (user, 2026-10-14: see the whole clip, bar
+                                // and all) -- only it (user, 2026-11-03: "play right eye blend", the left
+                                // eye is just the source)
                                 const folder = page.info.folder || ""
                                 const shown = tile.thumb
-                                const rest = tile.modelData.files.map(f => folder + "/" + f).filter(p => p !== shown)
-                                tileMenu.plays = (shown ? [{ path: shown, text: "Play " + shown.split("/").pop() + "  (the eye with the bar)" }] : [])
-                                        .concat(rest.map(p => ({ path: p, text: "Play " + p.split("/").pop() })))
+                                const leftEye = (tile.m && tile.m.eye) ? tile.m.eye === "L" : tile.part === "left"
+                                tileMenu.plays = (shown ? [{ path: shown, text: leftEye ? "Play Left Eye Blend" : "Play Right Eye Blend" }] : [])
+                                        // a filled clip's unfilled original, kept beside it (user, 2026-11-07)
+                                        .concat(tile.original ? [{ path: tile.original, text: leftEye ? "Play Original Left Eye" : "Play Original Right Eye" }] : [])
                                 // the merged clip and its hi-res splat, selected in Explorer (user, 2026-10-18)
                                 const merged = shown || (tile.modelData.files.length ? folder + "/" + tile.modelData.files[0] : "")
                                 tileMenu.explores = (merged ? [{ path: merged, text: "Open Merged Clip in Explorer" }] : [])
@@ -676,7 +761,7 @@ Item {
             iconGlyph: Theme.icon.play
             enabled: page.idle && !page.otherJob && page.phase === "list" && page.picked.length > 0 && page.ready
             onClicked: page.fill("")
-            HoverTip { tip: page.help("fill") }
+            HoverTip { tip: page.covering ? page.help("method") : page.help("fill") }
         }
         AccentButton {
             objectName: "fillEdgesStop"

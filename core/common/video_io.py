@@ -1849,6 +1849,32 @@ def resolve_frame_break_mask(splatted_or_output_path: str) -> str:
     return os.path.splitext(splatted_or_output_path)[0] + "_framebreak.mkv"
 
 
+#: what resolve_frame_break_mask() adds to a splat's stem (file_organizer moves it along by this)
+FRAME_BREAK_SUFFIX = "_framebreak.mkv"
+
+
+def is_frame_break_mask(path: str) -> bool:
+    """A Frame Break protrusion mask, not a clip (user, 2026-11-03: Inpainting's .mkv glob took
+    goblinbridgeattack00149667_1408_splatted2_framebreak.mkv for a splat and inpainted it)."""
+    return os.path.basename(str(path)).lower().endswith(FRAME_BREAK_SUFFIX)
+
+
+def find_frame_break_mask(splatted_path: str) -> str:
+    """The Frame Break mask for a splat as Merging finds it: beside the splat, else where the splat was
+    before a move -- the folder above when it sits in finished/, or its finished/ when it doesn't (user,
+    2026-11-03: Inpainting moved goblinbridgeattack00149667's hi-res splat to hires/finished and left its
+    mask in hires/; Merging looked only beside the splat and merged without bars). The path beside the
+    splat when none is there."""
+    here = resolve_frame_break_mask(splatted_path)
+    folder, name = os.path.split(os.path.abspath(splatted_path))
+    elsewhere = (os.path.dirname(folder) if os.path.basename(folder).lower() == "finished"
+                 else os.path.join(folder, "finished"))
+    for cand in (here, resolve_frame_break_mask(os.path.join(elsewhere, name))):
+        if os.path.isfile(cand):
+            return cand
+    return here
+
+
 def start_ffmpeg_pipe_process_mask(
     content_width: int,
     content_height: int,

@@ -74,8 +74,13 @@ QMetaObject.invokeMethod(dlg, "open"); pump(0.8)
 root = dlg.property("contentItem")
 def named(n): return find(root, lambda c: c.objectName() == n)
 def row(key): return next(r for r in models.property("rows") if r["key"] == key)
-check("a row for every model", named("modelsList").property("count") == len(C.MODELS)
-      and all(named("modelsRow_" + m.key) is not None for m in C.MODELS if m.key in ("depthcrafter", "svd", "sam3")),
+def _row_built(key):   # the list builds only the rows in view (DVD's row pushed SAM 3 out): scroll to it
+    from PySide6.QtCore import Q_ARG
+    _i = [m.key for m in C.MODELS].index(key)
+    QMetaObject.invokeMethod(named("modelsList"), "positionViewAtIndex", Q_ARG(int, _i), Q_ARG(int, 0)); pump(0.3)
+    return named("modelsRow_" + key) is not None
+check("a row for every model listed on this PC (Sage 1: RTX 20 only)", named("modelsList").property("count") == sum(1 for m in C.MODELS if C.listed(m))
+      and all(_row_built(k) for k in ("depthcrafter", "svd", "sam3")),
       str(named("modelsList").property("count")))
 check("the folder shown", named("modelsFolderPath").property("text") == str(tmp / "weights"))
 check("nothing here yet: DepthCrafter missing, 3.0 GB",
@@ -126,6 +131,7 @@ from core.scenecut import detection as D
 check("...where Scene Cut now finds it", D.DETECTORS["OmniShotCut"].weights_path
       == str(tmp / "weights" / "SceneCut" / "OmniShotCut_ckpt.pth"))
 pump(0.3)
+_row_built("omnishotcut")   # the refresh rebuilt the list at the top
 check("...and the row says Installed", named("modelsState_omnishotcut").property("text") == "Installed")
 
 # ---- TensorRT (2026-10-29): packages, not weights -- an Install, never run here

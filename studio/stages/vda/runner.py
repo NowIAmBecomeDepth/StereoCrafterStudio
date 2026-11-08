@@ -196,33 +196,7 @@ class VdaRunner:
                 logger.warning("%s: %d of %d frames could be read; the map has %d.", os.path.basename(path), got, n, got)
 
             # -- pass 2: encode ----------------------------------------------------------------
-            from core.common.partial_output import discard, part_path  # noqa: F401
-            from core.depthedit.depth_io import ClipInfo, DepthWriter
-            from core.vda import normalize as N
-            from core.vda import output as OUT
-
-            final = OUT.map_path(out_dir, base, o.get("output_suffix") or "_depth")
-            part = part_path(final)
-            ranges = N.ranges(o["normalise_mode"], lows, highs, float(o["ema_decay"]), int(o["ema_buffer"]))
-            writer = DepthWriter(part, ClipInfo(path=final, width=ow, height=oh, num_frames=got, fps=info.fps,
-                                                pix_fmt="yuv420p10le", full_range=False),
-                                 metadata={"comment": OUT.TAG})
-            tick = _Ticker(self.hooks, got, "encode", os.path.basename(path))
-            for a in range(0, got, ENCODE_BATCH):
-                if self.stop_now.is_set():
-                    raise Stopped()
-                b = min(got, a + ENCODE_BATCH)
-                block = torch.from_numpy(np.asarray(raw[a:b])).to(device).float()
-                ks = torch.tensor([N.scale(*ranges[i])[0] for i in range(a, b)], device=device).view(-1, 1, 1)
-                offs = torch.tensor([N.scale(*ranges[i])[1] for i in range(a, b)], device=device).view(-1, 1, 1)
-                codes = (block * ks + offs).round_().clamp_(0, 1023).to(torch.int32).cpu().numpy().astype(np.uint16)
-                for c in codes:
-                    writer.write(c)
-                tick(b)
-            writer.close()
-            writer = None
-            moved = OUT.publish(part, final)
-            part = None
+            final, moved = self.encode(raw, lows, highs, got, (oh, ow), info, path, base, device)
             self.made.append({"source": path, "map": final, "set_aside": moved or ""})
             took = time.monotonic() - t0
             logger.info("%s: depth map saved to %s in %.1f s (%.1f fps)%s.", os.path.basename(path), final, took,
@@ -257,6 +231,57 @@ class VdaRunner:
             except Exception:
                 pass
 
+    #: what the maps this runner writes are tagged (core.vda.output) and the kind publish() is told
+    TAG_KIND = ("vda", "TAG")
+
+    def ticker(self, total: int, phase: str, name: str) -> "_Ticker":
+        return _Ticker(self.hooks, total, phase, name)
+
+    def encode(self, raw, lows, highs, got: int, map_size, info, path: str, base: str, device):
+        """Pass 2: the raw frames normalised (whole clip or EMA) and written as 10-bit HEVC, tv range, as
+        DepthCrafter's maps, under a .part name and put in place whole (core.vda.output.publish, which moves a
+        map of another kind there aside first). Returns (the map, where the map it replaced went or None).
+        Raises Stopped on Stop (now). Shared with DVD's runner (studio/stages/dvd)."""
+        import numpy as np
+        import torch
+        from core.common.partial_output import discard, part_path
+        from core.depthedit.depth_io import ClipInfo, DepthWriter
+        from core.vda import normalize as N
+        from core.vda import output as OUT
+
+        o = self.opts
+        oh, ow = map_size
+        kind, tag_name = self.TAG_KIND
+        final = OUT.map_path(o["output_dir"], base, o.get("output_suffix") or "_depth")
+        part = part_path(final)
+        ranges = N.ranges(o["normalise_mode"], lows, highs, float(o["ema_decay"]), int(o["ema_buffer"]))
+        writer = DepthWriter(part, ClipInfo(path=final, width=ow, height=oh, num_frames=got, fps=info.fps,
+                                            pix_fmt="yuv420p10le", full_range=False),
+                             metadata={"comment": getattr(OUT, tag_name)})
+        try:
+            tick = self.ticker(got, "encode", os.path.basename(path))
+            for a in range(0, got, ENCODE_BATCH):
+                if self.stop_now.is_set():
+                    raise Stopped()
+                b = min(got, a + ENCODE_BATCH)
+                block = torch.from_numpy(np.asarray(raw[a:b])).to(device).float()
+                ks = torch.tensor([N.scale(*ranges[i])[0] for i in range(a, b)], device=device).view(-1, 1, 1)
+                offs = torch.tensor([N.scale(*ranges[i])[1] for i in range(a, b)], device=device).view(-1, 1, 1)
+                codes = (block * ks + offs).round_().clamp_(0, 1023).to(torch.int32).cpu().numpy().astype(np.uint16)
+                for c in codes:
+                    writer.write(c)
+                tick(b)
+            writer.close()
+            writer = None
+            moved = OUT.publish(part, final, new_kind=kind)
+            part = None
+            return final, moved
+        finally:
+            if writer is not None:
+                writer.abort()
+            if part:
+                discard(part)
+
     # ---- finished / failed (DepthCrafter's _move_original_source) -----------------------------
 
     def _move_original(self, current: str, target_subfolder: str) -> None:
@@ -282,7 +307,8 @@ class _Ticker:
     to the depth map tab in the console") -- a '\r' bar on stderr, which the console shows live in the running
     job's tab (log_model.StreamTee) and keeps as a line when the pass ends."""
 
-    LABELS = {"depth": "VDA depth", "encode": "VDA encode"}
+    LABELS = {"depth": "VDA depth", "encode": "VDA encode",
+              "measure": "Blend measure", "blend": "Blend"}         # the Blend tab's (stages/blend)
 
     def __init__(self, hooks: Hooks, total: int, phase: str, name: str = ""):
         self.hooks, self.total, self.phase, self.name = hooks, total, phase, name

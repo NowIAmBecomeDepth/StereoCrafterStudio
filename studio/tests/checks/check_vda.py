@@ -89,8 +89,9 @@ pump(0.3)
 # ---- the tab ------------------------------------------------------------------------------
 show(0)
 dcpage = stage.property("pages").property(0).toQObject()
-check("DepthCrafter's page has the DepthCrafter | VDA strip",
-      one("dcEngineSwitch") is not None and one("dcEngineSwitch").property("model").toVariant() == ["DepthCrafter", "VDA"]
+_dm = ["DepthCrafter", "VDA", "DVD"] + (["Blend"] if os.path.isfile("studio/qml/Studio/BlendPage.qml") else [])  # Blend: the user's copy
+check("DepthCrafter's page has the " + " | ".join(_dm) + " strip",
+      one("dcEngineSwitch") is not None and one("dcEngineSwitch").property("model").toVariant() == _dm
       if one("dcEngineSwitch") is not None else False)
 check("...DepthCrafter's tab first", dcpage.property("engine") == 0 and one("vdaPage") is None and one("pageContent") is not None)
 dcpage.setProperty("engine", 1); pump(0.8)

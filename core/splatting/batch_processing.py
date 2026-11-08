@@ -7,6 +7,7 @@ sidecar integration, auto-convergence, and move-to-finished functionality.
 import gc
 import glob
 import logging
+import math
 import os
 import queue
 import threading
@@ -166,6 +167,13 @@ class ProcessingSettings:
     depth_blur_left: float = 0.0
     depth_blur_left_mix: float = 0.5
     auto_convergence_mode: str = "Off"
+    # Auto 3D (Thomas's patch, 2026-11-07; core.splatting.auto_estimate): each clip's Disparity from how
+    # close its shot is, Min..Max with Mid at a medium shot. Off: nothing changes.
+    auto_strength: bool = False
+    auto_strength_min: float = 10.0
+    auto_strength_mid: float = 40.0
+    auto_strength_max: float = 80.0
+    auto_strength_every: int = 6
     enable_sidecar_gamma: bool = True
     enable_sidecar_blur_dilate: bool = True
     single_finished_source_folder: Optional[str] = None
@@ -273,6 +281,14 @@ class ProcessingSettings:
 
         kwargs.update(overrides)
         return cls(**kwargs)
+
+
+def _same(a, b) -> bool:
+    """Two numbers equal to 1e-6 (an int and a float alike); anything else as ==."""
+    try:
+        return abs(float(a) - float(b)) < 1e-6
+    except (TypeError, ValueError):
+        return a == b
 
 
 def _saved_or(sidecar_data: dict, key: str, fallback):
@@ -594,6 +610,12 @@ class BatchProcessor:
                 rain_gpu.release_flow()           # Rain's SEA-RAFT, when a clip used it
             except Exception:
                 pass
+            if getattr(settings, "auto_strength", False):
+                try:
+                    from core.splatting import auto_estimate
+                    auto_estimate.release()       # Auto 3D's CLIP
+                except Exception:
+                    pass
             release_cuda_memory()
             self.progress_queue.put(("result", dict(result)))
             self.progress_queue.put("finished")
@@ -626,6 +648,13 @@ class BatchProcessor:
             n = len(self.get_defined_tasks(settings))
             self.progress_queue.put(("tasks_done", initial_task_counter + n))
             return n
+
+        # 1b. Auto 3D: the clip's Disparity from how close its shot is (a failure leaves its own)
+        if getattr(settings, "auto_strength", False):
+            try:
+                self._auto_3d(video_path, settings, vid_settings)
+            except Exception as e:
+                self.logger.warning(f"Auto 3D: {video_name}: {e}; its own Disparity is used", exc_info=True)
 
         # 2. Convergence: the clip's sidecar anchor, else the global one. Auto-
         # convergence is a preview pre-pass (its result goes to the slider and
@@ -899,6 +928,63 @@ class BatchProcessor:
                 self.logger.info(f"Successfully moved {moved} source/sidecar files to finished.")
 
         return len(tasks)
+
+    def _auto_3d(self, video_path: str, settings: ProcessingSettings, vid_settings: dict) -> None:
+        """Auto 3D: vid_settings' Disparity from how close the clip's shot is. Kept in the clip's sidecar
+        (max_disparity, and auto_estimate.auto_strength: how it was found) -- the preview, a re-run and
+        Merging see it; a re-run with the same Min / Mid / Max on the same clip file reuses it. A clip
+        with no sidecar gets none made (its next run would take the sidecar defaults over the page's):
+        its estimate is kept in <clip>_depth.auto3d.json beside where the sidecar would be."""
+        from core.common.atomic_json import read_json, write_json_atomic
+        from core.splatting import auto_estimate
+        name = os.path.splitext(os.path.basename(video_path))[0]
+        lo, mid, hi = (float(settings.auto_strength_min), float(settings.auto_strength_mid),
+                       float(settings.auto_strength_max))
+        every = max(1, int(settings.auto_strength_every or auto_estimate.EVERY))
+        if not (hi > lo) or not all(math.isfinite(v) for v in (lo, mid, hi)):
+            self.logger.warning(f"Auto 3D: Max ({hi:g}) must be above Min ({lo:g}); {name} keeps its Disparity.")
+            return
+        sidecar = os.path.join(settings.sidecar_folder, f"{name}_depth{settings.sidecar_ext}")
+        cache = os.path.join(settings.sidecar_folder, f"{name}_depth.auto3d.json")
+        has_sidecar = os.path.isfile(sidecar)
+        try:
+            st = os.stat(video_path)
+            clip_id = [st.st_size, int(st.st_mtime)]
+        except OSError:
+            clip_id = None
+        data: dict = {}
+        try:
+            got = read_json(sidecar if has_sidecar else cache) if (has_sidecar or os.path.isfile(cache)) else {}
+            data = got if isinstance(got, dict) else {}
+        except Exception as e:
+            self.logger.debug(f"Auto 3D: {name}: its record didn't read ({e})")
+        prev = ((data.get("auto_estimate") or {}) if has_sidecar else data).get("auto_strength")
+        if (isinstance(prev, dict) and prev.get("value") is not None and prev.get("clip") == clip_id
+                and all(_same(prev.get(k), v) for k, v in (("min", lo), ("max", hi), ("typical", mid),
+                                                           ("every", every)))):
+            value = float(prev["value"])
+            self.logger.info(f"Auto 3D: {os.path.basename(video_path)} -> Disparity {value} (from its "
+                             f"{'sidecar' if has_sidecar else 'record'})")
+            vid_settings["max_disparity_percentage"] = value
+            return
+        r = auto_estimate.auto_strength_for_clip(video_path, vid_settings.get("actual_depth_map_path"), lo, mid, hi,
+                                                 every=every, stop_event=self.stop_event)
+        if r is None:
+            return
+        value = float(r["strength"])
+        vid_settings["max_disparity_percentage"] = value
+        rec = {"min": lo, "max": hi, "typical": mid, "every": every, "value": value,
+               "closeness": r["closeness"], "model": r["model"], "clip": clip_id}
+        try:
+            if has_sidecar:
+                est = data.get("auto_estimate") if isinstance(data.get("auto_estimate"), dict) else {}
+                data["auto_estimate"] = dict(est, auto_strength=rec)
+                data["max_disparity"] = value
+                write_json_atomic(sidecar, data, indent=4)
+            elif settings.sidecar_folder and os.path.isdir(settings.sidecar_folder):
+                write_json_atomic(cache, {"auto_strength": rec}, indent=4)
+        except Exception as e:
+            self.logger.warning(f"Auto 3D: {name}: not kept ({e}); it is estimated again next time")
 
     def _get_video_specific_settings(
         self, video_path: str, settings: ProcessingSettings, is_single_file_mode: bool

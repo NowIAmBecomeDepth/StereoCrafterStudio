@@ -227,13 +227,20 @@ if "q" in WANT:
     FIX = _fixtures.copy("merge", tmp / "mg")
     out = tmp / "mg_out"
     import studio.stages.merging.engine as ME
-    from studio.child_procs import descendants, _snapshot
-    _Reader = ME.VideoReader
-    encoders = lambda: [n for _, n in descendants(os.getpid(), _snapshot()) if n == "ffmpeg.exe"]  # noqa: E731
+    # Merging reads through open_rgb_reader_ahead since 2026-10-30 (111f8b1: ffmpeg readers, read
+    # ahead) -- patching decord's VideoReader held nothing, and the readers are ffmpeg.exe too, so
+    # the encoder is told by its own process (the one start_ffmpeg_pipe_process starts)
+    _Ahead, _Pipe = ME.open_rgb_reader_ahead, ME.start_ffmpeg_pipe_process
+    pipes = []
+    def _pipe(*a, **kw):
+        p = _Pipe(*a, **kw)
+        pipes.append(p)
+        return p
+    encoders = lambda: [p.pid for p in pipes if p is not None and p.poll() is None]  # noqa: E731
     gate = Gate()
     class Reader:
         def __init__(self, path, *a, **kw):
-            self._r, self._name = _Reader(path, *a, **kw), os.path.basename(path)
+            self._r, self._name = _Ahead(path, *a, **kw), os.path.basename(path)
             self._n = 0
         def get_batch(self, idx):
             if "inpainted" in self._name:
@@ -242,10 +249,10 @@ if "q" in WANT:
                     gate.at(self._name)
             return self._r.get_batch(idx)
         def __getattr__(self, name):
-            return getattr(self._r, name)
+            return getattr(self.__dict__["_r"], name)
         def __len__(self):
             return len(self._r)
-    ME.VideoReader = Reader
+    ME.open_rgb_reader_ahead, ME.start_ffmpeg_pipe_process = Reader, _pipe
     for k, v in {"inpainted_folder": str(FIX / "inpainted"), "original_folder": str(FIX / "orig"),
                  "mask_folder": str(FIX / "mask"), "output_folder": str(out),
                  "encoding_encoder": "Force CPU", "codec": "H.264", "use_gpu": False, "resume": False,
@@ -274,7 +281,7 @@ if "q" in WANT:
     pump(0.8)
     left = [p.name for p in out.rglob("*") if p.is_file()]
     check("Quit: no output and no partial file is left", not left, str(left))
-    ME.VideoReader = _Reader
+    ME.open_rgb_reader_ahead, ME.start_ffmpeg_pipe_process = _Ahead, _Pipe
 
 print()
 _lj = (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None) == h0

@@ -120,7 +120,9 @@ QTest.mouseMove(win, QPoint(int(win.width() / 2), int(win.height() * 0.8))); pum
 move(dm_tab); pump(1.3)
 rows = [r for r in find_all(root, lambda c: c.objectName() == "tabMenuItem") if r.isVisible()]
 names = [str(r.property("modelData")) for r in sorted(rows, key=lambda r: r.mapToScene(QPointF(0, 0)).y())]
-check("hovering Depth Map drops down DepthCrafter and VDA", menu.property("opened") and names == ["DepthCrafter", "VDA"], str(names))
+# Blend only on the user's own copy (it isn't released)
+_dm = ["DepthCrafter", "VDA", "DVD"] + (["Blend"] if os.path.isfile("studio/qml/Studio/BlendPage.qml") else [])
+check("hovering Depth Map drops down " + ", ".join(_dm), menu.property("opened") and names == _dm, str(names))
 check("...under the Depth Map tab", rows and abs(rows[0].mapToScene(QPointF(0, 0)).x() - dm_tab.mapToScene(QPointF(0, 0)).x()) < 20)
 vda_row = next(r for r in rows if r.property("modelData") == "VDA")
 move(vda_row); pump(0.4); click(vda_row); pump(0.6)

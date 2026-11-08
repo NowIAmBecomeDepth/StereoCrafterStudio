@@ -219,7 +219,9 @@ if "mg" in WANT:
     mg = objs["Merging"]; st = mg.property("settings")
     FIX = _fixtures.copy("merge", tmp / "mg")
     import studio.stages.merging.engine as ME
-    _Reader = ME.VideoReader
+    # Merging reads through open_rgb_reader_ahead since 2026-10-30 (111f8b1): decord's VideoReader,
+    # patched here before, held nothing and the run finished before it could be armed
+    _Reader = ME.open_rgb_reader_ahead
     for twice in (False, True):
         gate = Gate()
         class Reader:
@@ -230,10 +232,10 @@ if "mg" in WANT:
                     gate.at(self._name)
                 return self._r.get_batch(idx)
             def __getattr__(self, name):
-                return getattr(self._r, name)
+                return getattr(self.__dict__["_r"], name)
             def __len__(self):
                 return len(self._r)
-        ME.VideoReader = Reader
+        ME.open_rgb_reader_ahead = Reader
         for k, v in {"inpainted_folder": str(FIX / "inpainted"), "original_folder": str(FIX / "orig"),
                      "mask_folder": str(FIX / "mask"), "output_folder": str(tmp / f"mg_out_{twice}"),
                      "encoding_encoder": "Force CPU", "codec": "H.264", "use_gpu": False, "resume": False,
@@ -242,7 +244,7 @@ if "mg" in WANT:
             st.setProperty(k, v)
         pump(0.3)
         exercise("Merging" + (" (twice)" if twice else ""), mg, "mgStopAfter", "merging", mg.start, gate, twice)
-    ME.VideoReader = _Reader
+    ME.open_rgb_reader_ahead = _Reader
 
 print()
 _lj = (hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None) == h0

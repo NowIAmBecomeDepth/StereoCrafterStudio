@@ -248,26 +248,27 @@ def splat_fx(values: dict, depths: List[str], cache: Dict, paths: Optional[List[
         row.append(text)
         row.append(part)
         row.append(gone)            # the eighth: an object erased from it (2026-10-16)
-    for row, vda in zip(out, _vda_flags(depths, cache)):
-        row.append(vda)             # the ninth: a Video Depth Anything map (user, 2026-10-25)
+    for row, kind in zip(out, _map_kinds(depths, cache)):
+        row.append(kind == "vda")   # the ninth: a Video Depth Anything map (user, 2026-10-25)
+        row.append(kind == "dvd")   # the tenth: a DVD map (user, 2026-11-07)
     return out
 
 
-def _vda_flags(depths: List[str], cache: Dict) -> List[bool]:
-    """Per depth map: Video Depth Anything made it (its tag, core.vda.output.tagged) -- read again only when
-    the file changes (size, time)."""
-    from core.vda.output import tagged
+def _map_kinds(depths: List[str], cache: Dict) -> List[str]:
+    """Per depth map: which model made it -- "vda", "dvd", "blend" or "dc" (its tag, core.vda.output.kind_of;
+    "" for no map) -- read again only when the file changes (size, time)."""
+    from core.vda.output import kind_of
     out = []
     for depth in depths:
         try:
             st = os.stat(depth)
         except OSError:
-            out.append(False)
+            out.append("")
             continue
-        key = ("vda", depth, st.st_mtime, st.st_size)
+        key = ("kind", depth, st.st_mtime, st.st_size)
         hit = cache.get(key)
         if hit is None:
-            hit = cache[key] = tagged(depth)
+            hit = cache[key] = kind_of(depth)
         out.append(hit)
     return out
 
@@ -519,9 +520,15 @@ def inpaint_clips(values: dict) -> List[str]:
         return [folder]
     if not os.path.isdir(folder):
         return []
-    # .mkv too: Splatting's Container may be MKV (user, 2026-10-25), as the engine's own glob
-    return sorted(glob.glob(os.path.join(folder, "*.mp4")) + glob.glob(os.path.join(folder, "*.mov"))
-                  + glob.glob(os.path.join(folder, "*.mkv")), key=_by_number)
+    # .mkv too: Splatting's Container may be MKV (user, 2026-10-25), as the engine's own glob -- but not a
+    # splat's Frame Break mask (<splat>_framebreak.mkv; user, 2026-11-03: it was inpainted as a clip)
+    return sorted((p for p in glob.glob(os.path.join(folder, "*.mp4")) + glob.glob(os.path.join(folder, "*.mov"))
+                   + glob.glob(os.path.join(folder, "*.mkv")) if not _frame_break_mask(p)), key=_by_number)
+
+
+def _frame_break_mask(path: str) -> bool:
+    """A splat's Frame Break mask, not a clip (core.common.video_io.is_frame_break_mask)."""
+    return os.path.basename(path).lower().endswith("_framebreak.mkv")
 
 
 #: Inpainting V2's input types (its engine's VIDEO_EXTENSIONS).
@@ -537,7 +544,7 @@ def inpaint_v2_clips(values: dict) -> List[str]:
     if not os.path.isdir(folder):
         return []
     return [os.path.join(folder, n) for n in sorted(os.listdir(folder), key=natural_key)
-            if n.lower().endswith(INPAINT_V2_EXTS)]
+            if n.lower().endswith(INPAINT_V2_EXTS) and not _frame_break_mask(n)]
 
 
 def dc_finished_moves(paths: List[str]) -> List[Tuple[str, str]]:

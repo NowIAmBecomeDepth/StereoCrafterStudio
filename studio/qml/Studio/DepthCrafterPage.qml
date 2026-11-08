@@ -28,7 +28,8 @@ Item {
     property real flipAngle: 0
     property var prompt: null            // Main's PromptDialog
     property var consoleRef: null        // Main's ConsoleWindow
-    // the sub tabs (user, 2026-10-25), as Inpainting's: 0 = DepthCrafter, 1 = Video Depth Anything (VdaPage.qml).
+    // the sub tabs (user, 2026-10-25), as Inpainting's: 0 = DepthCrafter, 1 = Video Depth Anything (VdaPage.qml),
+    // 2 = DVD (DvdPage.qml; user, 2026-11-07), 3 = Blend (BlendPage.qml).
     // Main's openStage(0, 1) picks VDA -- Splatting's "Rerun with Video Depth Anything".
     property int engine: 0
 
@@ -56,8 +57,12 @@ Item {
     // narrow only once it has gone, so it never animates in a window too small.
     // (2026-10-10: plus Upcoming Jobs' least width)
     readonly property int requiredWidth: engine === 1 ? vdaPage.requiredWidth
+                                         : engine === 2 ? dvdPage.requiredWidth
+                                         : engine === 3 ? blendPage.requiredWidth
                                          : 36 + (grid.mergeFrac > 0 ? 3 : 2) * (grid.colMin + Theme.gap) + grid.listMin
     readonly property real requiredHeight: engine === 1 ? vdaPage.y + vdaPage.requiredHeight
+                                           : engine === 2 ? dvdPage.y + dvdPage.requiredHeight
+                                           : engine === 3 ? blendPage.y + blendPage.requiredHeight
                                            : content.y + content.implicitHeight + Theme.gap + actionBar.implicitHeight + 12
 
     transform: Rotation {
@@ -78,7 +83,8 @@ Item {
     }
     function help(k) { return page.dc.help[k] || "" }
 
-    onActiveChanged: if (active) { dc.refreshSceneCut(); dc.refreshChapters(); VDA.refreshSceneCut(); VDA.refreshChapters() }
+    onActiveChanged: if (active) { dc.refreshSceneCut(); dc.refreshChapters(); VDA.refreshSceneCut(); VDA.refreshChapters()
+                                   DVD.refreshSceneCut(); DVD.refreshChapters() }
 
     // ---- runner prompts and toasts --------------------------------------
     Connections {
@@ -191,7 +197,7 @@ Item {
         y: 0
         implicitHeight: 34
         numbered: false
-        model: ["DepthCrafter", "VDA"]       // user, 2026-10-25: "rename the tab to vda"
+        model: ["DepthCrafter", "VDA", "DVD", "Blend"]   // user, 2026-10-25: "rename the tab to vda"; Blend 2026-10-26; DVD 2026-11-07
         currentIndex: page.engine
         onActivated: (i) => page.engine = i
     }
@@ -622,7 +628,9 @@ ChangeFoldersButton {
 
     // v1's menus for this stage. Main puts them on the menu bar after the
     // Studio / View / GPU menus while this tab is showing.
-    readonly property var stageMenus: engine === 1 ? vdaPage.stageMenus : [fileMenu, helpMenu]
+    readonly property var stageMenus: engine === 1 ? vdaPage.stageMenus : engine === 2 ? dvdPage.stageMenus
+                                    : engine === 3 ? blendPage.stageMenus
+                                                                        : [fileMenu, helpMenu]
     // ...and after them, the custom resolution presets (user, 2026-10-05)
     readonly property Component settingsExtra: Component { DcPresetEditor { dc: page.dc } }
 
@@ -700,7 +708,37 @@ ChangeFoldersButton {
         opacity: page.engine === 1 ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
-        transform: Translate { x: page.engine === 1 ? 0 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
+        transform: Translate { x: page.engine === 1 ? 0 : page.engine > 1 ? -40 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
+    }
+
+    // ---- DVD (user, 2026-11-07) -----------------------------------------------------------
+    DvdPage {
+        id: dvdPage
+        objectName: "dvdPage"
+        y: engineSwitch.y + engineSwitch.height
+        width: page.width
+        height: page.height - y
+        prompt: page.prompt
+        consoleRef: page.consoleRef
+        opacity: page.engine === 2 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
+        transform: Translate { x: page.engine === 2 ? 0 : page.engine > 2 ? -40 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
+    }
+
+    // ---- Blend: the two maps into one (user, 2026-10-26) ------------------------------
+    BlendPage {
+        id: blendPage
+        objectName: "blendPage"
+        y: engineSwitch.y + engineSwitch.height
+        width: page.width
+        height: page.height - y
+        prompt: page.prompt
+        consoleRef: page.consoleRef
+        opacity: page.engine === 3 ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur(260) } }
+        transform: Translate { x: page.engine === 3 ? 0 : 40; Behavior on x { NumberAnimation { duration: Theme.dur(320); easing.type: Easing.OutCubic } } }
     }
 
     // drag and drop (user, 2026-10-25): Drop Zones over the paths

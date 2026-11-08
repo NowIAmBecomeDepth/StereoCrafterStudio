@@ -31,6 +31,8 @@ frame's fill (strip PSNR 27.9 vs 26.6 dB, the seam line gone), 6 steps matched
 50, the grain came out at 1.23 against the real 1.22, and no colour correction
 helped (ROSE drifts under a level). 36 frames: ~24 s, most of it ROSE starting.
 
+Black Bar and Zoom (cover(), 2026-11-07) hide the strip instead, without an inpainter.
+
 No Qt here: Merging's controller runs fill() on a worker thread.
 """
 
@@ -652,6 +654,11 @@ class _Edge:
     copied: Optional[np.ndarray] = None   # (n, h, mask, 3) uint8
     copy: Optional[np.ndarray] = None     # (n, h, mask) uint8
     rose: Optional[np.ndarray] = None     # (n, h, mask) bool
+    # Depth Aware (depth_guard.py): the other eye's crop, lined up, and how near each pixel of the crop is
+    other: Optional[np.ndarray] = None    # (n, h, crop + reach, 3) uint8, mapped on disk
+    reach: int = 0                        # the largest shift looked for either way, px
+    depth: Optional[np.ndarray] = None    # (n, h, crop + reach) float16 0..1: the clip's depth map, as `other`
+    near: Optional[np.ndarray] = None     # (n, h, crop) uint8 0-255
 
 
 def _eye_sources(group: Group, probes: Dict[str, Dict]) -> Dict[str, Tuple[str, int, int, int]]:
@@ -750,27 +757,129 @@ def detail_gain(real: List[np.ndarray], filled: List[np.ndarray], cols: Optional
     return round(best, 2)
 
 
-def _copy_ready() -> bool:
-    """Copy From Other Frames can run: SEA-RAFT downloaded and a CUDA card. Says why not when it can't."""
-    from . import flow_fill
-    if not flow_fill.available():
-        logger.info("  Copy From Other Frames is on but SEA-RAFT isn't downloaded (Settings > Studio > Models): "
-                    "the inpainter fills the whole strip")
-        return False
+DEPTH_EXTS = (".mp4", ".mkv", ".mov")
+
+
+def find_depth(group: Group, folder: str) -> Optional[str]:
+    """The clip's depth map in `folder` (or its finished/): <stem>_depth.mp4 (.mkv, .mov) -- the map Splatting
+    reads, so a blend's if the Blend tab made one."""
+    if not folder:
+        return None
+    for d in (folder, os.path.join(folder, "finished")):
+        for ext in DEPTH_EXTS:
+            p = os.path.join(d, f"{group.stem}_depth{ext}")
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+def _read_depth(path: str, out: np.ndarray, eye_w: int, h: int, x: int, w: int, flip: bool, stop) -> int:
+    """`path`'s frames scaled to the eye (eye_w x h), cropped to [x, x + w) (mirrored for a right edge), 0..1,
+    into `out` (n, h, w); the last frame held if the map is shorter. Frames read."""
+    vf = f"scale={eye_w}:{h}:flags=bicubic,crop={w}:{h}:{x}:0" + (",hflip" if flip else "")
+    proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", path, "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray16le",
+                             "-"], stdout=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    size = w * h * 2
+    got = 0
+    try:
+        while got < len(out):
+            if stop.is_set():
+                raise E.Stopped()
+            buf = proc.stdout.read(size)
+            if len(buf) < size:
+                break
+            out[got] = (np.frombuffer(buf, np.uint16).reshape(h, w).astype(np.float32) / 65535.0).astype(np.float16)
+            got += 1
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
+    for i in range(got, len(out)):
+        if got:
+            out[i] = out[got - 1]
+    return got
+
+
+def _other_eye(eye: str) -> str:
+    return "L" if eye == "R" else "R"
+
+
+def near_map(e: "_Edge", n: int, h: int, progress, stop, k: int = 0, of: int = 1) -> np.ndarray:
+    """Depth Aware: (n, h, crop) uint8, how near each pixel of the edge's crop is (depth_guard.near_maps) --
+    never in the hole itself (the old fill there matches anything). The background's shift each frame is the
+    hole's width (Splatting's shift opened it)."""
+    from . import depth_guard
+    runs = e.runs.astype(np.float32) if e.runs is not None and e.runs.size else np.zeros((n, h), np.float32)
+    if runs.shape[0] < n:
+        runs = np.concatenate([runs, np.repeat(runs[-1:], n - runs.shape[0], axis=0)])
+    runs = runs[:n] * e.ratio
+    bg = np.percentile(runs, 95, axis=1) if runs.size else np.zeros(n)
+    tick = lambda d: progress(0.08 + 0.02 * (k + d) / of, "Depth: what is near")      # noqa: E731
+    near = None
+    if e.depth is not None:                   # the clip's depth map: steadier than matching the eyes
+        near = depth_guard.near_maps_from_depth(e.full, e.other, e.depth, bg, e.reach, progress=tick, stop=stop)
+    if near is None:
+        near = depth_guard.near_maps(e.full, e.other, bg, e.reach, stop=stop, progress=tick)
+    if runs.shape[1] != h:                    # each row's hole, at the eye's height
+        src = (np.arange(h) + 0.5) * runs.shape[1] / float(h) - 0.5
+        runs = np.stack([np.interp(src, np.arange(runs.shape[1]), r) for r in runs])
+    cols = np.arange(near.shape[2])[None, None, :]
+    near[cols < np.ceil(runs)[:, :, None]] = 0
+    # a near region must reach past the fill's fade into the real picture: the old inpainter's smear just
+    # past the hole doesn't match the other eye either, and read as near (ch.3 BACKTOFORMULA00017844 frame 85:
+    # a pale band of wall kept); a subject passing reaches well into the frame
+    for t in range(n):
+        zone = int(np.ceil(bg[t])) + STRIP_PAD + FEATHER + 8
+        cnt, lab, st, _ = cv2.connectedComponentsWithStats((near[t] > 127).astype(np.uint8), connectivity=8)
+        if cnt <= 1:
+            near[t] = 0
+            continue
+        keep = np.zeros(cnt, bool)
+        keep[1:] = st[1:, cv2.CC_STAT_LEFT] + st[1:, cv2.CC_STAT_WIDTH] > zone
+        if not keep[1:].all():
+            held = cv2.dilate(keep[lab].astype(np.uint8), np.ones((9, 9), np.uint8))
+            near[t] = near[t] * held
+    return near
+
+
+#: Copy From Other Frames' models: AllTracker (track_fill.py; user, 2026-11-07: the default) or SEA-RAFT
+#: (flow_fill.py)
+COPIERS = ("AllTracker", "SEA-RAFT")
+
+
+def _copier(name: str):
+    from . import flow_fill, track_fill
+    return {"AllTracker": track_fill, "SEA-RAFT": flow_fill}.get(name, track_fill)
+
+
+def _copy_ready(copier: str = COPIERS[0]):
+    """The module Copy From Other Frames runs with -- the model asked for, else the other one if that is
+    downloaded -- or None (a CUDA card and one of them are needed). Says why when it falls back or can't."""
     try:
         import torch
-        if torch.cuda.is_available():
-            return True
+        cuda = torch.cuda.is_available()
     except Exception:
-        pass
-    logger.info("  Copy From Other Frames needs an NVIDIA card: the inpainter fills the whole strip")
-    return False
+        cuda = False
+    if not cuda:
+        logger.info("  Copy From Other Frames needs an NVIDIA card: the inpainter fills the whole strip")
+        return None
+    want = copier if copier in COPIERS else COPIERS[0]
+    other = [c for c in COPIERS if c != want][0]
+    if _copier(want).available():
+        return _copier(want)
+    if _copier(other).available():
+        logger.info(f"  Copy From Other Frames: {want} isn't downloaded (Settings > Studio > Models); {other} is used")
+        return _copier(other)
+    logger.info(f"  Copy From Other Frames is on but {want} isn't downloaded (Settings > Studio > Models): "
+                f"the inpainter fills the whole strip")
+    return None
 
 
 def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
          steps: int = STEPS, grain: bool = True, settings: Optional[Dict] = None,
          strips: Optional[Dict] = None, rose_height: int = ROSE_HEIGHT, detail: bool = False,
-         both_edges: bool = False, prefill: str = "Blur", copy_frames: bool = True,
+         both_edges: bool = False, prefill: str = "Blur", copy_frames: bool = True, copier: str = "AllTracker",
+         depth_aware: bool = True, depth_folder: str = "",
          inpainter: str = "ROSE") -> Dict:
     """Refill the edge strips of one merged clip, its files rewritten in place -- each eye's usual edge
     (USUAL_EDGE), or every edge with a strip with `both_edges`. `prefill`: what ROSE sees under its
@@ -833,7 +942,7 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
     if widest >= crop - 8:
         return {"skipped": f"The edge strip ({max(e.strip for e in edges)} px) is too wide for the frame."}
     rng = np.random.default_rng(int(time.time()))
-    use_flow = _copy_ready() if copy_frames else False
+    use_flow = _copy_ready(copier) if copy_frames else None     # the copier's module (track_fill / flow_fill)
     sweep(group.folder)
     tmp = tempfile.mkdtemp(prefix=TEMP_PREFIX, dir=group.folder)
     # the frames whose grain and detail are measured: the only ones kept past the blend's width
@@ -852,7 +961,8 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
             # on disk, mapped: at Native the whole clip at full height ran to GBs in memory
             e.small = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_small.npy"), mode="w+",
                                                 dtype=np.uint8, shape=(n, rh, rw, 3))
-            if use_flow:            # Copy From Other Frames reads the crop at full size
+            depth_here = depth_aware and _other_eye(e.eye) in sources
+            if use_flow or depth_here:      # Copy From Other Frames and Depth Aware read the crop at full size
                 e.full = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_full.npy"), mode="w+",
                                                    dtype=np.uint8, shape=(n, h, e.crop, 3))
             x = x0 if e.edge == "left" else x0 + ew - e.crop
@@ -875,6 +985,33 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
             if got < n - SHORT_TAIL or got == 0:
                 raise RuntimeError(f"Read {got} of {n} frames of {os.path.basename(path)}.")
             e.got = got
+            if depth_here:          # the other eye beside it, as wide again as the largest shift
+                o_path, o_x0, o_ew, _oh = sources[_other_eye(e.eye)]
+                e.reach = max(64, 2 * e.strip)
+                ow = min(o_ew, e.crop + e.reach)
+                e.other = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_other.npy"), mode="w+",
+                                                    dtype=np.uint8, shape=(n, h, ow, 3))
+                ox = o_x0 if e.edge == "left" else o_x0 + o_ew - ow
+                for i, fr in enumerate(_crop_reader(o_path, ox, ow, h, e.edge == "right")):
+                    if i >= n:
+                        break
+                    if stop.is_set():
+                        raise E.Stopped()
+                    e.other[i] = (fr >> 8).astype(np.uint8)
+                # the clip's depth map, lined up with that eye (user, 2026-11-07: "use depth map") -- not for a
+                # Dual Eye splat, whose two eyes are both moved from the source the map is of
+                dmap = find_depth(group, depth_folder) if depth_folder else None
+                if dmap and "splatted2d" not in os.path.basename(mask_path).lower():
+                    e.depth = np.lib.format.open_memmap(os.path.join(tmp, f"e{k}_depth.npy"), mode="w+",
+                                                        dtype=np.float16, shape=(n, h, ow))
+                    got_d = _read_depth(dmap, e.depth, o_ew, h, ox - o_x0, ow, e.edge == "right", stop)
+                    if got_d == 0:
+                        e.depth = None
+                    else:
+                        logger.info(f"  Depth map: {os.path.basename(dmap)}")
+                elif depth_folder:
+                    logger.info(f"  No depth map for {group.stem} in {depth_folder}: depth is measured from "
+                                f"the two eyes")
         # A clip that decodes a frame or two short of its packet count (user, 2026-11-05: an NVENC
         # 1_1920_merged_full_sbs.mp4 read 94 of 95) is filled for the frames it has: they are all
         # ffmpeg ever shows of it, and _write writes back what decodes.
@@ -889,14 +1026,22 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
             pick = pick[pick < n]
             picked = set(int(i) for i in pick)
 
+        # 1a. Depth Aware: what is nearer than the background beside the strip -- the fill leaves it alone
+        for k, e in enumerate(edges):
+            if e.other is None:
+                continue
+            e.near = near_map(e, n, h, progress, stop, k, len(edges))
+            e.other = e.depth = None
+
         # 1b. Copy From Other Frames: the real picture copied into each strip from the frames that show
         # it; ROSE's frames get the copies and its mask shrinks to what no frame showed
         rose_lo = 0.08
         if use_flow:
-            from . import flow_fill
             for k, e in enumerate(edges):
                 span = 0.17 / len(edges)
-                got_copy = flow_fill.propagate(e.full, e.mask, progress, stop, lo=0.08 + span * k, hi=0.08 + span * (k + 1))
+                extra = {"near": e.near} if e.near is not None and use_flow.__name__.endswith("track_fill") else {}
+                got_copy = use_flow.propagate(e.full, e.mask, progress, stop, lo=0.08 + span * k,
+                                              hi=0.08 + span * (k + 1), **extra)
                 if got_copy is not None:
                     e.copied, e.copy, e.rose = got_copy
                     _rh, _rw = e.small.shape[1:3]
@@ -910,6 +1055,8 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                         e.small[i] = cv2.resize(fr, (_rw, _rh), interpolation=cv2.INTER_AREA)
                 e.full = None
             rose_lo = 0.25
+        for e in edges:
+            e.full = None
 
         # 2. ROSE: every edge's windows in one run (one model load)
         windows = E.plan_windows([True] * n, window=E.WINDOW, overlap=E.OVERLAP, context=0)
@@ -1068,6 +1215,8 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                     raise E.Stopped()
                 alpha = (alpha_of(reach[i], e.keep) if reach is not None
                          else np.broadcast_to(straight, (h, e.keep)))[..., None]
+                if e.near is not None:      # nearer than the background: left as it is
+                    alpha = alpha * (1.0 - e.near[i][:, :e.keep, None].astype(np.float32) / 255.0)
                 orig = e.hi[i].astype(np.float32)
                 if not alpha.any():
                     e.patch[i] = e.hi[i]
@@ -1083,7 +1232,7 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
                 if i % 16 == 0:
                     progress(0.75 + 0.05 * (k + i / n) / len(edges), "Grain and blend")
             e.hi = None
-            e.copied = e.copy = e.rose = None
+            e.copied = e.copy = e.rose = e.near = None
             if e.edge == "right":
                 e.patch = np.ascontiguousarray(e.patch[:, :, ::-1])
             cleaned.clear()
@@ -1112,50 +1261,63 @@ def fill(group: Group, mask_path: str, progress: Progress, stop: threading.Event
             for _path, part in parts:
                 discard(part)
             raise
-        # every original must be movable before any is swapped: one open in a player (the grid's
-        # own right-click Play) failed its move after an earlier file was already replaced -- the
-        # SBS filled, the _R not (bug sweep 2026-10-14b)
-        for path, _part in parts:
-            probe = path + ".edgefill-check"
-            try:
-                os.rename(path, probe)
-            except OSError as err:
-                for _p, part in parts:
-                    discard(part)
-                raise RuntimeError(f"{os.path.basename(path)} is open in another program (a player?): close "
-                                   f"it and fill again. Nothing was changed.") from err
-            os.rename(probe, path)
-        written = []
-        refills = {group.files[key] for key in src if src[key] != group.files[key]}
-        for k, (path, part) in enumerate(parts):
-            try:
-                _swap(path, part, path in refills)
-            except Exception as err:
-                for _path, rest in parts[k + 1:]:
-                    discard(rest)
-                if written:                      # said plainly: the clip's files now disagree
-                    raise RuntimeError(f"{err} {', '.join(os.path.basename(w) for w in written)} "
-                                       f"{'was' if len(written) == 1 else 'were'} already filled.") from err
-                raise
-            written.append(path)
-            logger.info(f"  Wrote {os.path.basename(path)}")
-        rec = _record(group.folder)
-        for path in group.files.values():         # the untouched ones too: the clip is done
-            rec[os.path.basename(path)] = {
-                "file": _file_id(path), "steps": int(steps), "grain": bool(grain), "copy": bool(use_flow),
-                "mask": os.path.basename(mask_path),
-                "edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges],
-                "date": time.strftime("%Y-%m-%d %H:%M")}
-            if path in written or path in refills:  # its kept original, tied to it (kept_original)
-                rec[os.path.basename(path)]["original"] = _file_id(_kept_path(path))
-        _save_json(os.path.join(group.folder, RECORD), rec)
+        written = _put_in_place(group, src, parts, {
+            "steps": int(steps), "grain": bool(grain), "copy": bool(use_flow),
+            "copier": ("AllTracker" if use_flow.__name__.endswith("track_fill") else "SEA-RAFT") if use_flow else "",
+            "mask": os.path.basename(mask_path),
+            "edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges]})
         progress(1.0, "Filled")
         return {"edges": [{"eye": e.eye, "edge": e.edge, "strip": e.strip} for e in edges], "files": written}
     finally:
         for e in edges:                       # the mapped frames let go, so their file can go
             e.small = None
             e.full = None
+            e.other = None
+            e.near = None
+            e.depth = None
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _put_in_place(group: Group, src: Dict[str, str], parts, entry: Dict) -> List[str]:
+    """The written `parts` ((file, its .part)) swapped in for the clip's files, the originals kept,
+    and the clip's record written: `entry` says how it was done (each file's id and the date are
+    added). `src`: each file's source (a refill's kept original). Returns the files written."""
+    from core.common.partial_output import discard
+    # every original must be movable before any is swapped: one open in a player (the grid's
+    # own right-click Play) failed its move after an earlier file was already replaced -- the
+    # SBS filled, the _R not (bug sweep 2026-10-14b)
+    for path, _part in parts:
+        probe = path + ".edgefill-check"
+        try:
+            os.rename(path, probe)
+        except OSError as err:
+            for _p, part in parts:
+                discard(part)
+            raise RuntimeError(f"{os.path.basename(path)} is open in another program (a player?): close "
+                               f"it and fill again. Nothing was changed.") from err
+        os.rename(probe, path)
+    written = []
+    refills = {group.files[key] for key in src if src[key] != group.files[key]}
+    for k, (path, part) in enumerate(parts):
+        try:
+            _swap(path, part, path in refills)
+        except Exception as err:
+            for _path, rest in parts[k + 1:]:
+                discard(rest)
+            if written:                      # said plainly: the clip's files now disagree
+                raise RuntimeError(f"{err} {', '.join(os.path.basename(w) for w in written)} "
+                                   f"{'was' if len(written) == 1 else 'were'} already filled.") from err
+            raise
+        written.append(path)
+        logger.info(f"  Wrote {os.path.basename(path)}")
+    rec = _record(group.folder)
+    for path in group.files.values():         # the untouched ones too: the clip is done
+        rec[os.path.basename(path)] = {"file": _file_id(path), **entry,
+                                       "date": time.strftime("%Y-%m-%d %H:%M")}
+        if path in written or path in refills:  # its kept original, tied to it (kept_original)
+            rec[os.path.basename(path)]["original"] = _file_id(_kept_path(path))
+    _save_json(os.path.join(group.folder, RECORD), rec)
+    return written
 
 
 def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threading.Event,
@@ -1219,6 +1381,188 @@ def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threadi
     if failed or count < n:
         discard(part)
         raise RuntimeError(failed or f"Writing {os.path.basename(path)} stopped at frame {count} of {n}.")
+    return part
+
+
+# ---- Black Bar / Zoom: the cheap covers (user, 2026-11-07) ----------------------------------------
+#
+# No inpainter: the strip is hidden. Black Bar paints it black; Zoom crops it off and scales what is
+# left back up to the frame. Both treat the two eyes alike (user: "the crop and zoom would have to
+# affect both eyes"): the same columns blacked in each, the same crop and scale -- an eye zoomed alone
+# would no longer line up with the other. One ffmpeg pass per file, in the file's own pixel format;
+# the originals kept and the record written as fill() does, so a clip can be filled or covered again.
+
+METHODS = ("Fill", "Black Bar", "Zoom")
+
+
+def cover_sides(strips: Dict) -> Dict[str, int]:
+    """{"left": px, "right": px} in the mask's eye px: per side, the widest strip either eye has there
+    (of edges_wanted()'s, so only the usual edges unless both were asked for)."""
+    out = {"left": 0, "right": 0}
+    for d in strips["eyes"].values():
+        for edge, px in d.items():
+            out[edge] = max(out[edge], int(px))
+    return out
+
+
+def _eyes_in(key: str, w: int) -> List[Tuple[int, int]]:
+    """(x, width) of each eye in a clip's file `key` ("sbs" / "L" / "R"), `w` px wide."""
+    return [(0, w // 2), (w // 2, w // 2)] if key == "sbs" else [(0, w)]
+
+
+def _even_up(x: float) -> int:
+    return int(math.ceil(x / 2.0 - 1e-9)) * 2
+
+
+def cover_px(px: int, mask_w: int, eye_w: int, squeeze: float = 1.0) -> int:
+    """A side's cover in a file's eye px, from the mask's `px` (`mask_w` its eye width): the strip at
+    the eye's full width `eye_w`, plus STRIP_PAD (the inpainter's smear goes a little past the hole),
+    times `squeeze` (0.5 in a Half SBS), rounded up to even for 4:2:0's chroma; 0 for a strip under
+    MIN_STRIP_FRACTION of the eye."""
+    strip = px * eye_w / float(mask_w or eye_w)
+    if px <= 0 or strip < max(2, int(eye_w * MIN_STRIP_FRACTION)):
+        return 0
+    return _even_up((math.ceil(strip) + STRIP_PAD) * squeeze)
+
+
+def cover_graph(method: str, eyes: List[Tuple[int, int]], h: int, left: int, right: int) -> str:
+    """The -vf graph that covers `left` / `right` px of each eye ((x, width) in a frame `h` high):
+    black boxes, or each eye cropped (its height by as much, the shape kept) and scaled back up."""
+    if method == "Black Bar":
+        boxes = []
+        for x, ew in eyes:
+            if left:
+                boxes.append(f"drawbox=x={x}:y=0:w={left}:h={h}:color=black:t=fill")
+            if right:
+                boxes.append(f"drawbox=x={x + ew - right}:y=0:w={right}:h={h}:color=black:t=fill")
+        return ",".join(boxes)
+    if method != "Zoom":
+        raise ValueError(f"Not a cover: {method}")
+    zooms = []
+    for x, ew in eyes:
+        kw = ew - left - right
+        kh = min(h, max(2, int(round(h * kw / float(ew) / 2.0)) * 2))
+        y = (h - kh) // 4 * 2
+        zooms.append(f"crop={kw}:{kh}:{x + left}:{y},scale={ew}:{h}:flags=lanczos")
+    if len(zooms) == 1:
+        return zooms[0]
+    n = len(zooms)
+    return (f"split={n}" + "".join(f"[e{i}]" for i in range(n)) + ";"
+            + ";".join(f"[e{i}]{z}[z{i}]" for i, z in enumerate(zooms)) + ";"
+            + "".join(f"[z{i}]" for i in range(n)) + f"hstack=inputs={n}")
+
+
+def cover(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
+          method: str = "Black Bar", settings: Optional[Dict] = None, strips: Optional[Dict] = None,
+          both_edges: bool = False) -> Dict:
+    """Hide the edge strips of one merged clip -- `method` "Black Bar" or "Zoom" -- the same on both
+    eyes, its files rewritten in place as fill() does (the originals kept; doing it again starts from
+    them). Returns {"method", "edges": [{"eye": "both", "edge", "strip"}], "files": [...]} or
+    {"skipped": why}. Raises E.Stopped, RuntimeError."""
+    if method not in METHODS[1:]:
+        raise ValueError(f"Not a cover: {method}")
+    from studio.merge_all import probe as probe_file
+    src = {k: kept_original(p) or p for k, p in group.files.items()}
+    probes = {p: probe_file(p) for p in src.values()}
+    progress(0.0, "Measuring the strip from the splat mask")
+    strips = edges_wanted(strips or measure(mask_path, stop), both_edges)
+    sides = cover_sides(strips)
+    mask_w = int(strips.get("width") or 0)
+    plans = []                                   # (key, path, eyes, h, left, right)
+    shown = {}                                   # side -> px at the eye's full width, for the record
+    for key, path in group.files.items():
+        p = probes[src[key]]
+        eyes = _eyes_in(key, p["w"])
+        half = key == "sbs" and group.kind == "half_sbs"
+        eye_w = eyes[0][1] * (2 if half else 1)
+        cut = {s: cover_px(px, mask_w, eye_w, 0.5 if half else 1.0) for s, px in sides.items()}
+        for s, px in sides.items():
+            full = cover_px(px, mask_w, eye_w)
+            if full:
+                shown[s] = max(shown.get(s, 0), full)
+        if cut["left"] + cut["right"] >= eyes[0][1] // 2:
+            return {"skipped": f"The edge strip ({max(cut.values())} px) is too wide for the frame."}
+        plans.append((key, path, eyes, p["h"], cut["left"], cut["right"]))
+    if not shown:
+        return {"skipped": "No edge strip wide enough to need it in its splat mask."}
+    edges = [{"eye": "both", "edge": s, "strip": px} for s, px in sorted(shown.items())]
+    logger.info(f"  {method}: " + ", ".join(f"{e['edge']} edge {e['strip']} px" for e in edges)
+                + f", both eyes (mask {os.path.basename(mask_path)})")
+    progress(0.08, f"{method}: starting")
+    from core.common.partial_output import discard
+    sweep(group.folder)
+    parts = []
+    try:
+        for fi, (key, path, eyes, h, left, right) in enumerate(plans):
+            if not (left or right):
+                continue
+            vf = cover_graph(method, eyes, h, left, right)
+            parts.append((path, _write_cover(
+                path, probes[src[key]], vf, settings or {}, stop,
+                lambda d, fi=fi, path=path: progress(0.08 + 0.92 * (fi + d) / len(plans),
+                                                     f"{method}: {os.path.basename(path)}"),
+                source=src[key])))
+    except BaseException:
+        for _path, part in parts:
+            discard(part)
+        raise
+    written = _put_in_place(group, src, parts, {"method": method, "mask": os.path.basename(mask_path),
+                                                "edges": edges})
+    progress(1.0, f"{method}: done")       # its own bar to the end (the controller's "cover")
+    return {"method": method, "edges": edges, "files": written}
+
+
+def _write_cover(path: str, probe: Dict, vf: str, settings: Dict, stop: threading.Event,
+                 progress: Callable[[float], None], source: Optional[str] = None) -> str:
+    """`source` (else `path`) through the filter graph `vf`, its audio copied, to <path>.part
+    (returned) in its own format (encoder_args); _put_in_place() swaps it in."""
+    source = source or path
+    from core.common.color_tags import with_color_tags
+    from core.common.frame_pipe import keep_coded_size
+    from core.common.partial_output import discard, ffmpeg_output_args, part_path
+    info = E._probe(source)
+    color = []
+    for key, flag in (("color_space", "-colorspace"), ("color_transfer", "-color_trc"),
+                      ("color_primaries", "-color_primaries"), ("color_range", "-color_range")):
+        if key in info["color"]:
+            color += [flag, info["color"][key]]
+    part = part_path(path)
+    movflags = ["-movflags", "write_colr"] if path.lower().endswith(".mov") else []
+    cmd = with_color_tags(["ffmpeg", "-v", "error", "-nostats", "-progress", "pipe:1", "-y",
+                           *keep_coded_size(), "-i", source, "-map", "0:v:0", "-map", "0:a?", "-vf", vf,
+                           "-c:a", "copy", *encoder_args(probe, settings), *color, *movflags,
+                           *ffmpeg_output_args(part)])
+    proc = E._with_stderr(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)))
+    total = max(1, info["frames"] or probe.get("frames") or 0)
+    frames = 0
+    try:
+        for raw in proc.stdout:          # -progress: a block every half second, "frame=N" in it
+            if stop.is_set():
+                raise E.Stopped()
+            line = raw.decode("ascii", "replace").strip()
+            if line.startswith("frame="):
+                try:
+                    frames = int(line[6:])
+                except ValueError:
+                    continue
+                progress(min(1.0, frames / float(total)))
+        proc.wait()
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        discard(part)
+        raise
+    finally:
+        proc.stdout.close()
+        proc.err_thread.join(timeout=5)
+        proc.stderr.close()
+    failed = E.writers_failed((proc,), frames, frames, f"Writing {os.path.basename(path)}")
+    if not failed and frames < info["frames"] - SHORT_TAIL:
+        failed = f"Writing {os.path.basename(path)} stopped at frame {frames} of {info['frames']}."
+    if failed:
+        discard(part)
+        raise RuntimeError(failed)
     return part
 
 

@@ -84,6 +84,19 @@ Splatting's standard warp.
 - From Forward-Warp (https://github.com/lizhihao6/Forward-Warp), as Tencent's StereoCrafter uses it; ported to
   plain PyTorch by irgadget (2025). MIT licence, Copyright (c) 2019 lizhihao6.
 
+## AllTracker — `alltracker/`
+
+Dense long-range point tracking for Edge Fill's Copy From Other Frames (`core/removal/track_fill.py`).
+
+- Upstream: https://github.com/aharley/alltracker (commit e755313)
+- Licence: MIT, Copyright (c) 2025 Adam W. Harley — `alltracker/LICENSE`
+- Only the network (`alltracker.py`, `blocks.py`) and the one helper it uses (`misc.py`); training, datasets,
+  the demo and evaluation are not kept. Edits, marked at the top of each file: package imports, the ConvNeXt
+  encoder built without its ImageNet start by default (the checkpoint overwrites it, and it would be a
+  download), `posenc` (only for options the released model leaves off) not vendored.
+- Its weights (`alltracker.pth`, `aharley/alltracker` on Hugging Face, MIT) download from Settings > Studio >
+  Models.
+
 ## SEA-RAFT — `sea_raft/`
 
 Optical flow for Edge Fill's Copy From Other Frames (`core/removal/flow_fill.py`).
@@ -96,6 +109,20 @@ Optical flow for Edge Fill's Copy From Other Frames (`core/removal/flow_fill.py`
   (the checkpoint overwrites it, and it would be a download), no scipy.
 - Its weights (the spring-M checkpoint, `MemorySlices/Tartan-C-T-TSKH-spring540x960-M`, BSD 3-Clause)
   download from Settings > Studio > Models.
+
+## DVD — `dvd_depth/`
+
+Depth Map's DVD tab (`core/dvd/model.py`): Deterministic Video Depth Estimation with Generative Priors.
+
+- Upstream: https://github.com/Billynom8/DVD (a fork of https://github.com/EnVision-Research/DVD), built on
+  DiffSynth-Studio's Wan 2.1 code (https://github.com/modelscope/DiffSynth-Studio)
+- Licence: Apache 2.0 — `dvd_depth/LICENSE`
+- Only the four files inference needs, untouched: the Wan 2.1 DiT and video VAE (`wan_video_dit.py`,
+  `wan_video_vae.py`) and the two modules they import (`utils.py`, `wan_video_camera_controller.py`). The
+  pipeline, text encoder, datasets and training code are not kept; `core/dvd/model.py` runs DVD's one forward
+  pass and window stitching itself.
+- Its weights (`FayeHongfeiZhang/DVD`, `dvd_1.1.safetensors`) are CC-BY-NC-4.0, **non-commercial use only**,
+  and download from Settings > Studio > Models.
 
 ## Models
 
@@ -111,6 +138,7 @@ for academic, research and education purposes only, with no commercial or produc
 | Stable Video Diffusion img2vid-xt 1.1 | https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1 (gated) | Stability AI Community License -- `LICENSE.md` in its folder. |
 | Wan 2.1 VACE 14B (diffusers) | https://huggingface.co/Wan-AI | Apache 2.0. |
 | SAM 3 | https://huggingface.co/facebook/sam3 (gated) | SAM License (see SAM 3 above). |
+| DVD v1.1 | https://huggingface.co/FayeHongfeiZhang/DVD | CC-BY-NC-4.0: non-commercial use only. Wan 2.1 T2V 1.3B (Apache 2.0) with DVD's LoRA. |
 | ROSE | https://github.com/Kunbyte-AI/ROSE, fetched by *Set Up ROSE* into its own environment | Apache 2.0 -- `LICENSE` in `weights/ROSE`. |
 | AutoShot, TransNetV2, OmniShotCut, DINOv3, SSCD checkpoints | the SceneCutGUI checkpoint bundle (see the README) | each under its own project's terms. |
 

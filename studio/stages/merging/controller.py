@@ -172,7 +172,7 @@ class _EngineHooks:
         self.ctl._sigPost.emit(int(delay_ms), fn)
 
     def running(self, on):
-        self.ctl._set_busy(bool(on))
+        self.ctl._engine_running(bool(on))
 
     def claim(self):
         jobs = getattr(self.ctl, "jobs", None)       # v1 _claim_job -> the shell's request_job
@@ -190,6 +190,22 @@ class _EngineHooks:
 
     def info_from_preview(self):
         self.ctl._clip_from_preview()
+
+
+class Phase:
+    """Merging's run, one state at a time (user, 2026-11-07). It was four flags
+    (_busy, _loading, _releasing, _merging_all), and the release step counted as
+    idle: Start looked free and did nothing, Stop was ignored and the batch ran,
+    and the GPU hand-over saw no job (check_merging_run_state)."""
+    IDLE = "idle"
+    RELEASING = "releasing"        # Start pressed: the preview lets go of the GPU first
+    STARTING = "starting"          # the preview let go: the engine loads (first run) and starts
+    RUNNING = "running"            # the batch runs (the engine said so)
+    MERGING_ALL = "merging_all"    # Merge All SBS to 1 Video
+
+    #: where each state may go; anything else is logged
+    NEXT = {IDLE: (RELEASING, MERGING_ALL), RELEASING: (STARTING, IDLE),
+            STARTING: (RUNNING, IDLE), RUNNING: (IDLE,), MERGING_ALL: (IDLE,)}
 
 
 class MergingController(QObject):
@@ -238,9 +254,10 @@ class MergingController(QObject):
         self._stop_after = threading.Event()    # Stop After Clip
         self._engine_values: Dict[str, Any] = {}
         self._module = None
-        self._loading = False
-        self._pending_start = None        # what to run once the engine has loaded
-        self._busy = False
+        self._loading = False             # engine.py's import in flight
+        self._then = []                   # what runs once the engine has loaded, in order
+        self._phase = Phase.IDLE
+        self._run = 0                     # which Start the phase belongs to (a stopped one's callbacks drop)
         # v1's display vars
         self._disp = {"status_label": "Ready.", "progress": 0.0, "progress_maximum": 1,
                       "processing_clip_count": "—", "current_filename": "No video loaded",
@@ -255,7 +272,6 @@ class MergingController(QObject):
         self._import_v2_desc = ""
         # Merge All SBS to 1 Video (user, 2026-10-11): the last scan, the run
         self._merge_info = None
-        self._merging_all = False
         self._merge_build = None
         self._merge_stop = threading.Event()
         self._merge_shown = 0.0
@@ -263,7 +279,6 @@ class MergingController(QObject):
         # The preview (phase 3): v1's own, generated -- see preview.py.
         self._applying_preview = False
         self._preview_info: Dict[str, Any] = {}
-        self._releasing = False           # Start waits for the preview to let go
         self.preview = MergingPreview(self._values, self)
         # Upcoming Jobs keeps the job's clips (and their bars) while it runs
         self.stateChanged.connect(lambda: self.preview.queue.hold(self._busy))
@@ -363,7 +378,7 @@ class MergingController(QObject):
         While a batch runs the panel follows the batch instead (v1
         set_live_clip_info), so it is only remembered."""
         self._preview_info.update(info)
-        if self._busy:
+        if self._job_on():
             return
         for key, value in info.items():
             if key in self._disp:
@@ -496,19 +511,66 @@ class MergingController(QObject):
 
     # ---- run state -------------------------------------------------------------------
 
-    busy = Property(bool, lambda self: self._busy, notify=stateChanged)
+    busy = Property(bool, lambda self: self._phase != Phase.IDLE, notify=stateChanged)
+    mergingAll = Property(bool, lambda self: self._phase == Phase.MERGING_ALL, notify=stateChanged)
+
+    @property
+    def _busy(self) -> bool:
+        """Not idle: a Start on its way in, a batch, or Merge All."""
+        return self._phase != Phase.IDLE
+
+    @_busy.setter
+    def _busy(self, on: bool) -> None:
+        # the checks' fake_busy only: a job that looks like it runs, no side effects
+        self._phase = Phase.RUNNING if on else Phase.IDLE
+
+    @property
+    def _merging_all(self) -> bool:
+        return self._phase == Phase.MERGING_ALL
+
+    def _job_on(self) -> bool:
+        """A batch or Merge All is running (not just on its way in)."""
+        return self._phase in (Phase.RUNNING, Phase.MERGING_ALL)
+
+    def _go(self, to: str) -> None:
+        """The one place the run's state changes. Back to idle, the run's ends are
+        tied up here: Stop After Clip cleared, settings saved, the import button
+        and the preview back (and the clip list let go, through stateChanged)."""
+        was = self._phase
+        if to == was:
+            return
+        if to not in Phase.NEXT[was]:
+            logger.warning("Merging: %s -> %s was not expected", was, to)
+        logger.debug("Merging: %s -> %s", was, to)
+        self._phase = to
+        if to == Phase.IDLE:
+            self._stop_after.clear()
+            self.stopAfterClipChanged.emit()
+        self.stateChanged.emit()
+        self.infoChanged.emit()
+        if to == Phase.IDLE:
+            self.save()
+            self.refreshImport()
+            self.preview.restore_after_job()
+
+    def _engine_running(self, on: bool) -> None:
+        """The engine's running(on): v1's _set_ui_processing_state."""
+        if on:
+            self._go(Phase.RUNNING)
+        elif self._phase == Phase.RUNNING:
+            self._go(Phase.IDLE)
 
     # ---- Stop After Clip: finish the clip being merged, then end the batch ----------
 
     stopAfterClipChanged = Signal()
     stopAfterClip = Property(bool, lambda self: self._stop_after.is_set(), notify=stopAfterClipChanged)
     #: the running batch has more than one clip (the button's only use)
-    multiClip = Property(bool, lambda self: self._busy and not self._merging_all
+    multiClip = Property(bool, lambda self: self._phase == Phase.RUNNING
                          and float(self._disp["progress_maximum"] or 1) > 1, notify=infoChanged)
 
     @Slot()
     def toggleStopAfterClip(self) -> None:
-        if not self._busy:
+        if not self._job_on():
             return
         if self._stop_after.is_set():
             self._stop_after.clear()
@@ -549,19 +611,6 @@ class MergingController(QObject):
         else:
             run()
 
-    def _set_busy(self, on: bool) -> None:
-        if on != self._busy:
-            self._busy = on
-            if not on:      # a run's Stop After Clip ends with it
-                self._stop_after.clear()
-                self.stopAfterClipChanged.emit()
-            self.stateChanged.emit()
-            self.infoChanged.emit()
-            if not on:
-                self.save()
-                self.refreshImport()
-                self.preview.restore_after_job()
-
     def _clip_from_preview(self) -> None:
         """v1 _update_info_display at the end of a batch: the previewer's clip.
         The batch had the preview released, so this is "No video loaded"
@@ -573,7 +622,7 @@ class MergingController(QObject):
         self.infoChanged.emit()
 
     def is_busy(self) -> bool:
-        return (self._loading or self._merging_all
+        return (self._phase != Phase.IDLE or self._loading
                 or bool(self._engine is not None and self._engine.is_busy()))
 
     # ---- Start / Stop / Single File ------------------------------------------------------
@@ -583,7 +632,7 @@ class MergingController(QObject):
         if self._module is not None:
             then(self._ensure_engine())
             return
-        self._pending_start = then
+        self._then.append(then)           # a list: a second ask while it loads used to drop the first
         if self._loading:
             return
         self._loading = True
@@ -604,16 +653,21 @@ class MergingController(QObject):
     def _on_loaded(self, result) -> None:
         self._loading = False
         self.stateChanged.emit()
-        then, self._pending_start = self._pending_start, None
+        thens, self._then = self._then, []
         if isinstance(result, Exception):
+            if self._phase == Phase.STARTING:     # the Start waiting on it ends (the list was left held)
+                self._go(Phase.IDLE)
             self._on_var("status_label", "The merging engine could not be loaded.")
             self.message.emit("error", "Merging", f"The merging engine could not be loaded:\n\n"
                                                   f"{type(result).__name__}: {result}")
             return
         self._module = result
         self._apply_debug_logging()
-        if then is not None:
-            then(self._ensure_engine())
+        for then in thens:
+            try:
+                then(self._ensure_engine())
+            except Exception:
+                logger.exception("Merging: what waited on the engine failed")
 
     def _ensure_engine(self):
         if self._engine is None:
@@ -622,47 +676,84 @@ class MergingController(QObject):
         # Every *_var the engine reads sees the settings as they are now.
         # (Split L/R Output is handed over as Full SBS + Split L/R + Delete SBS)
         self._engine_values.update(S.for_engine(S.normalise(self._values())))
+        self._engine.depth_sidecar_folders = self._depth_folders()
         return self._engine
+
+    def _depth_folders(self) -> list:
+        """Where each clip's depth map sidecar is, for its Frame Break (user, 2026-11-03: Splatting saves it
+        there and Merging never looked, so goblinbridgeattack00149667 merged without bars): Splatting's
+        Depth Maps for Merging's chapter, then Splatting's own Depth Maps folder (and Multi-Map's sidecars/).
+        read_clip_sidecar also looks in their finished/."""
+        out = []
+        if self._chapter_num >= 0:
+            try:
+                out.append(str((self._shell.stagePaths("splatting", self._chapter_num, "") or {}).get("depth") or ""))
+            except Exception:
+                logger.debug("No chapter depth folder for Frame Break", exc_info=True)
+        splatting = getattr(self, "splatting", None)
+        if splatting is not None:
+            try:
+                from studio.stages.splatting import settings as SS
+                v = splatting._values()
+                out += [SS.effective_depth_folder(v), SS.sidecar_folder(v, create=False)]
+            except Exception:
+                logger.debug("No Splatting depth folder for Frame Break", exc_info=True)
+        return [f for f in dict.fromkeys(out) if f]
 
     @Slot()
     def start(self, only=None, test: bool = False) -> None:
         if self.is_busy():
             return
         self.save()
-        # v1 start_processing clears the preview's resources first; here that
-        # happens on the preview's own thread, and the batch starts after.
-        if self._releasing:
-            return
         from studio.clip_queue import move_pending
         if move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
             return
-        self._releasing = True
-        # the list held from now, not from the run's start: while the preview let go, Move to
-        # Finished could take clips the batch was about to read (bug sweep 2026-10-14c)
-        self.preview.queue.hold(True)
         only_keys = {os.path.normcase(os.path.abspath(p)) for p in only} if only else None
         self._restart = lambda: self.start(only, test)
         accept, self._accept_next = self._accept_next, frozenset()
 
-        def go():
-            self._releasing = False
+        def run(eng):
+            eng.only_clips = only_keys          # Process Selected, or None: every clip
+            eng.accept_missing_originals = accept
+            if test:
+                # a Test Render: into <Output Folder>/Test Renders, nothing moved to finished/
+                # (Resume's move); the next start takes the page's values again (_ensure_engine)
+                from studio import test_renders
+                self._engine_values["output_folder"] = test_renders.folder(self._engine_values["output_folder"])
+                self._engine_values["resume"] = False
+                logger.info("Test render into %s", self._engine_values["output_folder"])
+            eng.start_processing()
+        self._begin(run)
 
-            def run(eng):
-                eng.only_clips = only_keys          # Process Selected, or None: every clip
-                eng.accept_missing_originals = accept
-                if test:
-                    # a Test Render: into <Output Folder>/Test Renders, nothing moved to finished/
-                    # (Resume's move); the next start takes the page's values again (_ensure_engine)
-                    from studio import test_renders
-                    self._engine_values["output_folder"] = test_renders.folder(self._engine_values["output_folder"])
-                    self._engine_values["resume"] = False
-                    logger.info("Test render into %s", self._engine_values["output_folder"])
-                eng.start_processing()
-                if not eng.is_processing:          # refused (v1's validation, or another stage runs)
-                    self.preview.queue.hold(False)
-                    self.preview.restore_after_job()
-            self._with_engine(run)
-        self.preview.release_for_job(go)
+    def _begin(self, run) -> None:
+        """Start's way in. v1 start_processing clears the preview's resources
+        first; here that happens on the preview's own thread (RELEASING), then
+        the engine loads if it hasn't and `run(eng)` starts it (STARTING); the
+        engine's own running(True) makes it RUNNING. A start the engine refuses
+        (v1's validation, or another stage runs) comes back to IDLE, and so does
+        Stop on the way in -- this Start's callbacks then do nothing. The clip
+        list is held from RELEASING on, not from the run's start: while the
+        preview let go, Move to Finished could take clips the batch was about to
+        read (bug sweep 2026-10-14c)."""
+        self._run += 1
+        me = self._run
+        self._go(Phase.RELEASING)
+
+        def released():
+            if self._run != me or self._phase != Phase.RELEASING:
+                return                            # stopped while the preview let go
+            self._go(Phase.STARTING)
+            self._with_engine(started)
+
+        def started(eng):
+            if self._run != me or self._phase != Phase.STARTING:
+                return                            # stopped while the engine loaded
+            try:
+                run(eng)
+            finally:
+                if self._phase == Phase.STARTING:     # refused: nothing runs
+                    self._go(Phase.IDLE)
+        self.preview.release_for_job(released)
 
     @Slot()
     def startSelected(self) -> None:
@@ -698,28 +789,28 @@ class MergingController(QObject):
         """v1 process_current_clip: the batch, on the clip the preview shows.
         The preview's clip list is handed to the engine as it stood (it lives
         on the preview's thread), then the preview lets go, then v1 runs."""
-        if self.is_busy() or self._releasing:
+        if self.is_busy():
             return
         self.save()
         entries, index = self.preview.current_entries()
-        self._releasing = True
         self._restart = self.processCurrentClip
         accept, self._accept_next = self._accept_next, frozenset()
 
-        def go():
-            self._releasing = False
-
-            def run(eng):
-                eng.previewer = self._module._Previewed(entries, index)
-                eng.accept_missing_originals = accept
-                eng.process_current_clip()
-                if not eng.is_processing:          # v1 refused (a warning): give the preview back
-                    self.preview.restore_after_job()
-            self._with_engine(run)
-        self.preview.release_for_job(go)
+        def run(eng):
+            eng.previewer = self._module._Previewed(entries, index)
+            eng.accept_missing_originals = accept
+            eng.process_current_clip()
+        self._begin(run)
 
     @Slot()
     def stop(self) -> None:
+        if self._phase in (Phase.RELEASING, Phase.STARTING):
+            # on its way in: nothing has started, so nothing runs (Stop was ignored here, and the
+            # batch ran once the preview had let go)
+            logger.info("Merging: stopped before the batch started (%s).", self._phase)
+            self._go(Phase.IDLE)
+            self._on_var("status_label", "Stopped before the batch started.")
+            return
         if self._merging_all:                 # Merge All: the movie being written is discarded
             self._merge_stop.set()
             build = self._merge_build
@@ -786,7 +877,6 @@ class MergingController(QObject):
     mergeAllScanned = Signal("QVariantMap")
     _sigMergeScanned = Signal(object)
     _sigMergeDone = Signal(object)
-    mergingAll = Property(bool, lambda self: self._merging_all, notify=stateChanged)
 
     def _merge_base(self) -> str:
         """The project's folder, or for a show the episode of Merging's chapter."""
@@ -852,11 +942,10 @@ class MergingController(QObject):
         from studio import merge_all
         opts = merge_all.options_from(self._values())
         self._merge_stop.clear()
-        self._merging_all = True
         self._disp.update({"status_label": "Merge All: checking the clips...", "progress": 0.0,
                            "progress_maximum": 1, "processing_clip_count": f"{info['total']} scenes",
                            "current_filename": os.path.basename(info["outputs"][0]) if info.get("outputs") else ""})
-        self._set_busy(True)
+        self._go(Phase.MERGING_ALL)
 
         def status(text):
             self._sigVar.emit("status_label", "Merge All: " + text)
@@ -905,7 +994,6 @@ class MergingController(QObject):
     @Slot(object)
     def _on_merge_done(self, result) -> None:
         self._merge_build = None
-        self._merging_all = False
         if result.get("stopped"):
             self._disp["status_label"] = "Merge All stopped; nothing was written."
             self.toast.emit("info", "Merge All stopped", "The unfinished movie was discarded.")
@@ -924,7 +1012,7 @@ class MergingController(QObject):
                             "\n".join(os.path.normpath(p) for p in outs)
                             + (f"\n{black} missing scene(s) are black." if black else "")
                             + (f"\nCame up short, the rest black: {', '.join(short)}" if short else ""))
-        self._set_busy(False)
+        self._go(Phase.IDLE)
 
     @Slot()
     def openMergeAllFolder(self) -> None:

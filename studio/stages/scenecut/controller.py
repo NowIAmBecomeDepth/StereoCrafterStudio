@@ -55,6 +55,19 @@ class _EngineHooks:
         self.ctl._sigWidget.emit(str(name), dict(options))
 
 
+class Phase:
+    """Scene Cut's run, one state at a time (user, 2026-11-07). The first Start imports the
+    engine, and that counted as idle: Stop was greyed out and did nothing, and the run started
+    when the import landed; a second ask while it loaded dropped the first
+    (check_v2_scenecut_run_state)."""
+    IDLE = "idle"
+    LOADING = "loading"            # a Start waits for engine.py's import
+    RUNNING = "running"            # the engine detects / splits
+
+    #: where each state may go; anything else is logged
+    NEXT = {IDLE: (LOADING, RUNNING), LOADING: (RUNNING, IDLE), RUNNING: (IDLE,)}
+
+
 class SceneCutController(QObject):
     stateChanged = Signal()
     progressChanged = Signal()
@@ -85,10 +98,11 @@ class SceneCutController(QObject):
 
         self._module = None
         self._engine = None
-        self._loading = False
+        self._loading = False             # engine.py's import in flight
         self._load_error = ""
-        self._then = None
-        self._busy = False
+        self._then = []                   # what runs once the engine has loaded, in order
+        self._phase = Phase.IDLE
+        self._run = 0                     # which Start the phase belongs to (a stopped one's drops)
         self._progress = 0.0
         self._bar_open = False                # a console bar left mid-line (_console_bar)
         self._status = "Ready"
@@ -185,8 +199,29 @@ class SceneCutController(QObject):
 
     # ---- the engine (loaded on a thread) -----------------------------------------------
 
-    busy = Property(bool, lambda self: self._busy, notify=stateChanged)
+    busy = Property(bool, lambda self: self._phase != Phase.IDLE, notify=stateChanged)
     loading = Property(bool, lambda self: self._loading, notify=stateChanged)
+
+    @property
+    def _busy(self) -> bool:
+        """Not idle: a Start waiting on the import, or the run."""
+        return self._phase != Phase.IDLE
+
+    @_busy.setter
+    def _busy(self, on: bool) -> None:
+        # the checks' stand-ins only: a run that looks like it runs, no side effects
+        self._phase = Phase.RUNNING if on else Phase.IDLE
+
+    def _go(self, to: str) -> None:
+        """The one place the run's state changes."""
+        was = self._phase
+        if to == was:
+            return
+        if to not in Phase.NEXT[was]:
+            logger.warning("Scene Cut: %s -> %s was not expected", was, to)
+        logger.debug("Scene Cut: %s -> %s", was, to)
+        self._phase = to
+        self.stateChanged.emit()
     ready = Property(bool, lambda self: self._module is not None, notify=stateChanged)
     progress = Property(float, lambda self: self._progress, notify=progressChanged)
     status = Property(str, lambda self: self._status, notify=progressChanged)
@@ -201,7 +236,7 @@ class SceneCutController(QObject):
                 then(self._ensure_engine())
             return
         if then is not None:
-            self._then = then
+            self._then.append(then)       # a list: a second ask while it loads used to drop the first
         if self._loading:
             return
         self._loading = True
@@ -220,11 +255,13 @@ class SceneCutController(QObject):
     @Slot(object)
     def _on_loaded(self, result) -> None:
         self._loading = False
-        then, self._then = self._then, None
+        thens, self._then = self._then, []
         if isinstance(result, Exception):
             self._load_error = f"{type(result).__name__}: {result}"
+            if self._phase == Phase.LOADING:      # the Start waiting on it ends
+                self._go(Phase.IDLE)
             self.stateChanged.emit()
-            if then is not None:
+            if thens:
                 self.message.emit("error", "Scene Cut", f"The Scene Cut engine could not be loaded:\n\n{self._load_error}")
             return
         self._module = result
@@ -232,8 +269,11 @@ class SceneCutController(QObject):
             self._set("detector_type", "AutoShot")      # v1 _load_settings
         self.stateChanged.emit()
         self.paramsChanged.emit()
-        if then is not None:
-            then(self._ensure_engine())
+        for then in thens:
+            try:
+                then(self._ensure_engine())
+            except Exception:
+                logger.exception("Scene Cut: what waited on the engine failed")
 
     def _ensure_engine(self):
         if self._engine is None:
@@ -255,13 +295,22 @@ class SceneCutController(QObject):
         if self.is_busy():
             return
         self.save()
+        self._run += 1
+        me, waits = self._run, self._module is None
+        if waits:
+            self._go(Phase.LOADING)       # busy from here: Stop can call it off before anything runs
 
         def go(eng):
-            eng._start_detection()
-            if eng.is_busy():
-                self._busy = True
-                self.stateChanged.emit()
-                self._poll.start()
+            if self._run != me or (waits and self._phase != Phase.LOADING):
+                return                    # stopped while the engine loaded (or a newer Start)
+            try:
+                eng._start_detection()
+            finally:
+                if eng.is_busy():
+                    self._go(Phase.RUNNING)
+                    self._poll.start()
+                elif self._phase == Phase.LOADING:
+                    self._go(Phase.IDLE)  # refused (v1's checks, the claim): nothing runs
         self._with_engine(go)
 
     def _claim(self) -> bool:
@@ -274,6 +323,8 @@ class SceneCutController(QObject):
         """Stop now (audit #13, user 2026-09-29): the scenes being cut are
         cancelled (their encoders ended, partial files discarded). The page
         asked first."""
+        if self._stop_loading():
+            return
         if self._engine is not None:
             self._engine.abort_now.set()
             self._engine._abort_detection()
@@ -281,11 +332,23 @@ class SceneCutController(QObject):
     @Slot()
     def abortAfterScenes(self) -> None:
         """Stop after the scenes being cut: they finish, no more start."""
+        if self._stop_loading():
+            return
         if self._engine is not None:
             self._engine._abort_detection()
 
+    def _stop_loading(self) -> bool:
+        """Either Stop while the engine still loads for a Start: nothing runs yet, so nothing will."""
+        if self._phase != Phase.LOADING:
+            return False
+        logger.info("Scene Cut: stopped before detection started (the engine was loading).")
+        self._status = "Stopped before detection started."
+        self.progressChanged.emit()
+        self._go(Phase.IDLE)
+        return True
+
     def is_busy(self) -> bool:
-        return self._loading and self._then is not None or bool(self._engine is not None and self._engine.is_busy())
+        return self._phase != Phase.IDLE or bool(self._engine is not None and self._engine.is_busy())
 
     def holds_gpu(self) -> bool:
         return bool(self._engine is not None and self._engine.holds_gpu())
@@ -383,9 +446,8 @@ class SceneCutController(QObject):
             self.message.emit(kind, title, text)
         if not eng.is_busy() and eng.progress_queue.empty() and eng.dialog_queue.empty():
             self._poll.stop()
-            if self._busy:
-                self._busy = False
-                self.stateChanged.emit()
+            if self._phase == Phase.RUNNING:
+                self._go(Phase.IDLE)
 
     # ---- the file pickers (v1 browse_video) --------------------------------------------
 

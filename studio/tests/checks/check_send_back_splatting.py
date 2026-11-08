@@ -59,7 +59,8 @@ check("...the counter says so", "1 clips" in str(one(sq, "queueClipCount").prope
 
 opened, texts = menu(sq, "clipA")
 check("right-click a finished clip: the reruns only",
-      opened and texts == ["Rerun in DepthCrafter", "Rerun with Video Depth Anything"], str(texts))
+      opened and texts == ["Rerun in DepthCrafter", "Rerun with Video Depth Anything", "Rerun with DVD"],
+      str(texts))
 opened, texts = menu(sq, "clipC")
 check("...a waiting clip keeps its own items, the reruns among them",
       "Splat This Clip Now" in texts and "Rerun in DepthCrafter" in texts, str(texts))

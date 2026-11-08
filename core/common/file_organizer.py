@@ -76,7 +76,28 @@ def _unique_destination(dest_path: str) -> str:
     return f"{stem} ({int(time.time())}){ext}"
 
 
+#: a splat's Frame Break mask: <splat stem> + this (core.common.video_io.FRAME_BREAK_SUFFIX; not imported --
+#: video_io pulls in numpy and the readers)
+_FRAME_BREAK_SUFFIX = "_framebreak.mkv"
+
+
 def move_single_file(
+    src_path: str, dest_folder: str, logger: Optional[logging.Logger] = None, max_retries: int = 1, retry_delay: float = 0.5
+) -> Tuple[bool, Optional[str]]:
+    """_move_one, and a splat's Frame Break mask (<stem>_framebreak.mkv) after it, into the same finished/
+    (user, 2026-11-03: Inpainting moved goblinbridgeattack00149667's hi-res splat and left its mask behind,
+    so Merging merged it without bars). The mask's own move failing doesn't fail the splat's."""
+    ok, err = _move_one(src_path, dest_folder, logger, max_retries, retry_delay)
+    if ok and not os.path.basename(src_path).lower().endswith(_FRAME_BREAK_SUFFIX):
+        mask = os.path.splitext(src_path)[0] + _FRAME_BREAK_SUFFIX
+        if os.path.isfile(mask):
+            m_ok, m_err = _move_one(mask, dest_folder, logger, max_retries, retry_delay)
+            if not m_ok and logger:
+                logger.warning(f"Frame Break mask {os.path.basename(mask)} stayed where it was: {m_err}")
+    return ok, err
+
+
+def _move_one(
     src_path: str, dest_folder: str, logger: Optional[logging.Logger] = None, max_retries: int = 1, retry_delay: float = 0.5
 ) -> Tuple[bool, Optional[str]]:
     """

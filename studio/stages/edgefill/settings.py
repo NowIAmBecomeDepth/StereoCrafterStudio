@@ -14,6 +14,9 @@ from typing import Any, Dict
 STRINGS: Dict[str, str] = {
     "merged_folder": "",       # the merged clips (Full SBS and / or _L / _R)
     "mask_folder": "",         # their splats (_splatted2*), which say how wide each strip is
+    # Depth Aware's depth maps (user, 2026-11-07: "use depth map"): <clip>_depth.mp4 here or in finished/; empty:
+    # Splatting's Input Depth Maps; no map: depth measured from the two eyes
+    "depth_folder": "",
     "size": "560 (sharper texture)",
     # Pre-fill (user, 2026-10-26): what ROSE sees under its mask -- it isn't blanked
     "prefill": "Blur",
@@ -22,6 +25,12 @@ STRINGS: Dict[str, str] = {
     "inpainter": "MiniMax-Remover",
     # MiniMax-Remover's steps (user, 2026-11-03: "add the 12 step on to the minimax options"): 6 or 12
     "mmr_steps": "6",
+    # Method (user, 2026-11-07): Fill paints the strip (the Inpainter); Black Bar and Zoom hide it, the
+    # same on both eyes, in one quick pass (core/removal/edge_fill.cover)
+    "method": "Fill",
+    # Copy From Other Frames' model (user, 2026-11-07): AllTracker (the default; core/removal/track_fill.py)
+    # or SEA-RAFT (flow_fill.py)
+    "copy_with": "AllTracker",
 }
 INTS: Dict[str, int] = {
     "steps": 6,                # ROSE's denoising steps per window
@@ -37,6 +46,9 @@ BOOLS: Dict[str, bool] = {
     # Copy From Other Frames (user, 2026-11-02): the real picture copied into the strip from the frames
     # where a pan or a move shows it (SEA-RAFT flow, core/removal/flow_fill.py); ROSE fills the rest
     "copy_frames": True,
+    # Depth Aware (user, 2026-11-07: "lets add depth map awareness too"): what is nearer than the background beside
+    # the strip -- measured from the merged L / R (core/removal/depth_guard.py) -- is left as it is
+    "depth_aware": True,
 }
 DEFAULTS: Dict[str, Any] = {**STRINGS, **INTS, **BOOLS}
 
@@ -49,6 +61,10 @@ TILE_RANGE = (120, 420)
 PREFILLS = ["Blur", "Stretched"]
 #: what paints the strip (core/removal/edge_fill.INPAINTERS)
 INPAINTERS = ["MiniMax-Remover", "ROSE"]
+#: Copy From Other Frames' models (core/removal/edge_fill.COPIERS)
+COPIERS = ["AllTracker", "SEA-RAFT"]
+#: Fill, or the cheap covers (core/removal/edge_fill.METHODS)
+METHODS = ["Fill", "Black Bar", "Zoom"]
 #: MiniMax-Remover's steps (core/removal/minimax_env.STEP_CHOICES)
 MMR_STEPS = ["6", "12"]
 
@@ -80,6 +96,10 @@ def coerce(key: str, value: Any) -> Any:
             return value if value in PREFILLS else PREFILLS[0]
         if key == "inpainter":
             return value if value in INPAINTERS else STRINGS["inpainter"]
+        if key == "copy_with":
+            return value if value in COPIERS else STRINGS["copy_with"]
+        if key == "method":
+            return value if value in METHODS else STRINGS["method"]
         if key == "mmr_steps":
             return str(value) if str(value) in MMR_STEPS else STRINGS["mmr_steps"]
         if key in STRINGS:

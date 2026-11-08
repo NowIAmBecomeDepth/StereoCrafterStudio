@@ -147,7 +147,7 @@ Section {
     readonly property int rowHeight: 52       // room for the clip's still (user, 2026-09-27)
     // a row with badges besides the sidecar's: a line for them under the name (user, 2026-10-17)
     readonly property int fxLineHeight: 16
-    function fxUnder(fx) { return !!fx && (!!fx[0] || !!fx[1] || !!fx[2] || !!fx[4] || !!fx[5] || !!fx[6] || !!fx[7] || !!fx[8]) }
+    function fxUnder(fx) { return !!fx && (!!fx[0] || !!fx[1] || !!fx[2] || !!fx[4] || !!fx[5] || !!fx[6] || !!fx[7] || !!fx[8] || !!fx[9]) }
     // the row numbers' column: as wide as the list's biggest number
     TextMetrics {
         id: numberMetrics
@@ -326,6 +326,7 @@ Section {
         { kind: "sidecar", flag: 3, name: "fxSidecar", label: "Sidecar saved" },
         { kind: "edited", flag: 4, name: "fxDepthEdited", label: "Depth map edited in the Depth Map Editor" },
         { kind: "vda", flag: 8, name: "fxVda", label: "Depth map from Video Depth Anything" },     // user, 2026-10-25
+        { kind: "dvd", flag: 9, name: "fxDvd", label: "Depth map from DVD" },                      // user, 2026-11-07
         { kind: "text", flag: 5, name: "fxTextMask", label: "Detect Text mask saved" },
         { kind: "keyframe", flag: 0, name: "fxKeyframe", label: "Keyframes" },
         { kind: "break", flag: 1, name: "fxFrameBreak", label: "Frame Break" },
@@ -338,11 +339,12 @@ Section {
     readonly property var legendItems: fxOrder.filter(f => legendKinds.indexOf(f.kind) >= 0)
     readonly property var legendText: ({ sidecar: "Sidecar", edited: "Depth edited", text: "Detect Text",
                                          keyframe: "Keyframes", "break": "Frame Break", pop: "Pop Out Boost",
-                                         particles: "Rain", erased: "Object removed", vda: "VDA map" })
+                                         particles: "Rain", erased: "Object removed", vda: "VDA map", dvd: "DVD map" })
 
     component FxIcon: Item {
+        id: fxIcon
         property string kind: ""
-        width: kind === "vda" ? vdaPill.width : kind === "text" || kind === "break" ? 14 : kind === "sidecar" ? 11 : 12
+        width: kind === "vda" || kind === "dvd" ? vdaPill.width : kind === "text" || kind === "break" ? 14 : kind === "sidecar" ? 11 : 12
         height: 12
         // a sidecar: a page with its corner folded down
         Item {
@@ -369,11 +371,13 @@ Section {
         }
         // a Video Depth Anything map (user, 2026-10-25): "VDA" in a pill, in the accent ink -- the pill as
         // wide as the letters' ink plus an even margin, and the ink centred in it (centring the text box left
-        // the glyphs' own side bearings as a gap on the right; user: "too much of a gap")
-        TextMetrics { id: vdaInk; text: "VDA"; font.family: Theme.buttonFont; font.pixelSize: 7; font.weight: Font.Bold }
+        // the glyphs' own side bearings as a gap on the right; user: "too much of a gap"). A DVD map's the
+        // same, "DVD" (user, 2026-11-07) -- fxIcon.kind, not parent.kind: TextMetrics isn't an Item, so its
+        // "parent" was the row's, and every DVD pill read "VDA" (user, 2026-11-07).
+        TextMetrics { id: vdaInk; text: fxIcon.kind === "dvd" ? "DVD" : "VDA"; font.family: Theme.buttonFont; font.pixelSize: 7; font.weight: Font.Bold }
         Rectangle {
             id: vdaPill
-            visible: parent.kind === "vda"
+            visible: parent.kind === "vda" || parent.kind === "dvd"
             anchors.centerIn: parent
             width: Math.round(vdaInk.tightBoundingRect.width) + 6; height: 11; radius: 5.5
             color: "transparent"
@@ -384,7 +388,7 @@ Section {
                 x: (parent.width - vdaInk.tightBoundingRect.width) / 2 - vdaInk.tightBoundingRect.x + 1
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: 0.5
-                text: "VDA"
+                text: vdaInk.text
                 color: Theme.accentInk
                 font: vdaInk.font
             }

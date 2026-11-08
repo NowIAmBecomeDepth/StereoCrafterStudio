@@ -64,9 +64,23 @@ class _TrueFlow:
         pass
 
 
-def _run(frames, flow):
+def _run(frames, flow, keep=False):
+    """`keep`: leave the session's cache as it is (else each run copies for itself -- the tests below hand the
+    same pan different stand-ins)."""
+    if not keep:
+        FF.clear_cache()
     with mock.patch.object(FF, "_make_flow", lambda: flow):
         return FF.propagate(frames, M, lambda *a: None, threading.Event())
+
+
+class _Counted(_TrueFlow):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.calls = 0
+
+    def between(self, pairs, h, w):
+        self.calls += 1
+        return super().between(pairs, h, w)
 
 
 class FlowFillTest(unittest.TestCase):
@@ -153,6 +167,47 @@ class NearThingTest(unittest.TestCase):
         frames[far][:, 48:72] = 0                          # where frame 6's strip lands in it
         fill, copy, rose = _run(frames, _Occluded(self.t0, set(range(N)) - {far}))
         self.assertLess(self._err(fill, frames, slice(0, M)), 6.0, "frame 18 alone isn't frame 6's strip")
+
+
+class SeaRaftCacheTest(unittest.TestCase):
+    """The session's cache (user, 2026-11-07: "do the same for sea raft"): a clip copied again isn't flowed again;
+    a changed one is. In RAM, shared with AllTracker's (track_fill)."""
+
+    def setUp(self):
+        FF.clear_cache()
+
+    def tearDown(self):
+        FF.clear_cache()
+
+    def test_the_same_clip_again_is_not_flowed_again(self):
+        frames = _pan()
+        first, again = _Counted(), _Counted()
+        a = _run(frames.copy(), first, keep=True)
+        b = _run(frames.copy(), again, keep=True)
+        self.assertGreater(first.calls, 0)
+        self.assertEqual(again.calls, 0, "reused")
+        for x, y in zip(a, b):
+            self.assertTrue(np.array_equal(x, y))
+
+    def test_a_changed_clip_or_strip_is_flowed_again(self):
+        frames = _pan()
+        _run(frames.copy(), _Counted(), keep=True)
+        changed = frames.copy()
+        changed[3, 10, 60] ^= 1
+        tr = _Counted()
+        _run(changed, tr, keep=True)
+        self.assertGreater(tr.calls, 0, "one pixel different: copied again")
+        tr = _Counted()
+        with mock.patch.object(FF, "_make_flow", lambda: tr):
+            FF.propagate(frames.copy(), M + 2, lambda *a: None, threading.Event())
+        self.assertGreater(tr.calls, 0, "a wider strip: copied again")
+
+    def test_the_two_copiers_keep_their_own(self):
+        frames = _pan()
+        _run(frames.copy(), _Counted(), keep=True)
+        k_sea = FF.cache_key("SEA-RAFT", (), frames, M)
+        k_at = FF.cache_key("AllTracker", (), frames, M)
+        self.assertNotEqual(k_sea, k_at)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,10 @@ the pass when no copy would be made, so it costs seconds, not minutes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -131,13 +134,124 @@ class _Flow:
             pass
 
 
+def tidy(found: np.ndarray, fill: np.ndarray, frames, M: int) -> None:
+    """Islands of copies under SMALL px dropped, holes under SMALL inside them filled from around them -- in
+    place: `found` (n, H, M) bool, `fill` (n, H, M, 3); `frames` the crop, whose picture beside the strip the
+    filling sees."""
+    n = len(found)
+    for t in range(n):
+        m = found[t].astype(np.uint8)
+        cnt, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        for c in range(1, cnt):
+            if st[c, cv2.CC_STAT_AREA] < SMALL:
+                m[lab == c] = 0
+        hole = (1 - m).astype(np.uint8)
+        cnt, lab, st, _ = cv2.connectedComponentsWithStats(hole, connectivity=8)
+        small = np.zeros_like(hole)
+        for c in range(1, cnt):
+            # a small hole inside the copies, not one open to the strip's edge with the picture
+            if st[c, cv2.CC_STAT_AREA] < SMALL and st[c, cv2.CC_STAT_LEFT] + st[c, cv2.CC_STAT_WIDTH] < M:
+                small[lab == c] = 1
+        if small.any():
+            img = np.concatenate([np.clip(fill[t], 0, 255).astype(np.uint8), frames[t][:, M:M + 8]], 1)
+            fixed = cv2.inpaint(img, np.pad(small, ((0, 0), (0, 8))), 5, cv2.INPAINT_TELEA)
+            fill[t][small > 0] = fixed[:, :M][small > 0]
+            m |= small
+        found[t] = m > 0
+
+
+def handoff(found: np.ndarray, trust: np.ndarray):
+    """How much of the copy is taken over the inpainter's paint, and where it paints: (copy (n, H, M) uint8
+    0-255, rose (n, H, M) bool) -- none where no frame showed it, faded over a few px; `trust` 0..1 per
+    pixel."""
+    n, H, M = found.shape
+    rose = ~found
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ROSE_GROW, ROSE_GROW))
+    copy = np.empty((n, H, M), np.uint8)
+    rose_mask = np.empty((n, H, M), bool)
+    for t in range(n):
+        grown = cv2.dilate(rose[t].astype(np.uint8), grow)
+        rose_mask[t] = grown > 0
+        soft = np.maximum(cv2.GaussianBlur(grown.astype(np.float32), (0, 0), 3), rose[t].astype(np.float32))
+        soft = np.maximum(soft, 1.0 - np.minimum(cv2.GaussianBlur(trust[t].astype(np.float32), (0, 0), 4), trust[t]))
+        copy[t] = np.clip((1.0 - soft) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    return copy, rose_mask
+
+
+# ---- the session's cache, both copiers' (user, 2026-11-07: AllTracker "cache its scans while studio stays open
+# so if i have to run it again it skips that step"; "do the same for sea raft") ----------------------------------
+#
+# A clip filled again -- another inpainter, steps, grain, a refill from its original -- hands the copier the same
+# crop and strip (and near map), so the same copy comes out: it is kept in RAM for as long as Studio runs, keyed
+# on what goes in (the crop's and near map's own bytes, the strip, the copier and its settings), so any change
+# copies again. A clip's entry is its fill and two masks, ~30 MB for 100 frames at 1038 rows; the oldest go past
+# CACHE_BYTES. Nothing is held on the card.
+
+CACHE_BYTES = 2 * 2 ** 30
+_cache: "OrderedDict[str, object]" = OrderedDict()
+_cache_lock = threading.Lock()
+_NOTHING = "nothing"          # a clip no frame shows: kept too, so its quick look isn't run again
+
+
+def _digest(arr, h) -> None:
+    for a in range(0, len(arr), 16):                  # a memmap a chunk at a time
+        h.update(np.ascontiguousarray(arr[a:a + 16]).tobytes())
+
+
+def cache_key(copier: str, settings: tuple, frames, hidden: int, near=None) -> str:
+    h = hashlib.blake2b(digest_size=20)
+    h.update(repr((copier, settings, frames.shape, int(hidden), near is not None)).encode())
+    _digest(frames, h)
+    if near is not None:
+        _digest(near, h)
+    return h.hexdigest()
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _size(v) -> int:
+    return 0 if v is None or isinstance(v, str) else sum(a.nbytes for a in v)
+
+
+def cached(copier: str, settings: tuple, frames, hidden: int, near, progress, lo: float, hi: float, run):
+    """`run()`'s copy for this input, or the one kept from earlier in the session."""
+    progress(lo, "Copy From Other Frames: looking for this clip's copy")
+    key = cache_key(copier, settings, frames, hidden, near)
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None:
+            _cache.move_to_end(key)
+    if hit is not None:
+        logger.info(f"  Copy From Other Frames ({copier}): this clip was copied earlier in this session -- reused")
+        progress(hi, "Copy From Other Frames: done (reused)")
+        return None if isinstance(hit, str) else tuple(a.copy() for a in hit)
+    got = run()
+    with _cache_lock:
+        _cache[key] = _NOTHING if got is None else tuple(a.copy() for a in got)
+        while len(_cache) > 1 and sum(_size(v) for v in _cache.values()) > CACHE_BYTES:
+            _cache.popitem(last=False)
+    return got
+
+
 def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: float = 0.0, hi: float = 1.0
               ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Copy real pixels into the left `hidden` columns of `frames` ((n, h, w, 3) uint8; a memmap is fine).
 
     Returns (fill (n, h, hidden, 3) uint8, copy (n, h, hidden) uint8 0-255: how much of the fill to
     take over ROSE's, rose (n, h, hidden) bool: where ROSE must paint), or None when no frame shows the
-    strip (a static shot). Raises erase.Stopped."""
+    strip (a static shot). The same input again in this session comes from the cache. Raises erase.Stopped."""
+    settings = (OFFSETS, BAND, MARGIN, FB_ABS, FB_REL, NEAR_DECAY, SMALL, STEADY, STEADY_CHECK, SEAM, SOLO,
+                FILL_FROM, LOOK_FRAMES, LOOK_OFFSETS, LOOK_LEAST, ROSE_GROW, sorted(CONFIG.items()))
+    return cached("SEA-RAFT", settings, frames, hidden, None, progress, lo, hi,
+                  lambda: _propagate(frames, hidden, progress, stop, lo, hi))
+
+
+def _propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: float = 0.0, hi: float = 1.0
+               ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """propagate's work, uncached."""
     import torch
     import torch.nn.functional as F
     from . import erase as E
@@ -257,25 +371,7 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
         flow.release()
 
     # 3. tidy: islands of copies dropped, small holes filled from around them
-    for t in range(n):
-        m = found[t].astype(np.uint8)
-        cnt, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
-        for c in range(1, cnt):
-            if st[c, cv2.CC_STAT_AREA] < SMALL:
-                m[lab == c] = 0
-        hole = (1 - m).astype(np.uint8)
-        cnt, lab, st, _ = cv2.connectedComponentsWithStats(hole, connectivity=8)
-        small = np.zeros_like(hole)
-        for c in range(1, cnt):
-            # a small hole inside the copies, not one open to the strip's edge with the picture
-            if st[c, cv2.CC_STAT_AREA] < SMALL and st[c, cv2.CC_STAT_LEFT] + st[c, cv2.CC_STAT_WIDTH] < M:
-                small[lab == c] = 1
-        if small.any():
-            img = np.concatenate([np.clip(fill[t], 0, 255).astype(np.uint8), frames[t][:, M:M + 8]], 1)
-            fixed = cv2.inpaint(img, np.pad(small, ((0, 0), (0, 8))), 5, cv2.INPAINT_TELEA)
-            fill[t][small > 0] = fixed[:, :M][small > 0]
-            m |= small
-        found[t] = m > 0
+    tidy(found, fill, frames, M)
     progress(lo + 0.85 * (hi - lo), "Copy From Other Frames: steadying")
 
     # 4. steadying: each frame's strip averaged with its neighbours', warped along the strip's flow; a
@@ -316,16 +412,7 @@ def propagate(frames: np.ndarray, hidden: int, progress: Progress, stop, lo: flo
     trust = np.clip(support * 1.5, 0.0, 1.0) * found        # held by its neighbours too: trusted fully
 
     # 5. how much of the copy is taken over ROSE: none where no frame showed it, faded over a few px
-    rose = ~found
-    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ROSE_GROW, ROSE_GROW))
-    copy = np.empty((n, H, M), np.uint8)
-    rose_mask = np.empty((n, H, M), bool)
-    for t in range(n):
-        grown = cv2.dilate(rose[t].astype(np.uint8), grow)
-        rose_mask[t] = grown > 0
-        soft = np.maximum(cv2.GaussianBlur(grown.astype(np.float32), (0, 0), 3), rose[t].astype(np.float32))
-        soft = np.maximum(soft, 1.0 - np.minimum(cv2.GaussianBlur(trust[t].astype(np.float32), (0, 0), 4), trust[t]))
-        copy[t] = np.clip((1.0 - soft) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    copy, rose_mask = handoff(found, trust)
     share = float(found.mean())
     logger.info(f"  Copy From Other Frames: {share:.0%} of the strip copied from other frames; the inpainter fills the rest")
     progress(hi, "Copy From Other Frames: done")
