@@ -4,7 +4,7 @@ import QtQuick.Effects
 import QtQuick.Layouts
 import Studio
 
-// Merge All SBS to 1 Video (user, 2026-10-11; studio/merge_all.py). begin() looks through
+// Merge All to One Video (user, 2026-10-11; studio/merge_all.py). begin() looks through
 // every chapter; then either "merge everything?" -- every scene has its merged output --
 // or the scenes that don't, each with Play (the default player) and Send to the stage it
 // still needs, and Merge Anyway (black in their place, each as long as its scene).

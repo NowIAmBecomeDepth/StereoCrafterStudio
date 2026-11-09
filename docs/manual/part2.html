@@ -1485,13 +1485,13 @@
       goes to the next.</li>
     <li><span class="btn">Fill Edges</span> opens <b>Extra &gt; Edge Fill</b> on this stage's folders, to refill the strip a deep 3D shift leaves at the frame's edge --
       see <a href="#fill-edges">11</a>.</li>
-    <li><span class="btn">Merge All SBS to 1 Video</span> puts the whole movie back together -- see
+    <li><span class="btn">Merge All to One Video</span> puts the whole movie back together -- see
       <a href="#merge-all">10</a>.</li>
     <li><span class="btn">View Output Folder</span> opens the finished videos.</li>
   </ul>
 
   <h3 id="merge-all"><span class="num">10</span> &nbsp;Merge All: the whole movie</h3>
-  <p>Once the scenes are merged, <span class="btn">Merge All SBS to 1 Video</span> joins them into one video:
+  <p>Once the scenes are merged, <span class="btn">Merge All to One Video</span> joins them into one video:
      every chapter in order, and every scene in the order it plays. The scenes are the clips Scene Cut made,
      found in each chapter of the Source folder; each one's merged output is looked for in that chapter of
      the merged folder, subfolders included. Split <code>_L</code> / <code>_R</code> files are joined side by
@@ -1510,9 +1510,10 @@
     <li>It runs like any Merging job: the bar shows it, <span class="btn">Stop</span> ends it and discards the
       unfinished file.</li>
   </ul>
-  <p>How it's written is under <span class="btn">Encoding Options…</span> &rsaquo; <b>Merge All</b>:
-     <span class="set">Layout</span> (<b>Full SBS</b>, <b>Half SBS</b>, or <b>L and R files</b>, a whole-movie
-     file per eye), the codec and quality, the container, and the <span class="set">Movie (sound)</span> --
+  <p>The movie comes out in Merging's <span class="set">Output Format</span>: Full SBS, Cross-eye, Double SBS,
+     Half SBS, an anaglyph or the right eye alone, and <b>Split L/R Output</b> as a whole-movie file per eye.
+     How it's written is under <span class="btn">Encoding Options…</span> &rsaquo; <b>Merge All</b>:
+     the codec and quality, the container, and the <span class="set">Movie (sound)</span> --
      the movie file whose soundtrack goes in, every audio track of it (use MKV for TrueHD / Atmos). Leave
      that empty for no sound. The file goes in the project's folder, as <code>&lt;project&gt; - 3D Full
      SBS.mkv</code>, unless you set an <span class="set">Output Folder</span>.</p>

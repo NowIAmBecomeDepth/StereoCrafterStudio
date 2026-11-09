@@ -17,7 +17,7 @@ Popup {
     function k(name) { return keyMap[name] || name }
     // Splatting's two CRFs (v1 show_dual_crf): Full Res and Low Res.
     property bool dualCrf: false
-    // Merging's Merge All SBS to 1 Video (user, 2026-10-11): its own tab, the whole movie's encode
+    // Merging's Merge All to One Video (user, 2026-10-11): its own tab, the whole movie's encode
     property bool mergeAll: false
     property int tab: 0                  // 0 the clips' encoding, 1 Merge All
 
@@ -270,7 +270,7 @@ Popup {
             Layout.fillWidth: true
             spacing: Theme.rowGap
             Text {
-                text: "How Merge All SBS to 1 Video writes the whole movie. The clips' own encoding is on the Clips tab."
+                text: "How Merge All to One Video writes the whole movie. The clips' own encoding is on the Clips tab."
                 color: Theme.fgMuted
                 font.family: Theme.bodyFont
                 font.pixelSize: Theme.smallSize + 1
@@ -283,7 +283,16 @@ Popup {
                 columns: 2
                 columnSpacing: 24
                 rowSpacing: Theme.rowGap
-                FieldRow { label: "Layout"; labelWidth: 120; help: dlg.help("mergeall_layout"); EDrop { key: "mergeall_layout"; model: dlg.ctl ? dlg.ctl.choices.mergeall_layout || [] : [] } }
+                FieldRow {      // Merging's Output Format decides it (user, 2026-11-09)
+                    label: "Layout"; labelWidth: 120; help: dlg.help("mergeall_layout")
+                    Text {
+                        objectName: "encMergeLayout"
+                        text: ((dlg.ctl && dlg.ctl.choices.mergeall_layout_of ? dlg.ctl.choices.mergeall_layout_of : {})
+                               [dlg.st ? String(dlg.st.output_format) : ""] || "Full SBS") + "  (Output Format)"
+                        color: Theme.fg
+                        font.family: Theme.bodyFont; font.pixelSize: 13
+                    }
+                }
                 FieldRow { label: "Container"; labelWidth: 120; help: dlg.help("mergeall_container"); EDrop { key: "mergeall_container"; model: dlg.ctl ? dlg.ctl.choices.mergeall_container || [] : [] } }
                 FieldRow { label: "Codec"; labelWidth: 120; help: dlg.help("mergeall_codec"); EDrop { key: "mergeall_codec"; model: dlg.ctl ? dlg.ctl.choices.mergeall_codec || [] : [] } }
                 FieldRow { label: "Encoder"; labelWidth: 120; enabled: !mAll.dnx; help: dlg.help("encoding_encoder"); EDrop { key: "mergeall_encoder"; model: dlg.ctl ? dlg.ctl.choices.encoding_encoder : [] } }

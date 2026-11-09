@@ -1,4 +1,4 @@
-"""merge_all.py -- Merging's "Merge All SBS to 1 Video" (user, 2026-10-11).
+"""merge_all.py -- Merging's "Merge All to One Video" (user, 2026-10-11).
 
 Every scene of the project (or the episode in use) put back together as the
 whole movie: each chapter's merged outputs, in chapter order and scene order,
@@ -74,7 +74,19 @@ STAGE_INDEX = {"depthcrafter": 0, "splatting": 1, "inpainting": 2, "merging": 3}
 #: Codecs whose every frame stands alone: their files join without re-encoding.
 INTRA_CODECS = {"dnxhd", "prores", "ffv1", "mjpeg", "rawvideo", "utvideo", "huffyuv"}
 
-LAYOUTS = ("Full SBS", "Half SBS", "L and R files")
+LAYOUTS = ("Full SBS", "Full SBS Cross-eye", "Double SBS", "Half SBS", "L and R files", "Anaglyph",
+           "Anaglyph Half-Color", "Right Eye")
+#: The movie takes Merging's Output Format (user, 2026-11-09: a cross-eye Merging joined as parallel SBS);
+#: a format not listed here is Full SBS.
+LAYOUT_OF = {"Full SBS (Left-Right)": "Full SBS", "Full SBS Cross-eye (Right-Left)": "Full SBS Cross-eye",
+             "Double SBS": "Double SBS", "Half SBS (Left-Right)": "Half SBS", "Split L/R Output": "L and R files",
+             "Anaglyph (Red/Cyan)": "Anaglyph", "Anaglyph Half-Color": "Anaglyph Half-Color",
+             "Right-Eye Only": "Right Eye"}
+
+
+def layout_for(output_format) -> str:
+    """Merge All's layout for Merging's Output Format."""
+    return LAYOUT_OF.get(str(output_format or ""), "Full SBS")
 CODECS = ("H.265", "H.264", "DNxHR")
 CONTAINERS = ("MKV", "MP4", "MOV")
 AUDIO_CODECS = ("Copy", "AAC")
@@ -518,6 +530,17 @@ def _layout_graph(src: str, layout: str) -> Tuple[str, List[str]]:
     """The filter from the full side-by-side picture `src` to the layout: (graph, output labels)."""
     if layout == "Half SBS":
         return f"{src}scale=iw/2:ih:flags=lanczos,setsar=1[v0]", ["[v0]"]
+    if layout == "Full SBS Cross-eye":     # the right eye on the left (tester, 2026-11-09)
+        return (f"{src}split=2[sl][sr];[sl]crop=iw/2:ih:iw/2:0[xl];[sr]crop=iw/2:ih:0:0[xr];"
+                f"[xl][xr]hstack=2,setsar=1[v0]", ["[v0]"])
+    if layout == "Double SBS":             # as Merging's: the Full SBS at twice its height
+        return f"{src}scale=iw:ih*2:flags=lanczos,setsar=1[v0]", ["[v0]"]
+    if layout in ("Anaglyph", "Anaglyph Half-Color"):
+        # Merging's two: red from the left eye (Half-Color: its grey), green + blue from the right
+        mode = "arcc" if layout == "Anaglyph" else "arch"
+        return f"{src}stereo3d=sbsl:{mode},setsar=1[v0]", ["[v0]"]
+    if layout == "Right Eye":
+        return f"{src}crop=iw/2:ih:iw/2:0,setsar=1[v0]", ["[v0]"]
     if layout == "L and R files":
         return (f"{src}split=2[sl][sr];[sl]crop=iw/2:ih:0:0,setsar=1[v0];[sr]crop=iw/2:ih:iw/2:0,setsar=1[v1]",
                 ["[v0]", "[v1]"])
@@ -849,7 +872,7 @@ class Build:
 
 def options_from(values: Dict) -> Dict:
     """Merge All's settings (Merging's mergeall_* keys) as Build reads them."""
-    return {"layout": values.get("mergeall_layout") or "Full SBS", "codec": values.get("mergeall_codec") or "H.265",
+    return {"layout": layout_for(values.get("output_format")), "codec": values.get("mergeall_codec") or "H.265",
             "encoder": values.get("mergeall_encoder") or "Auto", "quality": values.get("mergeall_quality") or "Medium",
             "crf": values.get("mergeall_crf") or "18", "bit_depth": values.get("mergeall_bit_depth") or "Auto",
             "dnxhr_profile": values.get("mergeall_dnxhr_profile") or "HQX (10-bit 4:2:2)",

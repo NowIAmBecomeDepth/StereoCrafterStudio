@@ -65,7 +65,7 @@ _HELP_FALLBACKS = {
     "current_video_count": (
         "How many clips are loaded in the current list, and which one is showing (e.g. 3 / 12). "
         "Use Load/Refresh List to rebuild it."),
-    # Merge All SBS to 1 Video (user, 2026-10-11)
+    # Merge All to One Video (user, 2026-10-11)
     "merge_all": (
         "Puts the whole movie back together: every chapter's merged scenes, in chapter and scene order, as one "
         "video (the layout, codec and soundtrack are in Settings > Encoding Options > Merge All). It first checks "
@@ -73,8 +73,8 @@ _HELP_FALLBACKS = {
         "each still needs, to play, or to merge anyway with black in their place. For a TV show: the episode "
         "Merging is on. With no project open: the merged clips in the Output Folder, in scene-number order."),
     "mergeall_layout": (
-        "Full SBS: both eyes at full width, side by side. Half SBS: both squeezed into one normal-width frame, "
-        "as most 3D TVs read side-by-side. L and R files: a whole-movie file for each eye."),
+        "The movie is joined in Merging's Output Format: Full SBS, Cross-eye, Double SBS, Half SBS, an anaglyph or "
+        "the right eye alone, and Split L/R Output as a whole-movie file for each eye. Change it there."),
     "mergeall_codec": "H.265 / H.264 use the Encoder, Quality Preset and CRF below; DNxHR uses its profile.",
     "mergeall_crf": "Quality for H.265 / H.264: lower is better and bigger. 18 is near-transparent.",
     "mergeall_audio_file": (
@@ -141,7 +141,7 @@ def _choices() -> Dict[str, list]:
     except Exception:
         logger.debug("encoding lists unavailable", exc_info=True)
     from studio import merge_all
-    out.update({"mergeall_layout": list(merge_all.LAYOUTS), "mergeall_codec": list(merge_all.CODECS),
+    out.update({"mergeall_layout": list(merge_all.LAYOUTS), "mergeall_layout_of": dict(merge_all.LAYOUT_OF), "mergeall_codec": list(merge_all.CODECS),
                 "mergeall_container": list(merge_all.CONTAINERS), "mergeall_audio_codec": list(merge_all.AUDIO_CODECS)})
     if "encoding_tune" in out and "Auto" not in out["encoding_tune"]:
         out["encoding_tune"] = ["Auto"] + out["encoding_tune"]
@@ -203,7 +203,7 @@ class Phase:
     RELEASING = "releasing"        # Start pressed: the preview lets go of the GPU first
     STARTING = "starting"          # the preview let go: the engine loads (first run) and starts
     RUNNING = "running"            # the batch runs (the engine said so)
-    MERGING_ALL = "merging_all"    # Merge All SBS to 1 Video
+    MERGING_ALL = "merging_all"    # Merge All to One Video
 
     #: where each state may go; anything else is logged
     NEXT = {IDLE: (RELEASING, MERGING_ALL), RELEASING: (STARTING, IDLE),
@@ -272,7 +272,7 @@ class MergingController(QObject):
         self._chapter_applying = False
         self._import_desc = ""
         self._import_v2_desc = ""
-        # Merge All SBS to 1 Video (user, 2026-10-11): the last scan, the run
+        # Merge All to One Video (user, 2026-10-11): the last scan, the run
         self._merge_info = None
         self._merge_build = None
         self._merge_stop = threading.Event()
@@ -874,7 +874,7 @@ class MergingController(QObject):
         if err:
             self.message.emit("warning", "Open Output Folder", err)
 
-    # ---- Merge All SBS to 1 Video (user, 2026-10-11; studio/merge_all.py) -----------------
+    # ---- Merge All to One Video (user, 2026-10-11; studio/merge_all.py) -----------------
 
     mergeAllScanned = Signal("QVariantMap")
     _sigMergeScanned = Signal(object)

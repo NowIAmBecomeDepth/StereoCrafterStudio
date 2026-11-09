@@ -1,4 +1,4 @@
-"""Merging's Merge All SBS to 1 Video (user, 2026-10-11), in the real app, offscreen,
+"""Merging's Merge All to One Video (user, 2026-10-11), in the real app, offscreen,
 on a made-up project: the button left of View Output Folder; its dialog lists the
 two scenes with no merged output, each needing its own stage; Send to Splatting
 loads that scene there (source + depth map + the chapter's splat folder) and opens
@@ -94,7 +94,7 @@ for k, v in (("mergeall_codec", "H.264"), ("mergeall_encoder", "Force CPU"), ("m
 shell.openStage(3, -1); pump(0.6)
 
 btn = shown("mgMergeAll")
-check("Merging shows Merge All SBS to 1 Video", len(btn) == 1)
+check("Merging shows Merge All to One Video", len(btn) == 1)
 view = next((i for i in win.findChildren(QQuickItem) if i.property("text") == "View Output Folder" and i.isVisible()), None)
 def placed(width):
     """At the window's `width`: Merge All left of View Output Folder on its line, clear of the
@@ -184,6 +184,15 @@ enc.setProperty("tab", 1); pump(0.4)
 check("...Merge All shows its section: layout, codec, the movie's sound, the folder",
       bool(shown("encMergeAll")) and bool(shown("encMergeAudio")) and bool(shown("encMergeOut")))
 check("...and fits the window", enc.property("height") <= win.height(), f"{enc.property('height')} / {win.height()}")
+lay = shown("encMergeLayout")
+_fmt0 = mg.settings.property("output_format")
+mg.settings.setProperty("output_format", "Full SBS Cross-eye (Right-Left)"); pump(0.3)
+t1 = lay[0].property("text") if lay else ""
+mg.settings.setProperty("output_format", "Split L/R Output"); pump(0.3)
+t2 = lay[0].property("text") if lay else ""
+mg.settings.setProperty("output_format", _fmt0); pump(0.3)
+check("...its Layout follows Merging's Output Format (no dropdown of its own)",
+      t1.startswith("Full SBS Cross-eye") and t2.startswith("L and R files"), f"{t1!r} / {t2!r}")
 enc.close(); pump(0.3)
 
 h1 = hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None

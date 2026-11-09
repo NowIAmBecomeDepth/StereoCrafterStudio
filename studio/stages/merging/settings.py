@@ -37,7 +37,7 @@ STRINGS: Dict[str, str] = {
     # Container (user, 2026-10-25): MP4 or MKV for a non-DNxHR output (DNxHR writes .mov)
     "output_container": "MP4",
     "grain_seed": "-1",
-    # Merge All SBS to 1 Video (user, 2026-10-11; studio/merge_all.py): Settings > Encoding > Merge All.
+    # Merge All to One Video (user, 2026-10-11; studio/merge_all.py): Settings > Encoding > Merge All.
     # The movie file's soundtrack goes in ("" = none); "" output folder = the project's (or episode's) folder.
     "mergeall_layout": "Full SBS",
     "mergeall_codec": "H.265",

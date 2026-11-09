@@ -1520,7 +1520,7 @@ Item {
             // the whole movie back together (user, 2026-10-11; studio/merge_all.py)
             AccentButton {
                 objectName: "mgMergeAll"
-                text: "Merge All SBS to 1 Video"
+                text: "Merge All to One Video"
                 kind: "outline"
                 // no project: it joins the Output folder's merged clips (a tester, 2026-11-03/06)
                 enabled: page.idle

@@ -1,4 +1,4 @@
-"""Merging's Merge All SBS to 1 Video (user, 2026-10-11; studio/merge_all.py): the
+"""Merging's Merge All to One Video (user, 2026-10-11; studio/merge_all.py): the
 scenes found chapter by chapter in movie order, their merged outputs (an L / R
 pair, a Full SBS), what a missing one still needs, and the movie built both
 ways -- concat for one intra-frame format, pipe for anything else -- with a
@@ -190,6 +190,44 @@ class MergeAllTests(unittest.TestCase):
         M._sweep(out)
         self.assertFalse(os.path.exists(left) or os.path.exists(part))
         self.assertTrue(os.path.exists(fresh), "a fresh one (maybe a live run's) stays")
+
+    def test_cross_eye_layout(self):
+        """Tester 2026-11-09: a cross-eye Merging came out parallel -- Merge All had no cross-eye layout."""
+        _plan, res = self.build(self.info, layout="Full SBS Cross-eye")
+        self.assertTrue(res["outputs"][0].endswith("Movie - 3D Full SBS Cross-eye.mkv"))
+        i = M.probe(res["outputs"][0])
+        self.assertEqual((i["w"], i["h"]), (2 * EW, EH))
+        f = self.frames_at(res["outputs"][0], (0,))[0]
+        self.assertGreater(f[:, : EW, 2].mean(), 150)              # the right eye (blue) on the left
+        self.assertGreater(f[:, EW:, 0].mean(), 150)               # the left eye (red) on the right
+
+    def test_layout_follows_merging_output_format(self):
+        """User 2026-11-09: Merge All joins in Merging's Output Format, no layout of its own."""
+        for fmt, layout in (("Full SBS (Left-Right)", "Full SBS"), ("Full SBS Cross-eye (Right-Left)", "Full SBS Cross-eye"),
+                            ("Double SBS", "Double SBS"), ("Half SBS (Left-Right)", "Half SBS"),
+                            ("Split L/R Output", "L and R files"), ("Anaglyph (Red/Cyan)", "Anaglyph"),
+                            ("Anaglyph Half-Color", "Anaglyph Half-Color"), ("Right-Eye Only", "Right Eye")):
+            self.assertEqual(M.options_from({"output_format": fmt, "mergeall_layout": "Half SBS"})["layout"], layout, fmt)
+        self.assertEqual(M.options_from({})["layout"], "Full SBS")
+        from studio.stages.merging import settings as S
+        self.assertEqual(set(M.LAYOUT_OF), set(S.OUTPUT_FORMATS), "every Output Format has a layout")
+
+    def test_double_anaglyph_and_right_eye_layouts(self):
+        _plan, res = self.build(self.info, layout="Double SBS")
+        i = M.probe(res["outputs"][0])
+        self.assertEqual((i["w"], i["h"]), (2 * EW, 2 * EH))
+        _plan, res = self.build(self.info, layout="Right Eye")
+        i = M.probe(res["outputs"][0])
+        self.assertEqual((i["w"], i["h"]), (EW, EH))
+        f = self.frames_at(res["outputs"][0], (0,))[0]
+        self.assertGreater(f[..., 2].mean(), 150)                  # the right eye (blue)
+        _plan, res = self.build(self.info, layout="Anaglyph")
+        self.assertTrue(res["outputs"][0].endswith("Movie - 3D Anaglyph.mkv"))
+        i = M.probe(res["outputs"][0])
+        self.assertEqual((i["w"], i["h"]), (EW, EH))
+        f = self.frames_at(res["outputs"][0], (0,))[0]
+        self.assertGreater(f[..., 0].mean(), 150)                  # red from the left eye (red)
+        self.assertGreater(f[..., 2].mean(), 150)                  # blue from the right eye (blue)
 
     def test_half_sbs_layout(self):
         _plan, res = self.build(self.info, layout="Half SBS")

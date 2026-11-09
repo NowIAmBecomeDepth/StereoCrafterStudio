@@ -60,7 +60,7 @@ for stage, old, new in (
         ("Splatting", "Dual Eye shares the shift", "Custom Resolution Presets"),
         ("Splatting", "Dual Eye shares the shift", "Keep lights out"),
         ("Scene Cut", "OmniShotCut", "Auto Crop"),
-        ("Merging", "Raise Blur Kernel", "Merge All SBS to 1 Video"),
+        ("Merging", "Raise Blur Kernel", "Merge All to One Video"),
         ("DepthCrafter", "Process as Segments", "Auto Size for the Loaded Clip"),
         ("Inpainting", "Keep Frames Chunk at 25", "Guidance Scale 1.0")):
     tips = fader(old)

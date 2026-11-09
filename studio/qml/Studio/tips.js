@@ -132,7 +132,7 @@ var GROUPS = [
         "Resume moves each finished clip into a finished folder and skips it next time, so a stopped batch picks up where it left off.",
         "Short on VRAM? Untick Use GPU for Mask Processing: slower, but it uses very little.",
         // 2026-10-11
-        "Every scene merged? Merge All SBS to 1 Video joins them into the whole movie, in order. Set the layout and the movie file for the sound in Encoding Options › Merge All.",
+        "Every scene merged? Merge All to One Video joins them into the whole movie, in order. It takes Merging's Output Format; the movie file for the sound is in Encoding Options › Merge All.",
         "Left some scenes out on purpose? Merge All's Merge Anyway puts black of each missing scene's length in its place, so the sound still lines up.",
         "Merge All lists any scene that isn't merged yet, with the stage it still needs: Send to takes it straight there.",
         "Erased an object in the Depth Map Editor with Put back on? Merging lays it back over both eyes, at the depth you set."
