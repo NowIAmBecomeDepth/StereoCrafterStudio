@@ -626,6 +626,69 @@ Item {
                                     checked: tile.ticked
                                     onToggled: page.toggle(tile.modelData.name, checked)
                                 }
+                                // the merged right eye in the PC's default player (user, 2026-11-08) -- the
+                                // scan's still is always the right eye's file (the SBS whole, when it's one)
+                                AbstractButton {
+                                    id: playRight
+                                    objectName: "fillEdgesPlayRight"
+                                    readonly property string path: tile.modelData.thumb || ""
+                                    visible: path.length > 0
+                                    anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 4
+                                    width: 26; height: 26
+                                    hoverEnabled: true
+                                    background: Rectangle {
+                                        radius: width / 2
+                                        color: Theme.alpha(Theme.bg, playRight.pressed ? 0.95 : playRight.hovered ? 0.9 : 0.72)
+                                        border.width: 1
+                                        border.color: playRight.hovered ? Theme.accent : Theme.alpha(Theme.fg, 0.25)
+                                    }
+                                    contentItem: Item {
+                                        Icon {
+                                            anchors.centerIn: parent
+                                            anchors.horizontalCenterOffset: 1
+                                            glyph: Theme.icon.play
+                                            size: 12
+                                            color: playRight.hovered ? Theme.accent : Theme.fg
+                                        }
+                                    }
+                                    onClicked: {
+                                        const why = Shell.openFile(path)
+                                        if (why) Theme.toast("warning", "Couldn't open it", why)
+                                    }
+                                    HoverTip { tip: "Play the merged right eye in your default player\n" + playRight.path.replace(/\//g, "\\") }
+                                }
+                                // Fill Just This Clip, a click away (user, 2026-11-08): a brush, not another play,
+                                AbstractButton {
+                                    id: fillThis
+                                    objectName: "fillEdgesFillThis"
+                                    visible: tile.can
+                                    // never disabled: a disabled button lets the click through to tick the tile
+                                    readonly property bool can: page.ready && page.idle
+                                    // bottom left (user, 2026-11-08), under the play button's corner
+                                    anchors.left: parent.left; anchors.bottom: parent.bottom
+                                    anchors.margins: 4
+                                    width: 26; height: 26
+                                    hoverEnabled: true
+                                    opacity: can ? 1 : Theme.dim(0.45)
+                                    background: Rectangle {
+                                        radius: width / 2
+                                        color: Theme.alpha(Theme.bg, fillThis.pressed ? 0.95 : fillThis.hovered ? 0.9 : 0.72)
+                                        border.width: 1
+                                        border.color: fillThis.hovered && fillThis.can ? Theme.accent : Theme.alpha(Theme.fg, 0.25)
+                                    }
+                                    contentItem: Item {
+                                        Icon {
+                                            anchors.centerIn: parent
+                                            glyph: Theme.icon.brush
+                                            size: 12
+                                            color: fillThis.hovered && fillThis.can ? Theme.accent : Theme.fg
+                                        }
+                                    }
+                                    onClicked: if (can) page.fill(tile.modelData.name)
+                                    HoverTip { tip: !page.idle ? "Fill just this clip -- once the job running now ends"
+                                                    : !page.ready ? "Fill just this clip -- its Inpainter isn't installed yet"
+                                                    : "Fill just this clip now, the ticks left as they are" }
+                                }
                             }
                             Text {
                                 text: tile.modelData.name
@@ -680,7 +743,10 @@ Item {
                             }
                         }
                         HoverTip {
-                            tip: tile.modelData.name + "\n" + tile.modelData.files.join("\n")
+                            objectName: "fillEdgesTileTip"
+                            // not over a corner button: the button's own tip shows alone (user, 2026-11-08)
+                            tip: playRight.hovered || fillThis.hovered ? ""
+                                 : tile.modelData.name + "\n" + tile.modelData.files.join("\n")
                                  + (tile.can ? "\nClick to tick or untick. Right-click to fill just this clip, play it or open it in Explorer."
                                              : "\nRight-click to play it or open it in Explorer.")
                         }

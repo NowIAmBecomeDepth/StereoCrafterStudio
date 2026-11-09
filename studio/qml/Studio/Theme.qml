@@ -221,6 +221,6 @@ Item {
         filter: "", layers: "", video: "", openFolder: "", file: "",
         console: "", help: "", merge: "", picture: "", undo: "", redo: "", toStart: "", toEnd: "",
         fullscreen: "\uE740",
-        bell: "\uEA8F", project: "", importIcon: ""
+        bell: "\uEA8F", brush: "\uE771", project: "", importIcon: ""
     })
 }

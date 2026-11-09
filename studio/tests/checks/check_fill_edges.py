@@ -209,6 +209,37 @@ if plays:
     click(plays[0])
 check("...Play opens that file in the default player", [os.path.normcase(p) for p in opened]
       == [os.path.normcase(os.path.join(OUT, f"take_{W}_merged_full_sbs_R.mov"))], str(opened))
+# the tile's own play button, top left (user, 2026-11-08): the merged right eye, the tick left alone
+if tm.property("visible"):
+    QTest.keyClick(win, Qt.Key.Key_Escape); pump(0.3)
+_pr = [b for b in shown("fillEdgesPlayRight") if b.parentItem().parentItem().parentItem() is tiles[1]]
+_tick = tiles[1].property("ticked")
+opened.clear()
+if _pr:
+    click(_pr[0])
+check("...each tile's play button opens its merged right eye in the default player", len(shown("fillEdgesPlayRight")) == len(tiles)
+      and [os.path.normcase(p) for p in opened] == [os.path.normcase(os.path.join(OUT, f"take_{W}_merged_full_sbs_R.mov"))]
+      and tiles[1].property("ticked") == _tick, f"{len(shown('fillEdgesPlayRight'))} of {len(tiles)}, {opened}, ticked {tiles[1].property('ticked')}")
+# a brush beside it: Fill Just This Clip (user, 2026-11-08) -- that clip alone, the ticks left alone
+_runs = []
+ef._run = lambda names, *a: _runs.append(list(names))
+_fb = [b for b in shown("fillEdgesFillThis") if b.parentItem().parentItem().parentItem() is tiles[1]]
+_tick = tiles[1].property("ticked")
+if _fb:
+    click(_fb[0])
+del ef._run
+check("...its brush fills just that clip, the tick unchanged", _runs == [[f"take_{W}_merged_full_sbs"]]
+      and tiles[1].property("ticked") == _tick, f"{_runs}, ticked {tiles[1].property('ticked')}")
+# over a corner button only the button's tip: the clip's own goes blank (user, 2026-11-08)
+_tt = next(t for t in items("fillEdgesTileTip") if t.parentItem() is tiles[1])
+_hov = lambda it: QTest.mouseMove(win, it.mapToScene(QPointF(it.width() / 2, it.height() / 2)).toPoint())
+_tips = []
+for _b in (_pr + _fb):
+    _hov(_b); pump(0.3); _tips.append(str(_tt.property("tip")))
+QTest.mouseMove(win, tiles[1].mapToScene(QPointF(tiles[1].width() / 2, tiles[1].height() - 8)).toPoint()); pump(0.3)
+check("...hovering a corner button hides the clip's tip; off it, the tip is back",
+      len(_tips) == 2 and _tips == ["", ""] and str(_tt.property("tip")).startswith(f"take_{W}_merged_full_sbs"),
+      f"{_tips} / {str(_tt.property('tip'))[:40]}")
 # "Open ... in Explorer" (user, 2026-10-18): the merged clip and its hi-res splat; Explorer stood in for
 revealed = []
 import core.ui.folder_open as _FO
