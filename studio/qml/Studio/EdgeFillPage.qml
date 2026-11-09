@@ -41,6 +41,11 @@ Item {
     // another stage's job running (Main's Theme.calm is up for any, Edge Fill's own included)
     readonly property bool otherJob: Theme.calm && !ef.busy
     property var picked: []                 // names of the clips to fill
+    // the clip last clicked to tick (user, 2026-11-08: Create Sidecar for it alone, with others ticked);
+    // ticked clips only -- else the one ticked last
+    property string lastClicked: ""
+    readonly property string sidecarOne: picked.indexOf(lastClicked) >= 0 ? lastClicked
+                                         : (picked.length ? picked[picked.length - 1] : "")
     property var measured: ({})             // name -> EdgeFill.measured's map
     readonly property var clips: info.clips || []
 
@@ -64,7 +69,7 @@ Item {
     }
     function toggle(name, on) {
         const p = picked.filter(n => n !== name)
-        if (on) p.push(name)
+        if (on) { p.push(name); lastClicked = name }
         picked = p
     }
     function fill(only) {
@@ -689,6 +694,26 @@ Item {
                                                     : !page.ready ? "Fill just this clip -- its Inpainter isn't installed yet"
                                                     : "Fill just this clip now, the ticks left as they are" }
                                 }
+                                // a sidecar: filled with its own settings (user, 2026-11-07)
+                                Rectangle {
+                                    objectName: "fillEdgesSidecarChip"
+                                    visible: page.ef.sidecarClips.indexOf(tile.modelData.name) >= 0
+                                    anchors.left: playRight.visible ? playRight.right : parent.left
+                                    anchors.top: parent.top
+                                    anchors.margins: 6; anchors.topMargin: 7
+                                    width: chipText.implicitWidth + 14; height: chipText.implicitHeight + 6
+                                    radius: height / 2
+                                    color: Theme.alpha(Theme.bg, 0.8)
+                                    border.width: 1; border.color: Theme.accent
+                                    Text {
+                                        id: chipText
+                                        anchors.centerIn: parent
+                                        text: "Sidecar"
+                                        color: Theme.accent
+                                        font.family: Theme.bodyFont; font.pixelSize: Theme.smallSize; font.weight: Font.DemiBold
+                                    }
+                                    HoverTip { tip: "This clip has a sidecar: it is filled with the settings saved in it, not the page's. Right-click to load, update or remove it." }
+                                }
                             }
                             Text {
                                 text: tile.modelData.name
@@ -768,6 +793,28 @@ Item {
             enabled: tileMenu.can && page.ready && page.idle
             onTriggered: page.fill(tileMenu.name)
         }
+        // its sidecar (user, 2026-11-07: "like splatting ... a create/update sidecar button")
+        MenuItem {
+            objectName: "fillEdgesSaveSidecar"
+            readonly property bool has: page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            text: has ? "Update Sidecar" : "Create Sidecar"
+            enabled: page.idle
+            onTriggered: page.ef.saveSidecar([tileMenu.name])
+            property string tip: "Saves the Fill Settings shown now as this clip's sidecar: it is filled with them, every clip without one with the page's."
+        }
+        MenuItem {
+            objectName: "fillEdgesLoadSidecar"
+            text: "Load Sidecar Settings"
+            enabled: page.idle && page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            onTriggered: page.ef.loadSidecar(tileMenu.name)
+            property string tip: "Puts this clip's sidecar settings on the page, to look at or change and save again."
+        }
+        MenuItem {
+            objectName: "fillEdgesRemoveSidecar"
+            text: "Remove Sidecar"
+            enabled: page.idle && page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            onTriggered: page.ef.removeSidecar(tileMenu.name)
+        }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
         // in the default player, as Upcoming Jobs' "Play ..."
         Instantiator {
@@ -782,7 +829,7 @@ Item {
                 }
                 HoverTip { tip: modelData.path.replace(/\//g, "\\") }
             }
-            onObjectAdded: (i, item) => tileMenu.insertItem(2 + i, item)
+            onObjectAdded: (i, item) => tileMenu.insertItem(5 + i, item)
             onObjectRemoved: (i, item) => tileMenu.removeItem(item)
         }
         MenuSeparator {
@@ -828,6 +875,31 @@ Item {
             enabled: page.idle && !page.otherJob && page.phase === "list" && page.picked.length > 0 && page.ready
             onClicked: page.fill("")
             HoverTip { tip: page.covering ? page.help("method") : page.help("fill") }
+        }
+        // the Fill Settings shown, as a clip's sidecar (user, 2026-11-07: "like splatting") -- with several
+        // ticked, the one last clicked first (user, 2026-11-08), every ticked clip's beside it
+        AccentButton {
+            objectName: "fillEdgesSidecarButton"
+            readonly property bool update: page.sidecarOne.length > 0 && page.ef.sidecarClips.indexOf(page.sidecarOne) >= 0
+            text: (update ? "Update " : "Create ") + "Sidecar"
+            kind: page.picked.length > 1 ? "tonal" : "outline"
+            enabled: page.idle && page.sidecarOne.length > 0
+            onClicked: page.ef.saveSidecar([page.sidecarOne])
+            HoverTip {
+                tip: "Saves the Fill Settings shown now as " + (page.sidecarOne ? page.sidecarOne + "'s" : "the ticked clip's")
+                     + " sidecar" + (page.picked.length > 1 ? " -- the clip you ticked last, not the others" : "")
+                     + ". A fill runs each clip with its sidecar, and every clip without one with the page's settings."
+            }
+        }
+        AccentButton {
+            objectName: "fillEdgesSidecarAllButton"
+            visible: page.picked.length > 1
+            readonly property bool update: page.picked.every(n => page.ef.sidecarClips.indexOf(n) >= 0)
+            text: (update ? "Update " : "Create ") + page.picked.length + " Sidecars"
+            kind: "outline"
+            enabled: page.idle
+            onClicked: page.ef.saveSidecar(page.picked)
+            HoverTip { tip: "Saves the Fill Settings shown now as every ticked clip's sidecar. A fill runs each clip with its sidecar, and every clip without one with the page's settings." }
         }
         AccentButton {
             objectName: "fillEdgesStop"

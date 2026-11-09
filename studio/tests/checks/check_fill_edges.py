@@ -409,7 +409,7 @@ check("...and a finish notification, as the stages give (sweep 2026-10-14b)", ("
 pump(0.5)
 con = objs["Logs"].tab("extra")
 text = con.allText()
-want = ["=== Edge Fill: 1 clip(s); 9 steps, size 560, pre-fill blur, grain on, detail on ===", "  Detail: ", f"[1/1] shot_{W}_merged_full_sbs",
+want = ["=== Edge Fill: 1 clip(s); ROSE, 9 steps, pre-fill blur, size 560, grain on, detail on", "  Detail: ", f"[1/1] shot_{W}_merged_full_sbs",
         "  Strip: R eye left edge 26 px", "  ROSE: ", "  Wrote shot_", "  Filled in ", "=== Edge Fill done: 1 filled"]
 check("the console's Extra tab tells the fill", all(w in text for w in want),
       str([w for w in want if w not in text]) + " | " + text[-1500:])
@@ -658,6 +658,65 @@ check("...its toast says black bar, both eyes", any(k == "success" and "black ba
                                                      for k, _t, m in toasts[n4:]), str(toasts[n4:]))
 ef.settings.setProperty("method", "Fill"); pump(0.3)
 unfill()
+
+# sidecars (user, 2026-11-07: per-clip settings, saved "like splatting" with a Create / Update Sidecar button)
+until(lambda: page.property("phase") == "list", 20)
+take, shot = f"take_{W}_merged_full_sbs", f"shot_{W}_merged_full_sbs"
+from studio.stages.edgefill import settings as S_EF
+side_file = os.path.join(OUT, S_EF.CLIPS_FILE)
+check("Sidecars: a Create Sidecar button beside Fill", bool(shown("fillEdgesSidecarButton")))
+ef.settings.setProperty("method", "Black Bar"); pump(0.3)
+ef.saveSidecar([take]); pump(0.4)
+check("...Create Sidecar saves the settings shown as the clip's, beside the clips",
+      json.load(open(side_file))[take]["method"] == "Black Bar" and list(ef.property("sidecarClips")) == [take])
+check("...its tile wears the Sidecar chip", sum(1 for c in items("fillEdgesSidecarChip") if c.property("visible")) == 1)
+ef.settings.setProperty("method", "Fill"); pump(0.5)
+check("...the page's settings change, the sidecar doesn't", json.load(open(side_file))[take]["method"] == "Black Bar")
+n5, jobs5 = len(toasts), len(jobs_seen)
+ef.fill([shot, take])
+until(lambda: ef.property("busy"), 10)
+until(lambda: not ef.property("busy"), 180); pump(0.8)
+rec_ef = json.load(open(os.path.join(OUT, F.RECORD)))
+check("...one run: the clip without a sidecar filled by the inpainter, the one with it covered by its Black Bar",
+      len(jobs_seen) == jobs5 + 1 and rec_ef[f"{take}_R.mov"].get("method") == "Black Bar"
+      and "method" not in rec_ef[f"{shot}_R.mov"], f"{len(jobs_seen) - jobs5} inpainter runs; "
+      f"{rec_ef.get(f'{take}_R.mov', {}).get('method')} / {rec_ef.get(f'{shot}_R.mov', {}).get('method')}")
+ef.loadSidecar(take); pump(0.4)
+check("...Load Sidecar Settings puts them on the page", ef.settings.property("method") == "Black Bar")
+ef.settings.setProperty("method", "Fill"); pump(0.3)
+ef.removeSidecar(take); pump(0.5)
+check("...Remove Sidecar: forgotten, the file gone", list(ef.property("sidecarClips")) == []
+      and not os.path.exists(side_file))
+unfill()
+# two ticked (user, 2026-11-08): Create Sidecar is the clip clicked last only, Create 2 Sidecars beside it
+until(lambda: page.property("phase") == "list", 20); pump(0.5)
+page.setProperty("picked", []); pump(0.3)
+def tile_of(name_):
+    md_ = lambda t: (lambda v: v.toVariant() if hasattr(v, "toVariant") else v)(t.property("modelData"))
+    return next(t for t in shown("fillEdgesTile") if md_(t)["name"] == name_)
+for nm_ in (shot, take):                # take clicked last
+    t_ = tile_of(nm_)
+    QTest.mouseClick(win, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                     t_.mapToScene(QPointF(t_.width() / 2, t_.height() - 8)).toPoint()); pump(0.3)
+one_b, all_b = shown("fillEdgesSidecarButton"), shown("fillEdgesSidecarAllButton")
+check("two ticked: Create Sidecar first, Create 2 Sidecars beside it",
+      sorted(picked()) == sorted([shot, take]) and bool(one_b) and bool(all_b)
+      and one_b[0].property("text") == "Create Sidecar" and all_b[0].property("text") == "Create 2 Sidecars"
+      and one_b[0].mapToScene(QPointF(0, 0)).x() < all_b[0].mapToScene(QPointF(0, 0)).x(),
+      f"{picked()} / {[b.property('text') for b in one_b + all_b]}")
+if one_b:
+    click(one_b[0])
+check("...Create Sidecar saves the clip clicked last only", list(ef.property("sidecarClips")) == [take],
+      str(list(ef.property("sidecarClips"))))
+check("...then it reads Update Sidecar", one_b and one_b[0].property("text") == "Update Sidecar")
+if all_b:
+    click(all_b[0])
+check("...Create 2 Sidecars saves both", sorted(ef.property("sidecarClips")) == sorted([shot, take]),
+      str(list(ef.property("sidecarClips"))))
+page.setProperty("picked", [take]); pump(0.3)
+check("one ticked: only the one button", bool(shown("fillEdgesSidecarButton")) and not shown("fillEdgesSidecarAllButton"))
+for nm_ in (shot, take):
+    ef.removeSidecar(nm_); pump(0.3)
 
 check("Merging no longer has Fill Edges' settings", all(mg.settings.property(k) is None for k in
       ("edgefill_steps", "edgefill_size", "edgefill_grain", "edgefill_tile")))

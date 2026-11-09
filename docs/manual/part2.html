@@ -1551,6 +1551,15 @@
       with its progress bars, on the console's Extra tab. It works during a fill too.</li>
     <li>To fill one clip from Merging's <b>Upcoming Jobs</b>, right-click it there and pick
       <b>Fill Edges</b>: its merged clip is filled straight away (once it has been merged).</li>
+    <li><b>Sidecars</b> let one batch fill clips with different models or settings, as Splatting's do. Set
+      the Fill Settings the way a clip should be filled, tick it and press
+      <span class="btn">Create Sidecar</span> beside Fill: the settings shown are saved as its sidecar, and the tile
+      wears a <i>Sidecar</i> chip. With several clips ticked, <span class="btn">Create Sidecar</span> saves only the
+      clip you clicked last, and <span class="btn">Create 3 Sidecars</span> (as many as are ticked) beside it saves
+      them all. Each reads <b>Update</b> instead when its clips have one already. A fill runs each clip with its sidecar, and every clip without one with the page's
+      settings. A clip's right-click menu can also <b>Create / Update Sidecar</b>, <b>Load Sidecar Settings</b>
+      onto the page, or <b>Remove Sidecar</b>. They're kept in <code>.edge_fill_sidecars.json</code> beside the
+      merged clips; the folders and Right Edge Too always come from the page.</li>
     <li>A filled clip's right-click also has <b>Play Original Right Eye</b>: its file from before the fill,
       kept in <code>edge_fill_originals</code>, in your default player, to compare with
       <b>Play Right Eye Blend</b>.</li>

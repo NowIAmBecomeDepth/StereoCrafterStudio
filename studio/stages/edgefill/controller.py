@@ -144,6 +144,8 @@ class EdgeFillController(QObject):
     measured = Signal("QVariantMap")
     #: the clips filled this run changed (filledNow)
     filledChanged = Signal()
+    #: which clips have a sidecar
+    ownChanged = Signal()
 
     _sigScanned = Signal(object)
     _sigMeasured = Signal(object)
@@ -162,6 +164,10 @@ class EdgeFillController(QObject):
         for key, value in stored.items():
             self._map.insert(key, value)
         self._last_good: Dict[str, Any] = dict(stored)
+        # the page's settings, and the clips' sidecars (user, 2026-11-07): a clip with one is filled with it
+        self._global: Dict[str, Any] = dict(stored)
+        self._own: Dict[str, Dict[str, Any]] = {}
+        self._own_folder = ""
         self._map.valueChanged.connect(self._on_value_changed)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -234,6 +240,7 @@ class EdgeFillController(QObject):
         if coerced != value or type(coerced) is not type(value):
             self._map.insert(key, coerced)
         self._last_good[key] = coerced
+        self._global[key] = coerced
         if key in ("merged_folder", "mask_folder"):
             if not self._chapter_applying:
                 self._maybe_leave_chapter()
@@ -244,7 +251,66 @@ class EdgeFillController(QObject):
 
     @Slot()
     def save(self) -> None:
-        settings_store.save("edgefill", S.normalise(self._values()))
+        settings_store.save("edgefill", S.normalise(self._global))
+
+    # ---- sidecars: a clip's own settings (user, 2026-11-07: "like splatting where theres a create/update sidecar
+    # button that saves whatever settings are currently displayed") ---------------------------------------------
+
+    sidecarClips = Property("QVariantList", lambda self: sorted(self._own), notify=ownChanged)
+
+    def _load_own(self, folder: str) -> None:
+        folder = os.path.abspath(folder) if folder else ""
+        if os.path.normcase(folder) == os.path.normcase(self._own_folder):
+            return
+        self._own_folder = folder
+        self._own = S.load_clip_settings(folder) if folder else {}
+        self.ownChanged.emit()
+
+    def _save_sidecars(self) -> bool:
+        if not self._own_folder or not os.path.isdir(self._own_folder):
+            return False
+        return S.save_clip_settings(self._own_folder, self._own)
+
+    @Slot("QVariantList")
+    def saveSidecar(self, names) -> None:
+        """The settings the page shows, saved as clips `names`' sidecar (made, or replaced)."""
+        names = [str(n) for n in (names or []) if str(n)]
+        if not names or self._busy:
+            return
+        vals = S.clip_values(S.normalise(self._values()))
+        new = sum(1 for n in names if n not in self._own)
+        for n in names:
+            self._own[n] = dict(vals)
+        if not self._save_sidecars():
+            self.toast.emit("warning", "Sidecar not saved", f"Couldn't write to {self._own_folder or 'the folder'}.")
+            return
+        self.ownChanged.emit()
+        what = (f"{names[0]}" if len(names) == 1 else f"{len(names)} clips")
+        self.toast.emit("success", "Sidecar saved" if len(names) == 1 else "Sidecars saved",
+                        f"{what}: {S.describe(S.fill_options({**self._global, **vals}))}."
+                        + ("" if new == len(names) else " (updated)"))
+
+    @Slot(str)
+    def loadSidecar(self, name: str) -> None:
+        """Clip `name`'s sidecar settings onto the page (to look at, change, and save again)."""
+        own = self._own.get(str(name or ""))
+        if not own or self._busy:
+            return
+        for k, v in own.items():
+            if self._map.value(k) != v:
+                self._map.insert(k, v)
+                self._on_value_changed(k, v)
+
+    @Slot(str)
+    def removeSidecar(self, name: str) -> None:
+        """Clip `name` back on the page's settings: its sidecar forgotten."""
+        if self._own.pop(str(name or ""), None) is not None:
+            self._save_sidecars()
+            self.ownChanged.emit()
+
+    def _clip_options(self, name: str) -> Dict[str, Any]:
+        own = self._own.get(name) or {}
+        return S.fill_options({**self._global, **own})
 
     def depth_folder(self) -> str:
         """Depth Aware's depth maps: the page's folder, else Splatting's Input Depth Maps (its folder, when it
@@ -527,6 +593,8 @@ class EdgeFillController(QObject):
         if info.get("gen") != self._gen:
             return                           # an older look's, finished after a newer one began
         self._scan = info if "error" not in info and "waiting" not in info else None
+        if self._scan is not None:
+            self._load_own(str(info.get("folder") or ""))
         self._scanning = False
         self.stateChanged.emit()
         self.scanned.emit(info)
@@ -585,9 +653,10 @@ class EdgeFillController(QObject):
         if edge_fill.find_mask(g, masks) is None:
             self.toast.emit("warning", "No splat mask", f"{g.name}: its splat mask isn't in the Mask folder.")
             return
-        if S.coerce("method", self._values().get("method")) != "Fill":
+        o = self._clip_options(g.name)           # its sidecar's settings, when it has one
+        if o["method"] != "Fill":
             pass                                 # Black Bar / Zoom need no model
-        elif S.coerce("inpainter", self._values().get("inpainter")) == "MiniMax-Remover":
+        elif o["inpainter"] == "MiniMax-Remover":
             if not minimax_env.available():
                 self.toast.emit("warning", "MiniMax-Remover isn't downloaded", minimax_env.missing_message())
                 return
@@ -608,24 +677,11 @@ class EdgeFillController(QObject):
         if jobs is not None and not jobs.claim("edgefill", self):
             return                               # refused: the grid's measuring goes on
         self._look.set()
-        v = self._values()
-        try:
-            steps = max(1, int(float(v.get("steps") or 6)))
-        except (TypeError, ValueError, OverflowError):
-            steps = 6
-        grain = bool(v.get("grain", True))
-        detail = bool(v.get("detail", True))
-        both_edges = bool(v.get("both_edges", False))
-        copy_frames = bool(v.get("copy_frames", True))
-        copier = S.coerce("copy_with", v.get("copy_with"))
-        depth_aware = bool(v.get("depth_aware", True))
         depth_folder = self.depth_folder()
-        height = S.height(v.get("size"))
-        prefill = S.coerce("prefill", v.get("prefill"))
-        inpainter = S.coerce("inpainter", v.get("inpainter"))
-        method = S.coerce("method", v.get("method"))     # Fill, or a cover: Black Bar / Zoom
-        if inpainter == "MiniMax-Remover":           # its own Steps: 6 or 12
-            steps = int(S.coerce("mmr_steps", v.get("mmr_steps")))
+        # each clip's settings: its sidecar, else the page's (user, 2026-11-07), taken now
+        shared = S.fill_options(self._global)
+        per_clip = {n: self._clip_options(n) for n in names}
+        owned = {n for n in names if n in self._own}
         # an H.264 / H.265 clip is written again with Merging's encoder settings (app.py sets .merging)
         merging = getattr(self, "merging", None)
         enc = merging._values() if merging is not None else {}
@@ -660,7 +716,7 @@ class EdgeFillController(QObject):
             # 0-0.08 reading, ROSE up to 0.75, then the rest.
             # Copy From Other Frames its own bar (2026-11-03: its lines drew in "Blend + write")
             STRETCH = {"read": (0.0, 0.08, "Reading edges"), "copy": (0.08, 0.25, "Copy from frames"),
-                       "finish": (0.75, 1.0, "Blend + write"), "cover": (0.08, 1.0, method)}
+                       "finish": (0.75, 1.0, "Blend + write"), "cover": (0.08, 1.0, "Covering")}
             bar = {"open": False, "phase": None, "t0": 0.0}
 
             def end_bar():
@@ -676,7 +732,7 @@ class EdgeFillController(QObject):
                     return "rose"
                 if text.startswith("Copy From Other Frames"):
                     return "copy"
-                if method != "Fill" and text.startswith(method):     # cover(): one pass per file
+                if text.startswith(("Black Bar", "Zoom")):     # cover(): one pass per file
                     return "cover"
                 return "read" if frac < 0.08 else "finish"
 
@@ -702,14 +758,8 @@ class EdgeFillController(QObject):
                                   suffix=f"{text[:40]} [{format_duration(took)}]".ljust(56), keep_suffix=True)
                 bar["open"] = part < 1
 
-            size = str(v.get("size") or "").split(" ")[0] or str(height)
-            how = (f"MiniMax-Remover, {steps} steps, size {size}" if inpainter == "MiniMax-Remover"
-                   else f"{steps} steps, size {size}, pre-fill {prefill.lower()}")
-            if method != "Fill":
-                logger.info(f"=== Edge Fill: {len(names)} clip(s); {method}, both eyes ===")
-            else:
-                logger.info(f"=== Edge Fill: {len(names)} clip(s); {how}, "
-                            f"grain {'on' if grain else 'off'}, detail {'on' if detail else 'off'} ===")
+            logger.info(f"=== Edge Fill: {len(names)} clip(s); {S.describe(shared)}"
+                        + (f"; {len(owned)} with a sidecar" if owned else "") + " ===")
             try:
                 from studio.gpu_jobs import wait_for_gpu
                 wait_for_gpu(self)
@@ -723,7 +773,9 @@ class EdgeFillController(QObject):
                         result["skipped"].append(f"{name}: its files or splat mask are gone")
                         continue
                     self._count = f"{k + 1} / {len(names)}"
-                    logger.info(f"[{k + 1}/{len(names)}] {name}")
+                    o = per_clip[name]
+                    logger.info(f"[{k + 1}/{len(names)}] {name}"
+                                + (f" -- its sidecar: {S.describe(o)}" if name in owned else ""))
                     started = time.monotonic()
                     bar["phase"] = None
 
@@ -739,16 +791,16 @@ class EdgeFillController(QObject):
                         # (log_model.parse_bar)
                         draw_bar(frac, text)
                     try:
-                        if method != "Fill":
-                            r = edge_fill.cover(g, mask, progress, self._stop, method=method, settings=enc,
-                                                both_edges=both_edges)
+                        if o["method"] != "Fill":
+                            r = edge_fill.cover(g, mask, progress, self._stop, method=o["method"], settings=enc,
+                                                both_edges=o["both_edges"])
                         else:
-                            r = edge_fill.fill(g, mask, progress, self._stop, steps=steps, grain=grain,
-                                               settings=enc, rose_height=height, detail=detail,
-                                               both_edges=both_edges, prefill=prefill, copy_frames=copy_frames,
-                                               copier=copier, depth_aware=depth_aware,
-                                               depth_folder=depth_folder,
-                                               inpainter=inpainter)
+                            r = edge_fill.fill(g, mask, progress, self._stop, steps=o["steps"], grain=o["grain"],
+                                               settings=enc, rose_height=o["height"], detail=o["detail"],
+                                               both_edges=o["both_edges"], prefill=o["prefill"],
+                                               copy_frames=o["copy_frames"], copier=o["copier"],
+                                               depth_aware=o["depth_aware"], depth_folder=depth_folder,
+                                               inpainter=o["inpainter"])
                     except Stopped:
                         end_bar()
                         logger.info(f"  Stopped: {name} is as it was.")

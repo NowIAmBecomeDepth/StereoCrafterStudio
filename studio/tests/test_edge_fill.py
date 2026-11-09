@@ -1041,6 +1041,39 @@ class DepthAwareTest(unittest.TestCase):
                         "the background isn't")
 
 
+class OwnSettingsTest(unittest.TestCase):
+    """A clip's Edge Fill sidecar (user, 2026-11-07): kept beside the merged clips, what a fill of it runs."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_kept_beside_the_clips_and_read_back(self):
+        from studio.stages.edgefill import settings as S
+        self.assertEqual(S.load_clip_settings(self.d), {})
+        S.save_clip_settings(self.d, {"a": {"method": "Zoom", "merged_folder": "x", "steps": "9"}})
+        self.assertEqual(S.load_clip_settings(self.d), {"a": {"method": "Zoom", "steps": 9}},
+                         "only a clip's own kind of setting, coerced")
+        S.save_clip_settings(self.d, {})
+        self.assertFalse(os.path.exists(os.path.join(self.d, S.CLIPS_FILE)))
+        with open(os.path.join(self.d, S.CLIPS_FILE), "w") as f:
+            f.write("{oops")
+        self.assertEqual(S.load_clip_settings(self.d), {})
+
+    def test_the_fill_options_of_a_clip(self):
+        from studio.stages.edgefill import settings as S
+        shared = S.normalise({"inpainter": "ROSE", "steps": 4, "size": "784 (straighter lines)"})
+        o = S.fill_options({**shared, **{"inpainter": "MiniMax-Remover", "mmr_steps": "12"}})
+        self.assertEqual((o["inpainter"], o["steps"], o["height"], o["method"]), ("MiniMax-Remover", 12, 784, "Fill"))
+        o = S.fill_options(shared)
+        self.assertEqual((o["inpainter"], o["steps"]), ("ROSE", 4))
+        self.assertIn("ROSE, 4 steps", S.describe(o))
+        self.assertEqual(S.describe(S.fill_options({**shared, "method": "Zoom"})), "Zoom, both eyes")
+        self.assertNotIn("both_edges", S.CLIP_KEYS, "the strips are measured on the shared edges")
+
+
 class MiniMaxInpainterTest(unittest.TestCase):
     """The Inpainter (user, 2026-11-03): MiniMax-Remover instead of ROSE -- the same crop, mask and
     finishing, its own job (its 6 steps, no Pre-fill: it blanks the mask itself), its own worker."""

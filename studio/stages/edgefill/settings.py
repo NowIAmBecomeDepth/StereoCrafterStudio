@@ -69,6 +69,75 @@ METHODS = ["Fill", "Black Bar", "Zoom"]
 MMR_STEPS = ["6", "12"]
 
 
+#: A clip's sidecar (user, 2026-11-07: "different models/settings per clip and run them all after", saved "like
+#: splatting" with a Create / Update Sidecar button): the fill's settings; the folders, the grid and Right Edge Too
+#: (the strips are measured on it) stay the page's
+CLIP_KEYS = ("method", "inpainter", "mmr_steps", "steps", "size", "prefill", "grain", "detail", "copy_frames",
+             "copy_with", "depth_aware")
+#: ...kept beside the merged clips, by clip name, as the fill's record and strips are
+CLIPS_FILE = ".edge_fill_sidecars.json"
+
+
+def clip_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: coerce(k, values[k]) for k in CLIP_KEYS if k in values}
+
+
+def load_clip_settings(folder: str) -> Dict[str, Dict[str, Any]]:
+    """The clips' sidecars kept in `folder` ({} when none, or the file won't read)."""
+    import json
+    import os
+    try:
+        with open(os.path.join(folder, CLIPS_FILE), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {c: clip_values(v) for c, v in data.items() if isinstance(c, str) and isinstance(v, dict)}
+
+
+def save_clip_settings(folder: str, data: Dict[str, Dict[str, Any]]) -> bool:
+    """Keep the clips' sidecars in `folder` (the file removed when no clip has one). False: it couldn't."""
+    import os
+    path = os.path.join(folder, CLIPS_FILE)
+    try:
+        if not data:
+            if os.path.exists(path):
+                os.remove(path)
+            return True
+        from core.common.atomic_json import write_json_atomic
+        write_json_atomic(path, {c: clip_values(v) for c, v in sorted(data.items())}, indent=2)
+        return True
+    except OSError:
+        return False
+
+
+def fill_options(values: Dict[str, Any]) -> Dict[str, Any]:
+    """What a fill of one clip runs with, from its settings (the shared ones, its own over them)."""
+    v = normalise(values)
+    try:
+        steps = max(1, int(float(v.get("steps") or 6)))
+    except (TypeError, ValueError, OverflowError):
+        steps = 6
+    if v["inpainter"] == "MiniMax-Remover":           # its own Steps: 6 or 12
+        steps = int(v["mmr_steps"])
+    return {"method": v["method"], "inpainter": v["inpainter"], "steps": steps, "height": height(v["size"]),
+            "size": str(v["size"]).split(" ")[0], "prefill": v["prefill"], "grain": bool(v["grain"]),
+            "detail": bool(v["detail"]), "both_edges": bool(v["both_edges"]), "copy_frames": bool(v["copy_frames"]),
+            "copier": v["copy_with"], "depth_aware": bool(v["depth_aware"])}
+
+
+def describe(o: Dict[str, Any]) -> str:
+    """fill_options() said in a few words, for the console."""
+    if o["method"] != "Fill":
+        return f"{o['method']}, both eyes"
+    how = (f"MiniMax-Remover, {o['steps']} steps" if o["inpainter"] == "MiniMax-Remover"
+           else f"ROSE, {o['steps']} steps, pre-fill {o['prefill'].lower()}")
+    return (f"{how}, size {o['size']}, grain {'on' if o['grain'] else 'off'}, detail {'on' if o['detail'] else 'off'}"
+            + (f", copy with {o['copier']}" if o["copy_frames"] else ", no copy")
+            + (", depth aware" if o["depth_aware"] else ""))
+
+
 def height(value: Any) -> int:
     """The Size choice's ROSE height (560 for anything unreadable; 0: Native, tiled)."""
     if str(value).strip().lower().startswith("native"):
