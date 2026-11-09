@@ -524,6 +524,20 @@ class DepthCrafterController(QObject):
         self.queue.rescan()             # the clips the batch moved to finished leave the list
         self.stateChanged.emit()
         self.infoChanged.emit()
+        if task == "flat_sbs":
+            flat, self._flat = getattr(self, "_flat", None) or {}, None
+            self._on_progress(0, 0)
+            if completed and flat.get("out"):
+                self._on_status("Ready")
+                self.queue.moveToFinished(flat["path"])     # done: it leaves the list, as a processed clip
+                self.toast.emit("success", "2D Full SBS written", flat["out"].replace("/", "\\"))
+            elif self._stop.is_set():
+                self._on_status("Stopped.")
+                self.toast.emit("info", "2D Full SBS stopped", "Nothing was written.")
+            else:
+                self._on_status("Error: the 2D Full SBS failed. See console.")
+                self.toast.emit("error", "2D Full SBS failed", flat.get("error") or "See the console.")
+            return
         if task == "batch":
             # audit #3: a batch where every clip failed (or the model never
             # loaded) is not a success, and hands nothing on
@@ -561,6 +575,61 @@ class DepthCrafterController(QObject):
         <output>/Test Renders, nothing moved to finished/, not handed on."""
         if path:
             self.start([path], test=True)
+
+    # ---- a clip with no depth as a flat 2D Full SBS (user, 2026-11-08: end credits) ------------
+
+    @Slot(result=str)
+    def flatSbsFolder(self) -> str:
+        """Where a 2D Full SBS goes unless the user picks another: Merging's Output Folder."""
+        mg = getattr(self, "merging", None)
+        folder = str(mg.settings.value("output_folder") or "") if mg is not None else ""
+        return os.path.abspath(folder).replace("\\", "/") if folder.strip() else ""
+
+    @Slot(str, result=str)
+    def flatSbsName(self, path: str) -> str:
+        """The file name Merging would give `path`'s Full SBS (the dialog shows it)."""
+        from core.common import flat_sbs
+        settings = self._flat_settings()
+        try:
+            w = flat_sbs.probe(path)["w"]
+        except Exception:
+            return ""
+        return os.path.basename(flat_sbs.output_path(path, "", settings, w))
+
+    def _flat_settings(self) -> Dict[str, Any]:
+        mg = getattr(self, "merging", None)
+        try:
+            return dict(mg._values()) if mg is not None else {}
+        except Exception:
+            logger.debug("Merging's settings unavailable for a 2D Full SBS", exc_info=True)
+            return {}
+
+    @Slot(str, str)
+    def renderFlatSbs(self, path: str, folder: str) -> None:
+        """Upcoming Jobs' "Render as 2D Full SBS": `path` -- end credits, a title card, anything with
+        no depth to give -- the same picture in both eyes, into `folder` (the Merged folder) as Merging
+        names and encodes a Full SBS; then the clip moves to finished, as a processed one does."""
+        path, folder = str(path or ""), str(folder or "").strip()
+        if not path or not folder:
+            self.toast.emit("warning", "2D Full SBS", "Pick the folder to write it into first.")
+            return
+        settings = self._flat_settings()       # read here, on the UI thread
+        self._flat = {"path": path, "folder": folder, "out": "", "error": ""}
+        self._begin("flat_sbs", self._run_flat_sbs, path, folder, settings,
+                    before=lambda: self._on_status(f"2D Full SBS: {os.path.basename(path)}"))
+
+    def _run_flat_sbs(self, path: str, folder: str, settings: Dict[str, Any]) -> bool:
+        from core.common import flat_sbs
+        try:
+            self._flat["out"] = flat_sbs.render(path, folder, settings, stop=self._stop.is_set,
+                                                progress=lambda d, t: self._sigProgress.emit(int(d), int(t)))
+            return True
+        except InterruptedError:
+            return False
+        except Exception as e:
+            logger.error("2D Full SBS of %s failed: %s", os.path.basename(path), e)
+            self._flat["error"] = str(e)
+            return False
 
     @Slot()
     def start(self, only=None, test: bool = False) -> None:

@@ -189,8 +189,9 @@ check("...the batch moved it to finished, and it left the list",
       (FIX / "src" / "finished" / "clipB.mp4").exists() and until(lambda: names(dq) == ["clipA.mp4"], 20), str(names(dq)))
 dc_ran.clear()
 texts = action(dq, "clipA", "run")
-check("right-click: Process This Clip Now, Test Render and Move to Finished",           # Test Render: 2026-10-15
-      texts == ["Process This Clip Now", "Test Render", "Move to Finished"], str(texts))
+check("right-click: Process This Clip Now, Test Render, Move to Finished, 2D Full SBS",   # Test Render: 2026-10-15
+      texts == ["Process This Clip Now", "Test Render", "Move to Finished",
+                "Render as 2D Full SBS (No Depth)"], str(texts))                       # 2026-11-08: end credits
 run_to_end(dc)
 check("Process This Clip Now runs that clip", dc_ran == ["clipA"], str(dc_ran))
 # Move to Finished: a fresh clip

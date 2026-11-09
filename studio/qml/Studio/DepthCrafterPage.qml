@@ -550,16 +550,21 @@ ChangeFoldersButton {
                 countText: page.dc.progressCount || ""
                 rowActions: [{ id: "run", text: "Process This Clip Now" }, { id: "test", text: "Test Render" },
                              { id: "finished", text: "Move to Finished" },
+                             // no depth to give (user, 2026-11-08: end credits): straight to the Merged folder
+                             { id: "flat", text: "Render as 2D Full SBS (No Depth)" },
                              { id: "send", text: "Send to Splatting", whenDone: true }]
                 onRowAction: (id, path) => {
                     if (id === "run") page.dc.startClip(path)
                     else if (id === "test") page.dc.testClip(path)      // into Test Renders (user, 2026-10-15)
                     else if (id === "finished") page.dc.jobClips.moveToFinished(path)
+                    else if (id === "flat") flatSbsDlg.show(page.dc, path)     // asks where first
                     else if (id === "send") sendOn(path, page.dc, "splatting", Splatting, 1)
                 }
             }
         }
     }
+
+    FlatSbsDialog { id: flatSbsDlg }
 
     // ---- action bar -----------------------------------------------------
     ActionBar {

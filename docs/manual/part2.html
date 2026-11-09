@@ -344,6 +344,14 @@
      <span class="btn">Process Selected</span> to do just those, or right-click one for
      <b>Process This Clip Now</b>, <b>Move to Finished</b> or <b>Play Source Clip</b>
      (see <a href="part4.html">Upcoming Jobs</a>).</p>
+  <p><b>Render as 2D Full SBS (No Depth)</b>, also on the right-click, is for a clip with no depth to
+     give it, such as end credits or a title card. It skips the whole pipeline: the clip is written
+     straight out as a finished Full SBS with the same picture in both eyes, named the way Merging names
+     its clips (<code>credits_1920_merged_full_sbs.mp4</code>) and encoded with Merging's Encoding
+     Settings. First it asks where to send it, with Merging's Output Folder filled in: type another folder
+     or press <span class="btn">Browse...</span>, then <span class="btn">Render</span>. Once it's written,
+     the clip moves to <code>finished</code> and leaves the list, so Splatting, Inpainting and Merging
+     never see it. <span class="btn">Cancel</span> stops it, leaving nothing behind.</p>
 
   <h3><span class="num">8</span> &nbsp;The action bar</h3>
   <ul>

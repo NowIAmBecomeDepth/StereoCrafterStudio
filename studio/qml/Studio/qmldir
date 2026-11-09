@@ -69,6 +69,7 @@ ExtraPage 1.0 ExtraPage.qml
 InpaintingV2Page 1.0 InpaintingV2Page.qml
 MergingPage 1.0 MergingPage.qml
 MergeAllDialog 1.0 MergeAllDialog.qml
+FlatSbsDialog 1.0 FlatSbsDialog.qml
 EdgeFillPage 1.0 EdgeFillPage.qml
 ThemePicker 1.0 ThemePicker.qml
 ProjectPicker 1.0 ProjectPicker.qml

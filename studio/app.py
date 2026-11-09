@@ -160,6 +160,7 @@ def build(app: QGuiApplication):
     dvd.splatting = splatting
     blend.splatting = splatting          # its folder (Same as Splatting), its list after a blend
     edgefill = EdgeFillController(shell)
+    depthcrafter.merging = merging       # its 2D Full SBS (end credits): Merging's folder, name and encoder
     edgefill.merging = merging           # an H.264 / H.265 clip is written again with Merging's encoder settings
     edgefill.splatting = splatting       # Depth Aware's depth maps when its own folder is empty
     # Put Back's Depth Map (user, 2026-10-15; core.removal.putback): the clean clip's depth map and
