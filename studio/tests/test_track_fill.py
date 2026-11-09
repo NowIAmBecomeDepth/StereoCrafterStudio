@@ -190,5 +190,41 @@ class CopierChoiceTest(unittest.TestCase):
         self.assertEqual((m.parts[0].folder, m.parts[0].files[0][0]), (TF.WEIGHTS[0], TF.WEIGHTS[1]))
 
 
+class TwoFrameWindowTest(unittest.TestCase):
+    """A window of two frames (a source next to a cut, or at the clip's end): AllTracker's forward_sliding
+    answers T <= 2 in its own shape -- frame 1's flow [B, 2, h, w] and visconf [B, 2, h, w], no time axis --
+    and track() read it as [S, ...]: the confidence came out [2, w], and the upscale failed with "Input and
+    output must have the same number of spatial dimensions" (user, 2026-11-08: a 1920 clip, Depth Aware on)."""
+
+    class _Net:
+        def __init__(self, h, w):
+            self.h, self.w = h, w
+
+        def forward_sliding(self, seq, **kw):
+            b, t = seq.shape[:2]
+            if t <= 2:              # alltracker.py: the T <= 2 branch
+                return (torch.full((b, 2, self.h, self.w), 3.0), torch.full((b, 2, self.h, self.w), 0.25),
+                        None, None)
+            return (torch.full((b, t, 2, self.h, self.w), 3.0), torch.full((b, t, 2, self.h, self.w), 0.25),
+                    None, None)
+
+    def _track(self, frames):
+        tr = TF._Tracker.__new__(TF._Tracker)       # no checkpoint: the network stood in for
+        tr.torch, tr.net = torch, self._Net(24, 40)
+        with mock.patch.object(torch, "autocast", lambda *a, **k: torch.no_grad()):
+            return tr.track(torch.zeros(frames, 3, 24, 40))
+
+    def test_two_frames_come_back_per_frame(self):
+        flows, conf = self._track(2)
+        self.assertEqual((tuple(flows.shape), tuple(conf.shape)), ((2, 2, 24, 40), (2, 24, 40)))
+        self.assertEqual(float(flows[0].abs().max()), 0.0)     # frame 0 is the query: it stays where it is
+        self.assertEqual(float(flows[1].min()), 3.0)
+        self.assertEqual(float(conf[1].min()), 0.25)
+
+    def test_longer_windows_as_before(self):
+        flows, conf = self._track(5)
+        self.assertEqual((tuple(flows.shape), tuple(conf.shape)), ((5, 2, 24, 40), (5, 24, 40)))
+
+
 if __name__ == "__main__":
     unittest.main()

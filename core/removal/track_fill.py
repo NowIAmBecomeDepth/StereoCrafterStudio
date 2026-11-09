@@ -88,6 +88,14 @@ class _Tracker:
         torch = self.torch
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             flows, vc, _, _ = self.net.forward_sliding(seq[None], iters=ITERS, sw=None, is_training=False)
+        if flows.dim() == 4:
+            # two frames (a source beside a cut or the clip's end): forward_sliding's T <= 2 branch gives
+            # frame 1's flow [B, 2, h, w] and visconf [B, 2, h, w], no time axis -- read as [S, ...] its
+            # confidence came out [2, w] and the upscale failed (user, 2026-11-08). Frame 0 put in front:
+            # the query, where it is, sure of it.
+            f1, c1 = flows[0].float(), vc[0, 1].float()
+            return (torch.stack([torch.zeros_like(f1), f1]).to(seq.device),
+                    torch.stack([torch.ones_like(c1), c1]).to(seq.device))
         return flows[0].to(seq.device).float(), vc[0, :, 1].to(seq.device).float()
 
     def release(self):
