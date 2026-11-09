@@ -136,6 +136,8 @@ def _choices() -> Dict[str, list]:
                     "bit_depth": list(eu.BIT_DEPTH_OPTIONS), "pix_fmt": list(eu.PIX_FMT_OPTIONS),
                     "dnxhr_profile": list(eu.DNXHR_PROFILE_OPTIONS),
                     "output_container": list(eu.OUTPUT_CONTAINERS)})
+        # Encoding Settings' Color Tags: never listed here, so Merging's dropdown was empty (2026-11-09)
+        out["color_tags"] = ["Off", "Auto", "BT.709 L", "BT.709 F", "BT.2020 PQ", "BT.2020 HLG"]
     except Exception:
         logger.debug("encoding lists unavailable", exc_info=True)
     from studio import merge_all

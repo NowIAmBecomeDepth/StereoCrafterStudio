@@ -155,7 +155,48 @@ Popup {
             FieldRow { label: "Encoder"; labelWidth: 120; help: dlg.help("encoding_encoder"); EDrop { key: dlg.k("encoding_encoder"); model: dlg.ctl ? dlg.ctl.choices.encoding_encoder : [] } }
             FieldRow { label: "Pixel Format"; labelWidth: 120; EDrop { key: dlg.k("pix_fmt"); model: dlg.ctl ? dlg.ctl.choices.pix_fmt : [] } }
             FieldRow { label: "Quality Preset"; labelWidth: 120; help: dlg.help("encoding_quality"); EDrop { key: dlg.k("encoding_quality"); model: dlg.ctl ? dlg.ctl.choices.encoding_quality : [] } }
-            FieldRow { label: "Color Tags"; labelWidth: 120; EDrop { key: dlg.k("color_tags"); model: dlg.ctl ? dlg.ctl.choices.color_tags : [] } }
+            // Color Tags (user, 2026-11-09): Auto a checkbox; unticked, the dropdown names the tags outright.
+            // One stored value as before ("Auto" or a tag set), so the encoders read it unchanged.
+            FieldRow {
+                id: ctRow
+                objectName: "encColorTagsRow"
+                label: "Color Tags"; labelWidth: 120
+                help: dlg.help("encoding_color_tags")
+                      || "Auto: the output carries the source clip's colour tags (BT.709 when it has none). "
+                       + "Untick it to name them yourself: BT.709 L (limited range, the usual video), BT.709 F "
+                       + "(full range), BT.2020 PQ (HDR10), BT.2020 HLG, or Off (no tags written). Tags only "
+                       + "label the colours, except BT.2020, which also converts with the BT.2020 matrix and "
+                       + "writes 10-bit."
+                readonly property string value: dlg.st ? String(dlg.st[dlg.k("color_tags")] || "Auto") : "Auto"
+                readonly property bool auto: value === "Auto"
+                // the last tag set picked by hand, back in the box when Auto is unticked again
+                property string manual: "BT.709 L"
+                // the value itself, not `auto`: its binding may not have caught up inside this handler
+                onValueChanged: if (value !== "Auto") manual = value
+                Component.onCompleted: if (value !== "Auto") manual = value
+                RowLayout {
+                    spacing: 10
+                    AnimCheck {
+                        objectName: "encColorTagsAuto"
+                        text: "Auto"
+                        checked: ctRow.auto
+                        onToggled: {
+                            if (dlg.st) dlg.st[dlg.k("color_tags")] = checked ? "Auto" : ctRow.manual
+                            // the click broke the binding: back on the stored value (a preset or another page may change it)
+                            checked = Qt.binding(() => ctRow.auto)
+                        }
+                    }
+                    Dropdown {
+                        objectName: "encColorTagsPick"
+                        // ticked Auto: greyed, showing what unticking it brings back (not "Auto")
+                        store: ctRow.auto ? null : dlg.st; key: dlg.k("color_tags")
+                        currentIndex: model ? model.indexOf(ctRow.auto ? ctRow.manual : ctRow.value) : -1
+                        boxWidth: 120
+                        enabled: !ctRow.auto
+                        model: (dlg.ctl && dlg.ctl.choices.color_tags ? dlg.ctl.choices.color_tags : []).filter(v => v !== "Auto")
+                    }
+                }
+            }
             FieldRow { label: "CPU Tune"; labelWidth: 120; help: dlg.help("encoding_tune"); EDrop { key: dlg.k("encoding_tune"); model: dlg.ctl ? dlg.ctl.choices.encoding_tune : [] } }
             FieldRow { visible: !dlg.dualCrf; label: "Output CRF"; labelWidth: 120; help: dlg.help("output_crf"); EBox { key: dlg.k("output_crf") } }
             FieldRow { visible: dlg.dualCrf; label: "Full Res CRF"; labelWidth: 120; help: dlg.help("output_crf_full") || dlg.help("output_crf"); EBox { key: "output_crf_full" } }
