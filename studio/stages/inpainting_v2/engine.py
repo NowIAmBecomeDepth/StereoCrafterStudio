@@ -181,6 +181,20 @@ def _never_stop():
     return False
 
 
+def splat_layout(input_video_path):
+    """v2: the layout a splat's name says (tester, 2026-11-12): dual (_splatted2: mask | warped),
+    quad (_splatted4, or upstream's _splatting_results: left | depth over mask | warped),
+    dual_eye (_splatted2D: left mask | left warped over right mask | right warped), or None: not a splat."""
+    stem = os.path.splitext(os.path.basename(input_video_path))[0]
+    if stem.endswith(("_splatted2D", "_splatted2DF")):
+        return "dual_eye"
+    if stem.endswith(("_splatted2", "_splatted2F")):
+        return "dual"
+    if stem.endswith(("_splatted4", "_splatted4F", "_splatting_results")):
+        return "quad"
+    return None
+
+
 def detect_dual_input(input_video_path):
     """Detect a dual-layout (1x2: mask | warped) video from its filename.
 
@@ -1340,13 +1354,21 @@ def run_inpaint(
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-    if is_dual_input is None:
-        is_dual_input = detect_dual_input(input_video_path)
+    layout = splat_layout(input_video_path)  # v2: refused if not a splat; a dual-eye splat's two eyes
+    if is_dual_input is None and layout is None:
+        raise ValueError(
+            f"{os.path.basename(input_video_path)} isn't a splat: its name doesn't end in _splatted2, "
+            "_splatted4 or _splatted2D. Point Input at Splatting's output (its lowres or hires folder).")
+    if layout != "dual_eye" and is_dual_input is not None:
+        layout = "dual" if is_dual_input else "quad"
+    is_dual_input = layout == "dual"
+    dual_eye = layout == "dual_eye"
 
     os.makedirs(save_dir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(input_video_path))[0]
     video_name = base_name.replace("_splatting_results", "") + "_inpainting_results"
-    logger.info("Input layout: %s", "dual (1x2)" if is_dual_input else "quad (2x2)")
+    logger.info("Input layout: %s", {"dual": "dual (1x2)", "quad": "quad (2x2)",
+                                     "dual_eye": "dual-eye (2x2, both eyes inpainted)"}[layout])
 
     progress_cb("encode_prompt", 0, 1, "Encoding prompt...")
     logger.info("Encoding prompt...")
@@ -1413,6 +1435,10 @@ def run_inpaint(
         is_dual_input=is_dual_input, total_frames=total_frames,
         model={"transformer": TRANSFORMER_PATH, "offload": getattr(engine, "offload_mode", ""),
                "dtype": getattr(engine, "dtype", "")}))
+    eyes = ("left", "right") if dual_eye else ("",)  # v2: a dual-eye splat's eyes, each its own checkpoints
+    eye_checkpoints = ([ChunkCheckpoints(save_dir, f"{video_name}_{eye}", checkpoints.sig) for eye in eyes]
+                       if dual_eye else [checkpoints])
+    eye_state = [(None, 0) for _ in eyes]  # each eye's (rolling history, its first frame's index)
 
     # Rolling history: only the last <= frames_chunk generated frames (at padded
     # resolution, float32, CPU) are kept for overlap conditioning. This replaces
@@ -1451,88 +1477,105 @@ def run_inpaint(
                 # [T, h, w, 3] uint8 -> [1, 3, T, h, w] float32 0-1
                 return panel_u8.permute(3, 0, 1, 2).unsqueeze(0).float().div_(255.0)
 
+            # v2: (mask, warped) per eye inpainted -- one, or a dual-eye splat's two (tester, 2026-11-12)
             left_u8 = None
             if is_dual_input:
-                chunk_mask = _panel_to_float(chunk_u8[:, :, :w_orig])
-                chunk_cond = _panel_to_float(chunk_u8[:, :, w_orig:])
+                panels = [(chunk_u8[:, :, :w_orig], chunk_u8[:, :, w_orig:])]
+            elif dual_eye:
+                # [left mask | left warped] over [right mask | right warped]
+                panels = [(chunk_u8[:, :h_orig, :w_orig], chunk_u8[:, :h_orig, w_orig:]),
+                          (chunk_u8[:, h_orig:, :w_orig], chunk_u8[:, h_orig:, w_orig:])]
             else:
                 left_u8 = chunk_u8[:, :h_orig, :w_orig].clone()  # kept uint8 for SBS/anaglyph
-                chunk_mask = _panel_to_float(chunk_u8[:, h_orig:, :w_orig])
-                chunk_cond = _panel_to_float(chunk_u8[:, h_orig:, w_orig:])
+                panels = [(chunk_u8[:, h_orig:, :w_orig], chunk_u8[:, h_orig:, w_orig:])]
             del chunk_u8
 
-            chunk_cond = chunk_cond * (1.0 - chunk_mask) + 0.5 * chunk_mask
+            # every eye shares the chunk plan, so the overlap and the new frames' count
+            actual_overlap = global_len - cur_i if global_len > 0 else 0
+            num_new = 0
+            eye_u8 = []
+            for e, (mask_u8, cond_u8) in enumerate(panels):
+                history, history_start = eye_state[e]
+                eye_tag = f"{eyes[e]} eye: " if dual_eye else ""
+                chunk_mask = _panel_to_float(mask_u8)
+                chunk_cond = _panel_to_float(cond_u8)
+                del mask_u8, cond_u8
 
-            # --- Per-chunk spatial padding (replicate for cond, zeros for mask) ---
-            if pad_h > 0 or pad_w > 0:
-                cond_4d = chunk_cond[0].permute(1, 0, 2, 3)
-                cond_4d = F.pad(cond_4d, (0, pad_w, 0, pad_h), mode='replicate')
-                chunk_cond = cond_4d.permute(1, 0, 2, 3).unsqueeze(0)
-                del cond_4d
-                chunk_mask = F.pad(chunk_mask, (0, pad_w, 0, pad_h), mode='constant', value=0)
+                chunk_cond = chunk_cond * (1.0 - chunk_mask) + 0.5 * chunk_mask
 
-            # --- Overlap conditioning from the rolling history buffer ---
-            actual_overlap = 0
-            if global_len > 0:
-                actual_overlap = global_len - cur_i
-                hs = cur_i - history_start
-                if hs < 0 or history is None or hs + actual_overlap > history.shape[2]:
-                    raise RuntimeError(
-                        f"Overlap window [{cur_i}:{global_len}] outside rolling history "
-                        f"(start={history_start}, len={0 if history is None else history.shape[2]})."
-                    )
-                chunk_cond[:, :, :actual_overlap] = history[:, :, hs : hs + actual_overlap]
+                # --- Per-chunk spatial padding (replicate for cond, zeros for mask) ---
+                if pad_h > 0 or pad_w > 0:
+                    cond_4d = chunk_cond[0].permute(1, 0, 2, 3)
+                    cond_4d = F.pad(cond_4d, (0, pad_w, 0, pad_h), mode='replicate')
+                    chunk_cond = cond_4d.permute(1, 0, 2, 3).unsqueeze(0)
+                    del cond_4d
+                    chunk_mask = F.pad(chunk_mask, (0, pad_w, 0, pad_h), mode='constant', value=0)
 
-            progress_cb(
-                "inpaint", min(global_len, total_frames), total_frames,
-                f"Processing chunk [{cur_i}:{cur_i + valid_chunk_size}] | Overlap: {actual_overlap} frames...",
-            )
-            logger.info(
-                "Processing chunk [%d:%d] | Overlap context: %d frames...",
-                cur_i, cur_i + valid_chunk_size, actual_overlap,
-            )
+                # --- Overlap conditioning from this eye's rolling history buffer ---
+                if global_len > 0:
+                    hs = cur_i - history_start
+                    if hs < 0 or history is None or hs + actual_overlap > history.shape[2]:
+                        raise RuntimeError(
+                            f"Overlap window [{cur_i}:{global_len}] outside rolling history "
+                            f"(start={history_start}, len={0 if history is None else history.shape[2]})."
+                        )
+                    chunk_cond[:, :, :actual_overlap] = history[:, :, hs : hs + actual_overlap]
 
-            # --- Spatial tiled inference (unchanged) ---
-            # v2: a chunk a stopped run finished: its latents, no denoise (resume.py)
-            chunk_latents = checkpoints.load(cur_i, valid_chunk_size, device)
-            if chunk_latents is None:
-                chunk_latents = spatial_tiled_process(
-                    chunk_cond, chunk_mask, tile_num, tile_overlap, prompt_embeds, transformer, vae, noise_scheduler,
-                    videoprocessor, vae_scale_factor_spatial, vae_scale_factor_temporal, transformer_patch_size,
-                    should_stop=should_stop,
+                progress_cb(
+                    "inpaint", min(global_len, total_frames), total_frames,
+                    f"{eye_tag}Processing chunk [{cur_i}:{cur_i + valid_chunk_size}] | Overlap: {actual_overlap} frames...",
                 )
-                checkpoints.save(cur_i, valid_chunk_size, chunk_latents)
-            del chunk_cond, chunk_mask
+                logger.info(
+                    "%sProcessing chunk [%d:%d] | Overlap context: %d frames...",
+                    eye_tag, cur_i, cur_i + valid_chunk_size, actual_overlap,
+                )
 
-            # --- Decode this chunk, move straight to CPU ---
-            with torch.no_grad():
-                latents_mean = torch.tensor(vae.config.latents_mean, device=device, dtype=torch.float32).view(1, vae.config.z_dim, 1, 1, 1)
-                latents_std = torch.tensor(vae.config.latents_std, device=device, dtype=torch.float32).view(1, vae.config.z_dim, 1, 1, 1)
-                chunk_latents = chunk_latents.float() * latents_std + latents_mean
-                chunk_latents = chunk_latents.to(vae.dtype)
-                video_chunk_tensor = vae.decode(chunk_latents, return_dict=False)[0]
-                video_chunk_tensor = (video_chunk_tensor / 2 + 0.5).clamp(0, 1).float().cpu()
-            del chunk_latents
+                # --- Spatial tiled inference (unchanged) ---
+                # v2: a chunk a stopped run finished: its latents, no denoise (resume.py)
+                chunk_latents = eye_checkpoints[e].load(cur_i, valid_chunk_size, device)
+                if chunk_latents is None:
+                    chunk_latents = spatial_tiled_process(
+                        chunk_cond, chunk_mask, tile_num, tile_overlap, prompt_embeds, transformer, vae, noise_scheduler,
+                        videoprocessor, vae_scale_factor_spatial, vae_scale_factor_temporal, transformer_patch_size,
+                        should_stop=should_stop,
+                    )
+                    eye_checkpoints[e].save(cur_i, valid_chunk_size, chunk_latents)
+                del chunk_cond, chunk_mask
 
-            # --- Keep only the NEW frames; update the rolling history ---
-            if global_len == 0:
-                new_frames = video_chunk_tensor
-            else:
-                new_frames = video_chunk_tensor[:, :, actual_overlap:]
-            num_new = new_frames.shape[2]
+                # --- Decode this chunk, move straight to CPU ---
+                with torch.no_grad():
+                    latents_mean = torch.tensor(vae.config.latents_mean, device=device, dtype=torch.float32).view(1, vae.config.z_dim, 1, 1, 1)
+                    latents_std = torch.tensor(vae.config.latents_std, device=device, dtype=torch.float32).view(1, vae.config.z_dim, 1, 1, 1)
+                    chunk_latents = chunk_latents.float() * latents_std + latents_mean
+                    chunk_latents = chunk_latents.to(vae.dtype)
+                    video_chunk_tensor = vae.decode(chunk_latents, return_dict=False)[0]
+                    video_chunk_tensor = (video_chunk_tensor / 2 + 0.5).clamp(0, 1).float().cpu()
+                del chunk_latents
+
+                # --- Keep only the NEW frames; update this eye's rolling history ---
+                if global_len == 0:
+                    new_frames = video_chunk_tensor
+                else:
+                    new_frames = video_chunk_tensor[:, :, actual_overlap:]
+                num_new = new_frames.shape[2]
+
+                if history is None:
+                    history = new_frames
+                else:
+                    history = torch.cat([history, new_frames], dim=2)
+                if history.shape[2] > frames_chunk:
+                    history = history[:, :, -frames_chunk:].contiguous()
+                eye_state[e] = (history, global_len + num_new - history.shape[2])
+                history = None
+
+                if num_new > 0:
+                    eye_u8.append(_frames_to_uint8(new_frames[0, :, :, :h_orig, :w_orig].clone()))
+                del video_chunk_tensor, new_frames
             global_len += num_new
-
-            if history is None:
-                history = new_frames
-            else:
-                history = torch.cat([history, new_frames], dim=2)
-            if history.shape[2] > frames_chunk:
-                history = history[:, :, -frames_chunk:].contiguous()
-            history_start = global_len - history.shape[2]
 
             # --- Stream the new frames to disk (crop padding, uint8, ffmpeg) ---
             if num_new > 0:
-                right_u8 = _frames_to_uint8(new_frames[0, :, :, :h_orig, :w_orig].clone())
+                right_u8 = eye_u8[-1]
 
                 if is_dual_input:
                     if "right_eye" not in writers:
@@ -1541,7 +1584,10 @@ def run_inpaint(
                         outputs["right_eye"] = right_eye_path
                     writers["right_eye"].append(right_u8)
                 else:
-                    left_out_u8 = np.ascontiguousarray(left_u8[actual_overlap:].numpy())
+                    if dual_eye:
+                        left_out_u8 = eye_u8[0]
+                    else:
+                        left_out_u8 = np.ascontiguousarray(left_u8[actual_overlap:].numpy())
 
                     if "sbs" not in writers:
                         frames_sbs_path = os.path.join(save_dir, f"{video_name}_sbs{_V2_VIDEO['ext']}")
@@ -1561,7 +1607,7 @@ def run_inpaint(
 
                 del right_u8
 
-            del video_chunk_tensor, new_frames, left_u8
+            del eye_u8, left_u8, panels
 
             # Stuck-progression guard (identical semantics to stock).
             if global_len > 0 and actual_overlap >= valid_chunk_size:
@@ -1594,7 +1640,8 @@ def run_inpaint(
         del history
         gc.collect()
 
-    checkpoints.clear()  # v2: the clip finished: its chunk checkpoints go
+    for checkpoints in eye_checkpoints:
+        checkpoints.clear()  # v2: the clip finished: its chunk checkpoints go
     progress_cb("done", total_frames, total_frames, "Done.")
     if is_dual_input:
         logger.info("Saved:\n  Right eye: %s", outputs.get("right_eye"))
@@ -1835,6 +1882,20 @@ class WanInpaintRunner:
             finished_dir = os.path.join(input_path, "finished")
             if os.path.isdir(finished_dir):
                 self._resume_dir = finished_dir  # v2: split on the worker (bug sweep A7)
+        if videos:  # v2: splats only -- a plain clip was cut into a 2x2 grid it isn't (tester, 2026-11-12)
+            splats = [v for v in videos if splat_layout(v)]
+            if len(splats) < len(videos):
+                logger.warning("Skipped %d video(s) that aren't splats (no _splatted2, _splatted4 or "
+                               "_splatted2D at the end of the name).", len(videos) - len(splats))
+            if not splats:
+                messagebox.showerror(
+                    "No splats",
+                    "None of the videos at the input path is a splat.\n"
+                    "Point Input at Splatting's output (its lowres or hires folder): files whose names "
+                    "end in _splatted2, _splatted4 or _splatted2D.",
+                )
+                return None
+            videos = splats
         if not videos:
             messagebox.showerror(
                 "No videos",

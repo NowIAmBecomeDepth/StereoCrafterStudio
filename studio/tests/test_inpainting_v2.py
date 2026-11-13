@@ -244,6 +244,26 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(self.runner.worker_thread)
         self.assertEqual(self.calls, [])
 
+    # tester, 2026-11-12: a folder of plain clips was cut into 2x2 grids; only splats go in now
+    def test_videos_that_arent_splats_are_skipped(self):
+        self.values["move_to_finished"] = False
+        for name in ("shot.mp4", "c_960_splatted4.mp4", "d_960_splatted2D.mkv"):
+            (self.inp / name).write_bytes(b"x")
+        self.runner.start_processing()
+        self._finish()
+        self.assertEqual(sorted(c[0] for c in self.calls),
+                         ["a_splatted2.mp4", "b_splatted2.mp4", "c_960_splatted4.mp4", "d_960_splatted2D.mkv"])
+
+    def test_a_folder_without_splats_says_so(self):
+        for name in ("a_splatted2.mp4", "b_splatted2.mp4"):
+            (self.inp / name).unlink()
+        for name in ("Clip_0001.mp4", "Clip_0002.mp4"):
+            (self.inp / name).write_bytes(b"x")
+        self.runner.start_processing()
+        self.assertEqual(self.hooks.messages[-1][1], "No splats")
+        self.assertIsNone(self.runner.worker_thread)
+        self.assertEqual((self.loads, self.calls), ([], []))
+
     def test_resume_all_done(self):
         # v1's case: clips still in the input that finished/ already holds.
         (self.inp / "finished").mkdir()

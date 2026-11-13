@@ -5,7 +5,7 @@ one index per pixel; the result is the same.
 
 Needs CUDA for the memory test; small tensors otherwise.
 
-    .venv\Scripts\python.exe -m unittest studio.tests.test_warp_memory -v
+    .venv\\Scripts\\python.exe -m unittest studio.tests.test_warp_memory -v
 """
 from __future__ import annotations
 
