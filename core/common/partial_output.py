@@ -64,15 +64,35 @@ def ffmpeg_output_args(path: str) -> List[str]:
     return [path]
 
 
+#: How long publish() keeps retrying a rename Windows refuses with "Access is
+#: denied" (user, 2026-11-09: a Split L/R lost both eyes to it). A media
+#: server, the search indexer or an antivirus scan opening a file in an output
+#: folder holds it for a moment; the rename goes through once it lets go.
+PUBLISH_RETRY_S = 5.0
+
+
 def publish(part: str, final: str) -> bool:
     """Put the finished ``part`` under its ``final`` name, replacing any
-    earlier output there. False (logged) when it could not."""
-    try:
-        os.replace(part, final)
-        return True
-    except OSError as e:
-        logger.error(f"Could not finish {final}: {e}")
-        return False
+    earlier output there. False (logged) when it could not. A file another
+    program has open only briefly (PermissionError) is retried for up to
+    PUBLISH_RETRY_S seconds before giving up."""
+    import time
+
+    deadline = time.monotonic() + PUBLISH_RETRY_S
+    delay = 0.1
+    while True:
+        try:
+            os.replace(part, final)
+            return True
+        except PermissionError as e:
+            if time.monotonic() >= deadline:
+                logger.error(f"Could not finish {final}: {e} (another program kept it open)")
+                return False
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
+        except OSError as e:
+            logger.error(f"Could not finish {final}: {e}")
+            return False
 
 
 def discard(path: Optional[str]) -> None:

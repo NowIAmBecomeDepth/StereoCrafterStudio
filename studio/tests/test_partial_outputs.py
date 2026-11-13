@@ -45,6 +45,33 @@ class HelperTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_publish_waits_out_a_brief_lock(self):
+        """user, 2026-11-09: Split L/R lost both eyes to "[WinError 5] Access is
+        denied" -- a program holding a file in the output folder for a moment.
+        publish() retries through it instead of failing on the first try."""
+        from unittest import mock
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            final, part = tmp / "x_L.mov", tmp / "x_L.mov.part"
+            part.write_bytes(b"eye")
+            real, calls = P.os.replace, []
+
+            def locked_twice(a, b):
+                calls.append(1)
+                if len(calls) <= 2:
+                    raise PermissionError(5, "Access is denied")
+                return real(a, b)
+
+            with mock.patch.object(P.os, "replace", side_effect=locked_twice):
+                self.assertTrue(P.publish(str(part), str(final)))
+            self.assertEqual((final.read_bytes(), part.exists(), len(calls)), (b"eye", False, 3))
+
+            part.write_bytes(b"eye")  # a lock that never lets go still fails, in bounded time
+            with mock.patch.object(P, "PUBLISH_RETRY_S", 0.3),                     mock.patch.object(P.os, "replace", side_effect=PermissionError(5, "Access is denied")):
+                self.assertFalse(P.publish(str(part), str(final)))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 class SplatRenderEndTest(unittest.TestCase):
     """bug sweep 2026-10-09 (A4): a stopped or failed Splatting render waited up
