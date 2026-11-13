@@ -157,6 +157,12 @@ def find_mask(group: Group, mask_folder: str) -> Optional[str]:
     for clip "shot" (bug sweep 2026-10-14). _splatted4 is Splatting's default output (Dual Output Only
     off) -- its bottom row is a _splatted2 frame (user, 2026-10-18: a fresh project found no mask)."""
     own = re.compile(re.escape(group.stem) + r"_\d+_splatted[24][^.]*\.(?:mp4|mov|mkv)$", re.IGNORECASE)
+    if mask_folder and os.path.isfile(mask_folder):
+        # one splat file, as Merging's Mask Folder takes ("Select a single splatted file") and hands on
+        # (user, 2026-11-10: every clip said "no splat mask"): this clip's if it is, else its folder's
+        if own.match(os.path.basename(mask_folder)):
+            return mask_folder
+        mask_folder = os.path.dirname(mask_folder)
     found = []
     for d in (mask_folder, os.path.join(mask_folder, "finished")):
         if not d or not os.path.isdir(d):

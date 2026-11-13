@@ -112,6 +112,18 @@ class EdgeFillTest(unittest.TestCase):
         mask = F.find_mask(groups[0], self.masks)
         self.assertTrue(mask and mask.endswith(f"shot_{W}_splatted2.mkv"), mask)
 
+    def test_a_single_splat_file_as_the_mask_folder(self):
+        """Merging's Mask Folder takes one splat file and hands it on; Edge Fill said "no splat mask in the
+        Mask folder" for it (user, 2026-11-10). The clip's own file is its mask; another clip's file
+        means its folder."""
+        g = F.find_groups(self.out)[0]
+        own = F.find_mask(g, self.masks)
+        self.assertEqual(F.find_mask(g, own), own)
+        other = os.path.join(os.path.dirname(own), f"other_{W}_splatted2.mkv")
+        shutil.copy(own, other)
+        self.assertEqual(F.find_mask(g, other), own)
+        self.assertIsNone(F.find_mask(g, os.path.join(self.tmp, "nothing_here.mkv")))
+
     def test_measures_the_strip_from_the_mask(self):
         m = F.measure(F.find_mask(F.find_groups(self.out)[0], self.masks))
         self.assertEqual(set(m["eyes"]), {"R"})
