@@ -3,6 +3,64 @@ from torch.nn import Module
 from torch.autograd import Function
 import math
 
+#: Pixels (frames x H x W) the forward pass warps at once: two 4K frames.
+_CHUNK_PIXELS = 2 * 3840 * 2160
+
+
+def _warp_chunk(im0, flow, im1, interpolation_mode_int):
+    """Warp im0 [b, C, H, W] by flow [b, H, W, 2] into im1 (a view, zeroed)."""
+    b, C, H, W = im0.shape
+    HW = H * W
+    xs = torch.arange(W, device=im0.device, dtype=im0.dtype).view(1, 1, W)
+    ys = torch.arange(H, device=im0.device, dtype=im0.dtype).view(1, H, 1)
+    x_dest = xs + flow[:, :, :, 0]
+    y_dest = ys + flow[:, :, :, 1]
+    src = im0.reshape(b, C, HW)
+    dst = im1.view(b, C, HW)
+
+    def scatter(yi, xi, weight, valid, add):
+        idx = (yi * W + xi).view(b, 1, HW).expand(b, C, HW)
+        if weight is None:
+            vals = src * valid.view(b, 1, HW)
+        else:
+            vals = src * weight.view(b, 1, HW)
+            vals.mul_(valid.view(b, 1, HW))
+        if add:
+            dst.scatter_add_(2, idx, vals)
+        else:
+            dst.scatter_(2, idx, vals)
+
+    if interpolation_mode_int == 0:  # Bilinear
+        x_f = torch.floor(x_dest)
+        y_f = torch.floor(y_dest)
+        ax = (x_f + 1) - x_dest     # x_ceil - x
+        bx = x_dest - x_f
+        ay = (y_f + 1) - y_dest
+        by = y_dest - y_f
+        del x_dest, y_dest
+        xi = x_f.long()
+        yi = y_f.long()
+        del x_f, y_f
+        # all four corners inside the image (the CUDA kernel's `if`)
+        valid = ((xi >= 0) & (xi + 1 < W) & (yi >= 0) & (yi + 1 < H)).to(im0.dtype)
+        x0 = xi.clamp(0, W - 1)
+        x1 = (xi + 1).clamp_(0, W - 1)
+        del xi
+        y0 = yi.clamp(0, H - 1)
+        y1 = (yi + 1).clamp_(0, H - 1)
+        del yi
+        scatter(y0, x0, ax * ay, valid, True)   # NW
+        scatter(y0, x1, bx * ay, valid, True)   # NE
+        scatter(y1, x0, ax * by, valid, True)   # SW
+        scatter(y1, x1, bx * by, valid, True)   # SE
+    else:  # Nearest: last write wins, like the CUDA kernel's `*im1_p = *im0_p`
+        xn = torch.round(x_dest).long()
+        yn = torch.round(y_dest).long()
+        del x_dest, y_dest
+        valid = ((xn >= 0) & (xn < W) & (yn >= 0) & (yn < H)).to(im0.dtype)
+        scatter(yn.clamp_(0, H - 1), xn.clamp_(0, W - 1), None, valid, False)
+
+
 class ForwardWarpFunction(Function):
 
     @staticmethod
@@ -28,115 +86,15 @@ class ForwardWarpFunction(Function):
 
         B, C, H, W = im0.shape
         im1 = torch.zeros_like(im0, device=im0.device, dtype=im0.dtype)
+        # A few frames at a time, each corner's index once per pixel (not per
+        # channel): the old flat [B*C*H*W] int64 indices made a 4K batch of 10
+        # ask for ~14 GB and a 12 GB card ran out (tester, 2026-11-12). Same
+        # sums in the same order, so the result is unchanged.
+        step = max(1, _CHUNK_PIXELS // max(1, H * W))
+        for b0 in range(0, B, step):
+            b1 = min(B, b0 + step)
+            _warp_chunk(im0[b0:b1], flow[b0:b1], im1[b0:b1], interpolation_mode_int)
 
-        # Create a grid of pixel coordinates
-        grid_x, grid_y = torch.meshgrid(
-            torch.arange(W, device=im0.device, dtype=im0.dtype),
-            torch.arange(H, device=im0.device, dtype=im0.dtype),
-            indexing='xy' # 'xy' means x-coords vary along dim 0, y-coords along dim 1
-        )
-        # Unsqueeze and expand for batch dimension [1, H, W] -> [B, H, W]
-        grid_x = grid_x.unsqueeze(0).expand(B, -1, -1)
-        grid_y = grid_y.unsqueeze(0).expand(B, -1, -1)
-
-        # Calculate destination coordinates
-        x_dest = grid_x + flow[:, :, :, 0]
-        y_dest = grid_y + flow[:, :, :, 1]
-        
-        if interpolation_mode_int == 0:  # Bilinear
-            x_f = torch.floor(x_dest).long() # x_floor
-            y_f = torch.floor(y_dest).long() # y_floor
-            x_c = x_f + 1 # x_ceil
-            y_c = y_f + 1 # y_ceil
-
-            # Calculate weights
-            nw_k = (x_c.float() - x_dest) * (y_c.float() - y_dest)
-            ne_k = (x_dest - x_f.float()) * (y_c.float() - y_dest)
-            sw_k = (x_c.float() - x_dest) * (y_dest - y_f.float())
-            se_k = (x_dest - x_f.float()) * (y_dest - y_f.float())
-
-            # Clamp coordinates to image boundaries for valid indices.
-            # This is done *after* weight calculation but before indexing.
-            x_f_clamped = torch.clamp(x_f, 0, W - 1)
-            y_f_clamped = torch.clamp(y_f, 0, H - 1)
-            x_c_clamped = torch.clamp(x_c, 0, W - 1)
-            y_c_clamped = torch.clamp(y_c, 0, H - 1)
-
-            # Create masks for valid contributions (original boundaries from CUDA `if` condition).
-            # A contribution is valid if all its 4 corners (x_f, x_c-1, y_f, y_c-1) are within the image.
-            # Note: CUDA used `x_c < W` which means x_c can be up to W-1.
-            valid_mask = (x_f >= 0) & (x_c < W) & (y_f >= 0) & (y_c < H)
-            
-            # Reshape weights and masks for broadcasting with im0 (add channel dim)
-            nw_k = nw_k.unsqueeze(1) # [B, 1, H, W]
-            ne_k = ne_k.unsqueeze(1)
-            sw_k = sw_k.unsqueeze(1)
-            se_k = se_k.unsqueeze(1)
-            valid_mask = valid_mask.unsqueeze(1) # [B, 1, H, W]
-
-            # Calculate base index for each batch and channel slice for flattened im1.
-            # These indices will be for a [B, C, H, W] tensor flattened to [B*C*H*W].
-            b_indices = torch.arange(B, device=im0.device).view(B, 1, 1, 1).expand(-1, C, H, W)
-            c_indices = torch.arange(C, device=im0.device).view(1, C, 1, 1).expand(B, -1, H, W)
-            base_idx = b_indices * (C * H * W) + c_indices * (H * W)
-            
-            # Use torch.scatter_add_ to perform atomic additions.
-            # Ensure values are zeroed out if they are not part of the `valid_mask`
-            
-            # --- Scatter to NW corner ---
-            nw_flat_idx = base_idx + y_f_clamped.unsqueeze(1) * W + x_f_clamped.unsqueeze(1)
-            nw_values = (im0 * nw_k) * valid_mask.float()
-            im1.view(-1).scatter_add_(0, nw_flat_idx.view(-1), nw_values.view(-1))
-
-            # --- Scatter to NE corner ---
-            ne_flat_idx = base_idx + y_f_clamped.unsqueeze(1) * W + x_c_clamped.unsqueeze(1)
-            ne_values = (im0 * ne_k) * valid_mask.float()
-            im1.view(-1).scatter_add_(0, ne_flat_idx.view(-1), ne_values.view(-1))
-
-            # --- Scatter to SW corner ---
-            sw_flat_idx = base_idx + y_c_clamped.unsqueeze(1) * W + x_f_clamped.unsqueeze(1)
-            sw_values = (im0 * sw_k) * valid_mask.float()
-            im1.view(-1).scatter_add_(0, sw_flat_idx.view(-1), sw_values.view(-1))
-
-            # --- Scatter to SE corner ---
-            se_flat_idx = base_idx + y_c_clamped.unsqueeze(1) * W + x_c_clamped.unsqueeze(1)
-            se_values = (im0 * se_k) * valid_mask.float()
-            im1.view(-1).scatter_add_(0, se_flat_idx.view(-1), se_values.view(-1))
-
-        else:  # Nearest
-            x_nearest = torch.round(x_dest).long()
-            y_nearest = torch.round(y_dest).long()
-
-            # Create masks for valid contributions
-            valid_mask = (x_nearest >= 0) & (x_nearest < W) & \
-                         (y_nearest >= 0) & (y_nearest < H)
-            
-            # Reshape valid_mask for broadcasting with im0
-            valid_mask = valid_mask.unsqueeze(1) # [B, 1, H, W]
-
-            # Generate flat indices for im0 to extract source values efficiently
-            b_indices = torch.arange(B, device=im0.device).view(B, 1, 1, 1).expand(-1, C, H, W)
-            c_indices = torch.arange(C, device=im0.device).view(1, C, 1, 1).expand(B, -1, H, W)
-            
-            # Clamp nearest coordinates for indexing
-            x_nearest_clamped = torch.clamp(x_nearest, 0, W - 1)
-            y_nearest_clamped = torch.clamp(y_nearest, 0, H - 1)
-
-            # Destination flat indices
-            dest_flat_idx = b_indices * (C * H * W) + \
-                            c_indices * (H * W) + \
-                            y_nearest_clamped.unsqueeze(1) * W + \
-                            x_nearest_clamped.unsqueeze(1)
-            
-            # Filter source values by valid_mask
-            source_values = im0 * valid_mask.float()
-
-            # For nearest, the CUDA code does direct assignment `*im1_p = *im0_p;`
-            # This implies "last write wins" if multiple source pixels map to the same destination.
-            # `torch.scatter_` (not `scatter_add_`) with `reduce='replace'` (default for `scatter_`)
-            # provides this behavior.
-            im1.view(-1).scatter_(0, dest_flat_idx.view(-1), source_values.view(-1))
-            
         ctx.save_for_backward(im0, flow)
         ctx.interpolation_mode_int = interpolation_mode_int
         ctx.B, ctx.C, ctx.H, ctx.W = B, C, H, W
