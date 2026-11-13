@@ -155,7 +155,8 @@
      clips. <span class="btn">Open Console</span>, at the right of the Run Process heading, shows the run
      as it goes, with its progress bar, on the console's Extra tab.</p>
   <p>When it's done, go to <span class="btn">1. Depth Map</span> and press
-     <span class="btn">Import from Scene Cut</span>: its input is filled in with the new clips.</p>
+     <span class="btn">Import from Scene Cut</span>: its input is filled in with the new clips (in a project,
+     its output too).</p>
 
   <h3>Using another tool instead</h3>
   <p>If you'd rather cut the movie elsewhere, a few things keep the clips at their best:</p>
@@ -233,8 +234,10 @@
      folder to open it, double-click it (or press <span class="btn">Select Folder</span>) to use the whole
      folder; click a clip and press <span class="btn">Select Clip</span> to process just that one. A folder of
      numbered image frames counts as one video. Every stage's folder fields use the same picker.</p>
-  <p>After Scene Cut has split a movie, <span class="btn">Import from Scene Cut</span> appears here
-     and fills the input with its clips.</p>
+  <p>After Scene Cut has split a movie, <span class="btn">Import from Scene Cut</span> appears here.
+     With a project open it fills the whole stage, the output folder included, from one chapter
+     of that project; its tooltip lists what it fills. Without a project it fills the input from the last
+     Scene Cut job. The VDA and DVD tabs have the same button.</p>
 
   <h3><span class="num">2</span> &nbsp;Main Parameters</h3>
   <ul>
@@ -547,7 +550,9 @@
      <span class="btn">Same as Splatting</span>). The tab lists every clip that has both maps there -- the one
      Splatting reads, and the other in the <code>DepthCrafter</code> or <code>VDA</code> folder that VDA's rerun
      moved it into. The blend goes where Splatting reads the clip's map, and the map it replaces moves into its own
-     folder, so Splatting shows the blend at once and nothing is lost. A later blend replaces the earlier one.</p>
+     folder, so Splatting shows the blend at once and nothing is lost. A later blend replaces the earlier one.
+     In a project, the chapter list beside <span class="btn">Same as Splatting</span> fills the folder with
+     that chapter's depth maps, and Blend follows the project like the other stages.</p>
   <table class="keys">
     <tr><td><b>Mode</b></td><td><b>Mix</b> averages the two maps, by <span class="set">Mix</span> (0 is all
       DepthCrafter, 1 all VDA). <b>Layout + Detail</b> keeps the <span class="set">Base</span> map's broad depth
@@ -651,6 +656,10 @@
     <div class="frame"><div class="canvas"><img src="shots/16_splat_queue.webp" alt="Upcoming Jobs"></div></div>
     <figcaption>Each clip shows a still, its length, and two bars that fill as its full-size (H) and
       smaller (L) results are made.</figcaption>
+  <p>The Import button is named after the tab that made the depth maps last:
+     <span class="btn">Import from DepthCrafter</span>, <b>DVD</b>, <b>VDA</b> or <b>Depth Map Editor</b>. With
+     a project open it fills every folder of the stage, Output Splatted included, from one chapter of that
+     project; without one it takes its folders from that last job.</p>
   </figure>
   <ul>
     <li><b>Tick boxes</b> pick clips. <span class="btn">Select All</span> and
@@ -1123,7 +1132,8 @@
       blended into these, so the finished eye keeps its full sharpness.</li>
     <li><span class="set">Output Folder</span>: where the filled clips go.</li>
   </ul>
-  <p>Picking a chapter fills all three. Otherwise <span class="btn">Import from Splatting</span> fills
+  <p>Picking a chapter fills all three. So does <span class="btn">Import from Splatting</span> with a
+     project open: one chapter of that project, the output folder included. Without a project it fills
      the two inputs from the last Splatting run.</p>
 
   <h3><span class="num">3</span> &nbsp;Parameters</h3>
@@ -1265,6 +1275,10 @@
      <span class="btn">Download V2 Weights</span>: <b>46.6 GB</b> from Hugging Face -- Wan 2.1 VACE's text encoder,
      VAE and tokenizer (11.9 GB) and StereoCrafter2 (34.7 GB), only the files V2 uses. Windows shows that as about
      43.4 GB. It asks first, showing the sizes and your free space, then downloads in the background with a progress
+  <p>V2's folders have a chapter list too, as V1's do: pick a chapter and its input is the chapter's
+     <code>hires</code> splats and its output the chapter's Inpainted folder, and the fields fold away
+     (<span class="btn">Change Folders</span> shows them). It follows the project like the other stages
+     (<a href="part1.html#switch-project">Part 1</a>).</p>
      bar; <span class="btn">Stop</span> it any time and the next Download carries on where it stopped. With
      <b>FP8 resident</b> picked as the offload mode, <span class="btn">Download FP8 Model</span> fetches its
      pre-quantized StereoCrafter2 (17.4 GB more).</span></div>
@@ -1342,8 +1356,9 @@
   <h3><span class="num">1</span> &nbsp;Folders</h3>
   <p>A chapter fills in all four: <span class="set">Inpainted Video Folder</span>,
      <span class="set">Original Video Folder</span>, <span class="set">Mask Folder</span> and
-     <span class="set">Output Folder</span>. Otherwise <span class="btn">Import from Inpainting</span>
-     (or <span class="btn">Import from Inpainting V2</span>) fills them from the last run.
+     <span class="set">Output Folder</span>. So does <span class="btn">Import from Inpainting</span>
+     (or <span class="btn">Import from Inpainting V2</span>) with a project open, from one chapter of that
+     project; without a project it fills them from the last run.
      <span class="btn">Encoding Options…</span> and the <b>8-bit / 10-bit</b> presets set how the finished
      video is saved.</p>
 

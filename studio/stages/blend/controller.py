@@ -25,7 +25,7 @@ from PySide6.QtQml import QQmlPropertyMap
 from studio.gpu_jobs import wait_for_gpu
 from studio.outcome import Outcome, verdict
 
-from ... import settings_store
+from ... import chapter_paths, project_memory, settings_store
 from ..vda.runner import Hooks
 from . import runner as R
 from . import settings as S
@@ -111,6 +111,7 @@ class BlendController(QObject):
     previewChanged = Signal()
     toast = Signal(str, str, str)
     fieldRejected = Signal(str)
+    chapterChanged = Signal()
 
     _sigStatus = Signal(str)
     _sigProgress = Signal(int, int)
@@ -176,6 +177,16 @@ class BlendController(QObject):
         self._sigPreview.connect(self._on_preview, q)
         QTimer.singleShot(0, self.rescan)
 
+        # the open project's chapter (2026-11-12): its Depth Maps folder, remembered per project; a side
+        # page beside DepthCrafter (project_memory.SIDE_STAGES)
+        self._chapters: list = []
+        self._chapter_num = -1
+        self._chapter_expected: Dict[str, str] = {}
+        self._chapter_applying = False
+        shell.projectChanged.connect(self.refreshChapters)
+        project_memory.attach(self, OWNER, shell, [k for _r, k in self._CHAPTER_FIELDS])
+        self.refreshChapters()
+
     # ---- settings --------------------------------------------------------------------------------------
 
     settings = Property(QObject, lambda self: self._map, constant=True)
@@ -211,6 +222,8 @@ class BlendController(QObject):
                 vals.update({k: v for k, v in S.follow_other({**vals, "other": coerced}).items()
                              if k in ("base", "size") and k in vals})
             self.choicesChanged.emit()
+        if key == "depth_folder" and not self._chapter_applying:
+            self._maybe_leave_chapter()
         if key in ("depth_folder", "output_suffix", "other"):
             self.rescan()
         else:
@@ -307,8 +320,80 @@ class BlendController(QObject):
         self._map.insert("depth_folder", os.path.normpath(folder))
         self._last_good["depth_folder"] = os.path.normpath(folder)
         self._global["depth_folder"] = os.path.normpath(folder)
+        self._maybe_leave_chapter()
         self.rescan()
         self._save_timer.start()
+
+    def _set(self, key: str, value: Any) -> None:
+        """Programmatic write (a chapter, a project switch): no valueChanged, so kept and rescanned here."""
+        value = S.coerce(key, value)
+        self._map.insert(key, value)
+        self._last_good[key] = value
+        self._keep(key, value)
+        if key == "depth_folder":
+            self.rescan()
+
+    # ---- chapters (2026-11-12) -------------------------------------------------------------------------
+
+    chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
+    chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
+    hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folder yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    #: (stage_paths role, settings key): the chapter's Depth Maps folder, where Splatting reads
+    _CHAPTER_FIELDS = (("depth", "depth_folder"),)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """The folder's "In <other project>" tag: Blend back on the open project."""
+        project_memory.reland(self)
+
+    @Slot()
+    def refreshChapters(self) -> None:
+        self._chapters = self._shell.listChapters()
+        saved = self._shell.stageChapter(OWNER)
+        nums = {c["num"] for c in self._chapters}
+        self._chapter_num = saved.get("num", -1) if saved.get("num") in nums else -1
+        if self._chapter_num >= 0:
+            self._chapter_expected = self._shell.stagePaths(OWNER, self._chapter_num, saved.get("name", ""))
+        self.chapterChanged.emit()
+
+    @Slot(int)
+    def pickChapter(self, num: int) -> None:
+        if num < 0:
+            self._chapter_num = -1
+            self._chapter_expected = {}
+            self._shell.setStageChapter(OWNER, {})
+            self.chapterChanged.emit()
+            return
+        name = next((c["name"] for c in self._chapters if c["num"] == num), "")
+        paths = self._shell.stagePaths(OWNER, num, name)
+        self._chapter_applying = True
+        try:
+            for role, key in self._CHAPTER_FIELDS:
+                if paths.get(role):
+                    self._set(key, paths[role].replace("\\", "/"))
+        finally:
+            self._chapter_applying = False
+        self._chapter_num = num
+        self._chapter_expected = paths
+        self._shell.setStageChapter(OWNER, {"num": num, "name": name})
+        self._save_timer.start()
+        self.chapterChanged.emit()
+        if not getattr(self, "_restoring", False):        # a project switch restores quietly
+            self.toast.emit("info", "Chapter selected", f"{name}\nThe depth-map folder now points at this chapter.")
+
+    def _maybe_leave_chapter(self) -> None:
+        if self._chapter_num < 0:
+            return
+        for role, key in self._CHAPTER_FIELDS:
+            exp = self._chapter_expected.get(role)
+            if exp and not chapter_paths.same_place(exp, self._map.value(key)):
+                self._chapter_num = -1
+                self._shell.setStageChapter(OWNER, {})
+                self.chapterChanged.emit()
+                return
 
     # ---- the clips -----------------------------------------------------------------------------------
 
@@ -485,6 +570,8 @@ class BlendController(QObject):
 
     def _start(self, pairs: List[Dict[str, str]]) -> None:
         if self._thread is not None and self._thread.is_alive():
+            return
+        if project_memory.refuse_start(self):   # on the project with no chapter yet (it says so)
             return
         self.save()
         if not pairs:

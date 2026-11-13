@@ -29,7 +29,7 @@ from typing import Any, Dict
 from PySide6.QtCore import Property, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlPropertyMap
 
-from ... import sage1, settings_store
+from ... import chapter_paths, project_memory, sage1, settings_store
 from ...legacy import REPO
 from . import settings as S
 
@@ -121,6 +121,7 @@ class InpaintingV2Controller(QObject):
     #: v1's modal dialogs (showerror / showinfo / showwarning): the page asks.
     message = Signal(str, str, str)
     fieldRejected = Signal(str)
+    chapterChanged = Signal()
 
     _sigMessage = Signal(str, str, str)
     _sigWake = Signal()
@@ -177,6 +178,16 @@ class InpaintingV2Controller(QObject):
         # the models folder changed, or Settings > Studio > Models downloaded V2's weights (2026-10-20)
         from core import weights_paths
         weights_paths.on_change(self._models_moved)
+
+        # the open project's chapter (2026-11-12: as Inpainting's -- the chapter's hi-res splats in,
+        # its Inpainted folder out), remembered per project; a side page (project_memory.SIDE_STAGES)
+        self._chapters: list = []
+        self._chapter_num = -1
+        self._chapter_expected: Dict[str, str] = {}
+        self._chapter_applying = False
+        shell.projectChanged.connect(self.refreshChapters)
+        project_memory.attach(self, "inpainting_v2", shell, [k for _r, k in self._CHAPTER_FIELDS])
+        self.refreshChapters()
 
     # ---- settings ------------------------------------------------------------------
 
@@ -319,6 +330,8 @@ class InpaintingV2Controller(QObject):
         if coerced != value or type(coerced) is not type(value):
             self._map.insert(key, coerced)
         self._last_good[key] = coerced
+        if key in ("input_folder", "output_folder") and not self._chapter_applying:
+            self._maybe_leave_chapter()
         self._save_timer.start()
 
     def _set(self, key: str, value: Any) -> None:
@@ -337,6 +350,7 @@ class InpaintingV2Controller(QObject):
         back in the input folder, ticked in Upcoming Jobs for Process Selected."""
         from studio import send_back
         send_back.take_back(self, self.queue, dict(plan or {}), self._set)
+        self._maybe_leave_chapter()            # splats from elsewhere aren't the chapter's
 
     @Slot(str)
     def loadSettingsFrom(self, path: str) -> None:
@@ -349,6 +363,7 @@ class InpaintingV2Controller(QObject):
             for key, value in cfg.items():
                 if key in S.DEFAULTS:
                     self._set(key, value)
+            self._maybe_leave_chapter()
             self.save()
             self._on_status(f"Loaded settings from {os.path.basename(path)}")
         except Exception as e:
@@ -504,6 +519,8 @@ class InpaintingV2Controller(QObject):
         self._begin()
 
     def _begin(self) -> None:
+        if project_memory.refuse_start(self):   # on the project with no chapter yet (it says so)
+            return
         if self._dl["what"] or not weights_installed():
             # what Start would only fail on: the weights (user, 2026-10-18: the button is on the page)
             self.message.emit("warning", "Inpainting V2", "V2's weights aren't all on this PC yet: "
@@ -647,6 +664,69 @@ class InpaintingV2Controller(QObject):
             return
         if self._runner is not None and self._runner.is_busy():
             self._runner.stop_processing()
+
+    # ---- chapters (2026-11-12: as Inpainting's) ----------------------------------------
+
+    chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
+    chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
+    hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    #: (stage_paths role, settings key): the chapter's hi-res splats in, its Inpainted folder out
+    _CHAPTER_FIELDS = (("hires", "input_folder"), ("output", "output_folder"))
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "In <other project>" tag: this stage back on the open project."""
+        project_memory.reland(self)
+
+    @Slot()
+    def refreshChapters(self) -> None:
+        self._chapters = self._shell.listChapters()
+        saved = self._shell.stageChapter("inpainting_v2")
+        nums = {c["num"] for c in self._chapters}
+        self._chapter_num = saved.get("num", -1) if saved.get("num") in nums else -1
+        if self._chapter_num >= 0:
+            self._chapter_expected = self._shell.stagePaths("inpainting_v2", self._chapter_num, saved.get("name", ""))
+        self.chapterChanged.emit()
+
+    @Slot(int)
+    def pickChapter(self, num: int) -> None:
+        if num < 0:
+            self._chapter_num = -1
+            self._chapter_expected = {}
+            self._shell.setStageChapter("inpainting_v2", {})
+            self.chapterChanged.emit()
+            return
+        name = next((c["name"] for c in self._chapters if c["num"] == num), "")
+        paths = self._shell.stagePaths("inpainting_v2", num, name)
+        self._chapter_applying = True
+        try:
+            for role, key in self._CHAPTER_FIELDS:
+                if paths.get(role):
+                    self._set(key, paths[role].replace("\\", "/"))
+        finally:
+            self._chapter_applying = False
+        self._chapter_num = num
+        self._chapter_expected = paths
+        self._shell.setStageChapter("inpainting_v2", {"num": num, "name": name})
+        self._save_timer.start()
+        self.chapterChanged.emit()
+        if not getattr(self, "_restoring", False):        # a project switch restores quietly
+            self.toast.emit("info", "Chapter selected", f"{name}\nInput and output now point at this chapter.")
+
+    def _maybe_leave_chapter(self) -> None:
+        if self._chapter_num < 0:
+            return
+        for role, key in self._CHAPTER_FIELDS:
+            exp = self._chapter_expected.get(role)
+            # a job moving the clips a finished level down is not a hand edit
+            if exp and not chapter_paths.same_place(exp, self._map.value(key)):
+                self._chapter_num = -1
+                self._shell.setStageChapter("inpainting_v2", {})
+                self.chapterChanged.emit()
+                return
 
     # ---- File actions (v1's shell-mode buttons) --------------------------------------
 

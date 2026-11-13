@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import re
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 import threading
 from typing import Any, Dict
 
@@ -704,7 +704,7 @@ class MergingController(QObject):
 
     @Slot()
     def start(self, only=None, test: bool = False) -> None:
-        if self.is_busy():
+        if self.is_busy() or project_memory.refuse_start(self):
             return
         self.save()
         from studio.clip_queue import move_pending
@@ -1074,6 +1074,19 @@ class MergingController(QObject):
     #: Inpainting V2's last job (job_handoff.SIDE_STAGES), for its own button.
     importV2Description = Property(str, lambda self: self._import_v2_desc, notify=importChanged)
 
+    def _import_plan(self, v2: bool = False):
+        """With a project open: the chapter an Import fills every folder from (2026-11-12).
+        Inpainting V2's only by its own record: its output is its own."""
+        from core.ui.job_handoff import get_record, get_source_record
+        record = get_record("inpainting_v2") if v2 else get_source_record("merging")
+        plan = project_memory.import_plan(self, self._shell, "merging", record, ("inpainted_out",),
+                                          () if v2 else ("inpainting",))
+        if plan and v2 and not plan["fromRecord"]:
+            return None
+        if plan:
+            plan["record"] = record or {}
+        return plan
+
     @Slot()
     def refreshImport(self) -> None:
         self._import_desc = self._import_v2_desc = ""
@@ -1081,10 +1094,16 @@ class MergingController(QObject):
             from core.ui.job_handoff import describe, get_record, get_source_record, in_project
             project = self._shell.projectFolder
             record = get_source_record("merging")
-            if record and record.get("inpainted_out") and in_project(record, project, ("inpainted_out",)):
+            plan = self._import_plan()
+            if plan:
+                self._import_desc = plan["description"]
+            elif record and record.get("inpainted_out") and in_project(record, project, ("inpainted_out",)):
                 self._import_desc = describe(record) or "Inpainting job"
             v2 = get_record("inpainting_v2")
-            if v2 and v2.get("inpainted_out") and in_project(v2, project, ("inpainted_out",)):
+            plan2 = self._import_plan(v2=True)
+            if plan2:
+                self._import_v2_desc = plan2["description"]
+            elif v2 and v2.get("inpainted_out") and in_project(v2, project, ("inpainted_out",)):
                 self._import_v2_desc = describe(v2) or "Inpainting V2 job"
         except Exception:
             logger.debug("Could not read the Inpainting handoff", exc_info=True)
@@ -1093,12 +1112,32 @@ class MergingController(QObject):
     @Slot()
     def importFromInpainting(self) -> None:
         from core.ui.job_handoff import get_source_record
-        self._import_record(get_source_record("merging") or {}, "Inpainting")
+        if not self._import_from_plan(self._import_plan(), "Inpainting"):
+            self._import_record(get_source_record("merging") or {}, "Inpainting")
 
     @Slot()
     def importFromInpaintingV2(self) -> None:
         from core.ui.job_handoff import get_record
-        self._import_record(get_record("inpainting_v2") or {}, "Inpainting V2")
+        if not self._import_from_plan(self._import_plan(v2=True), "Inpainting V2"):
+            self._import_record(get_record("inpainting_v2") or {}, "Inpainting V2")
+
+    def _import_from_plan(self, plan, label: str) -> bool:
+        """The whole stage from one chapter of the open project; the record's own
+        inpainted folder when it is somewhere else in that chapter (V2's)."""
+        if not plan:
+            return False
+        try:
+            filled = project_memory.apply_import(self, plan)
+            own = str(plan.get("record", {}).get("inpainted_out") or "")
+            if plan["fromRecord"] and own and os.path.isdir(own) \
+                    and not chapter_paths.same_place(own, plan["paths"].get("inpainted")):
+                self._set("inpainted_folder", own.replace("\\", "/"))
+                self._maybe_leave_chapter()
+                self._save_timer.start()
+            self._on_var("status_label", f"Imported {filled} from {label} ({plan['name']}).")
+        except Exception:
+            logger.exception("Import from %s failed", label)
+        return True
 
     def _import_record(self, record, label: str) -> None:
         try:
@@ -1126,10 +1165,12 @@ class MergingController(QObject):
             if record.get("inpainted_out"):
                 self._set("inpainted_folder", fwd(record["inpainted_out"]))
                 filled.append("inpainted")
-            if record.get("source"):
+            # the inpainted folder lies in no project: an original or mask that lies in
+            # one is another project's (2026-11-12) -- left alone
+            if record.get("source") and not chapters.locate_chapter(record["source"]):
                 self._set("original_folder", fwd(resolve_subfolder(record["source"], "finished")))
                 filled.append("original")
-            if record.get("hires"):
+            if record.get("hires") and not chapters.locate_chapter(record["hires"]):
                 self._set("mask_folder", fwd(resolve_subfolder(record["hires"], "finished")))
                 filled.append("mask")
             if filled:
@@ -1276,6 +1317,13 @@ class MergingController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this stage back on the open project."""
+        project_memory.reland(self)
 
     #: v1 _install_chapter_picker("merging", ...): the roles and the fields they fill.
     _CHAPTER_FIELDS = (("inpainted", "inpainted_folder"), ("original", "original_folder"),

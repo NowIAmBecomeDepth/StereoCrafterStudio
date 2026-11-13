@@ -34,6 +34,8 @@ INPUT_ROLES = {
     "depthcrafter": ("input",),
     "splatting": ("source", "depth"),
     "inpainting": ("lowres", "hires"),
+    "inpainting_v2": ("hires",),
+    "blend": ("depth",),
     "merging": ("inpainted", "original", "mask"),
 }
 

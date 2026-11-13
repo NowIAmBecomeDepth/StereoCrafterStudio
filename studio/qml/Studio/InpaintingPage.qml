@@ -39,7 +39,8 @@ Item {
     // A picked chapter fills every path, so the rows are put away (v1's
     // collapse); Change Folders brings them back without leaving it.
     property bool foldersOpen: false
-    readonly property bool chapterMode: ip.hasProject && ip.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: ip.hasProject && (ip.chapterNum >= 0 || ip.needsChapter)
     // Manual paths: put away by Hide Folders, remembered (user, 2026-09-30)
     readonly property bool manualHidden: !!Shell.foldersHidden["inpainting"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
@@ -210,10 +211,10 @@ Item {
                         iconGlyph: Theme.icon.importIcon
                         onClicked: page.ip.importFromSplatting()
                         HoverTip {
-                            tip: "Fill the Lo-Res and Hi-Res Blend Folders from the most recent completed "
-                                 + "Splatting job, whichever ran last on this machine.\n"
-                                 + "Clicking replaces whatever those two fields currently hold.\n\n"
-                                 + "Most recent job:\n" + page.ip.importDescription
+                            tip: "Fill this stage's folders from the most recent completed Splatting job, "
+                                 + "whichever ran last on this machine: in a project, its chapter's folders, Output too.\n"
+                                 + "Clicking replaces whatever those fields currently hold.\n\n"
+                                 + (page.ip.hasProject ? "Fills:\n" : "Most recent job:\n") + page.ip.importDescription
                         }
                     },
 ChangeFoldersButton {

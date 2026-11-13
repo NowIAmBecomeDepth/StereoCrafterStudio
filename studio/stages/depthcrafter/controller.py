@@ -19,7 +19,7 @@ import json
 import logging
 import math
 import os
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 import threading
 from typing import Any, Dict, Optional
 
@@ -635,7 +635,8 @@ class DepthCrafterController(QObject):
     def start(self, only=None, test: bool = False) -> None:
         """The batch -- or, from Upcoming Jobs, only the clips in `only`; `test`: a Test Render."""
         from studio.clip_queue import move_pending
-        if move_pending(getattr(self, "queue", None), self.toast):
+        from studio.project_memory import refuse_start
+        if refuse_start(self) or move_pending(getattr(self, "queue", None), self.toast):
             return
         self.save()
         opts = S.snapshot(self._values())
@@ -806,13 +807,23 @@ class DepthCrafterController(QObject):
     def sceneCutDescription(self):
         return self._scene_cut_desc
 
+    def _import_plan(self):
+        """With a project open: the chapter Import from Scene Cut fills input and output from."""
+        from core.ui.job_handoff import get_source_record
+        from studio import project_memory
+        return project_memory.import_plan(self, self._shell, "depthcrafter", get_source_record("depthcrafter"),
+                                          ("source",), ("scenecut",))
+
     @Slot()
     def refreshSceneCut(self) -> None:
         self._scene_cut_desc = ""
         try:
             from core.ui.job_handoff import describe, get_source_record, in_project
+            plan = self._import_plan()
             record = get_source_record("depthcrafter")
-            if record and record.get("source") and in_project(record, self._shell.projectFolder, ("source",)):
+            if plan:
+                self._scene_cut_desc = plan["description"]
+            elif record and record.get("source") and in_project(record, self._shell.projectFolder, ("source",)):
                 self._scene_cut_desc = describe(record) or record["source"]
         except Exception:
             logger.debug("Could not read the Scene Cut handoff", exc_info=True)
@@ -822,6 +833,12 @@ class DepthCrafterController(QObject):
     def importFromSceneCut(self) -> None:
         try:
             from core.ui.job_handoff import get_source_record, in_project
+            from studio import project_memory
+            plan = self._import_plan()
+            if plan:                # the whole stage from one chapter of the project (2026-11-12)
+                filled = project_memory.apply_import(self, plan)
+                self._on_status(f"Imported {filled} from Scene Cut ({plan['name']}).")
+                return
             record = get_source_record("depthcrafter") or {}
             source = record.get("source") if in_project(record, self._shell.projectFolder, ("source",)) else None
             if source:
@@ -852,6 +869,14 @@ class DepthCrafterController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this stage back on the open project."""
+        from studio import project_memory
+        project_memory.reland(self)
 
     @Slot()
     def refreshChapters(self) -> None:

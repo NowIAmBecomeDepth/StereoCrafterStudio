@@ -8,6 +8,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
 import core.splatting.rain as R
 
 

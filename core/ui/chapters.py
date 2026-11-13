@@ -28,11 +28,18 @@ the one thing every copy agrees on. Folders with no chapter number in them
 The "finished" subfolders follow core.ui.job_handoff.resolve_subfolder: a
 stage moves the files it has consumed one level down, so a later stage reads
 from there -- but only once that folder exists.
+
+A FLAT unit (user, 2026-11-12: a tester's LaCasa/{input,depth,splat,inpaint,
+merged} with the clips straight in the stage folders) has no chapter folders,
+or clips lying directly in its Source folder. It gets one more entry, WHOLE:
+the stage folders themselves. A unit may also name its own stage folders in
+PROJECT_FILE (the Project Folders panel), which wins over name matching.
 """
 
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 from typing import Dict, List, Optional, Tuple
@@ -50,9 +57,127 @@ _KEYWORDS = {
     "inpainted": ("inpaint",),
     "merged": ("merged",),
 }
+#: Other names a stage folder goes by (user, 2026-11-12: "input" was not taken
+#: for the Source folder). Weaker than the keywords: a name holding another
+#: stage's keyword is never taken by an alias ("Merged Clips" is not Source).
+_ALIASES = {
+    "source": ("input", "original", "clips"),
+    "merged": ("merge", "final", "output", "sbs"),
+}
 #: The merged folder's fallback: "LR" as a word of its own, so "SM Converted
 #: LR Clips" matches and a name that merely contains the letters does not.
 _LR_WORD = re.compile(r"(?<![a-z0-9])lr(?![a-z0-9])", re.IGNORECASE)
+
+#: The chapter number of a flat unit's one entry: its stage folders themselves.
+#: No real chapter is numbered this high, and it stays below the Shell's
+#: per-episode key step (100000).
+WHOLE = 99999
+WHOLE_NAME = "Whole project"
+
+#: A unit's own stage folders (the Project Folders panel): {"folders": {role:
+#: path}}, a path relative to the unit when it lies inside it.
+PROJECT_FILE = ".studio_project.json"
+
+#: Clips (or frames) -- what tells a flat Source folder.
+MEDIA_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".mxf",
+              ".png", ".exr", ".tif", ".tiff", ".jpg", ".jpeg"}
+
+#: Overrides kept outside the unit (its folder not writable): {normcase unit
+#: path: {role: path}}, filled by the Shell from its own settings. They win over
+#: the unit's PROJECT_FILE.
+_EXTRA_OVERRIDES: Dict[str, Dict[str, str]] = {}
+
+
+def _ukey(path: str) -> str:
+    return os.path.normcase(os.path.normpath(str(path or "")))
+
+
+def set_extra_overrides(mapping: Dict[str, Dict[str, str]]) -> None:
+    """Replace the overrides kept outside the units ({unit path: {role: path}})."""
+    _EXTRA_OVERRIDES.clear()
+    for unit, folders in (mapping or {}).items():
+        if folders:
+            _EXTRA_OVERRIDES[_ukey(unit)] = {r: str(p) for r, p in dict(folders).items() if r in ROLES and p}
+
+
+def _resolve_override(unit: str, path: str) -> str:
+    p = str(path).replace("\\", "/")
+    if not os.path.isabs(p):
+        p = _join(unit, p)
+    return p.rstrip("/")
+
+
+def read_override_file(unit: str) -> Dict[str, str]:
+    """The unit's PROJECT_FILE folders, as stored ({} when none or unreadable)."""
+    path = os.path.join(str(unit or ""), PROJECT_FILE)
+    try:
+        if not os.path.isfile(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        folders = data.get("folders") if isinstance(data, dict) else None
+        if not isinstance(folders, dict):
+            return {}
+        return {r: str(p) for r, p in folders.items() if r in ROLES and isinstance(p, str) and p.strip()}
+    except Exception:
+        return {}
+
+
+def overrides(unit: str) -> Dict[str, str]:
+    """{role: absolute folder} the unit names for itself. Never raises."""
+    try:
+        found = dict(read_override_file(unit))
+        found.update(_EXTRA_OVERRIDES.get(_ukey(unit), {}))
+        return {r: _resolve_override(unit, p) for r, p in found.items()}
+    except Exception:
+        return {}
+
+
+def stored_override(unit: str, folder: str) -> str:
+    """How an override is written: relative to the unit when inside it."""
+    p = os.path.normpath(str(folder))
+    u = os.path.normpath(str(unit))
+    try:
+        rel = os.path.relpath(p, u)
+    except ValueError:                      # another drive
+        rel = ""
+    if rel and not rel.startswith("..") and not os.path.isabs(rel) and rel != ".":
+        return rel.replace("\\", "/")
+    return p.replace("\\", "/")
+
+
+def write_override_file(unit: str, folders: Dict[str, str]) -> bool:
+    """Write the unit's PROJECT_FILE ({role: path}, stored relative where it
+    can be); no folders removes the file. False when it cannot be written."""
+    path = os.path.join(str(unit or ""), PROJECT_FILE)
+    try:
+        clean = {r: stored_override(unit, _resolve_override(unit, p))
+                 for r, p in (folders or {}).items() if r in ROLES and p}
+        if not clean:
+            if os.path.isfile(path):
+                os.remove(path)
+            return True
+        if not os.path.isdir(unit):
+            return False
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"folders": clean}, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def has_clips(path: str) -> bool:
+    """Any clip (or frame) directly in `path`."""
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                if entry.is_file() and os.path.splitext(entry.name)[1].lower() in MEDIA_EXTS:
+                    return True
+    except OSError:
+        pass
+    return False
 
 #: "Chapter 37 - ...", "Chapter 14- ...", "Chapterr 36", "Ch5", "C2 SMBITE...".
 #: A C, optionally followed by letters starting with h, then the number.
@@ -78,19 +203,59 @@ def _join(*parts: str) -> str:
     return "/".join(str(p).replace("\\", "/").rstrip("/") for p in parts if p)
 
 
+def _word_start(low: str, key: str) -> bool:
+    """`key` in `low` at the start of a word ("SM Splats", "DepthMaps")."""
+    at = low.find(key)
+    while at >= 0:
+        if at == 0 or not low[at - 1].isalnum():
+            return True
+        at = low.find(key, at + 1)
+    return False
+
+
+def _rank(name: str, role: str) -> Optional[int]:
+    """How well a folder name fits a role (lower is better), or None: a
+    keyword at a word's start, a keyword anywhere, then the same for an alias.
+    An alias never takes a name holding another stage's keyword, and Source's
+    never takes the LR folder or a Merged alias ("SM Converted LR Clips")."""
+    low = name.lower()
+    hits = [k for k in _KEYWORDS[role] if k in low]
+    if hits:
+        return 0 if any(_word_start(low, k) for k in hits) else 1
+    hits = [k for k in _ALIASES.get(role, ()) if k in low]
+    if not hits:
+        return None
+    if any(k in low for other, keys in _KEYWORDS.items() if other != role for k in keys):
+        return None
+    if role == "source" and (_LR_WORD.search(name) or any(k in low for k in _ALIASES["merged"])):
+        return None
+    return 2 if any(_word_start(low, k) for k in hits) else 3
+
+
 def find_stage_dirs(project: str) -> Dict[str, str]:
-    """{role: folder} for each stage folder found in `project`."""
-    names = _subdirs(project)
-    found: Dict[str, str] = {}
+    """{role: folder} for each stage folder found in `project`.
+
+    The unit's own choices (PROJECT_FILE) first -- an overridden role is that
+    folder, or missing while it does not exist yet; then by name. Folders
+    starting with "_" or "." are never stage folders (a "_inpaint_resume" was
+    taken for Inpainted)."""
+    pinned = overrides(project)
+    names = [n for n in _subdirs(project) if not n.startswith(("_", "."))]
+    found: Dict[str, str] = {r: p for r, p in pinned.items() if os.path.isdir(p)}
+    taken = {os.path.normcase(p) for p in pinned.values()}
     for role in ROLES:
-        hits = [n for n in names if any(k in n.lower() for k in _KEYWORDS[role])]
-        if not hits and role == "merged":
-            hits = [n for n in names if _LR_WORD.search(n)]
+        if role in pinned:
+            continue
+        free = [n for n in names if os.path.normcase(_join(project, n)) not in taken]
+        ranked = [(r, n) for n in free for r in [_rank(n, role)] if r is not None]
+        if not ranked and role == "merged":
+            ranked = [(4, n) for n in free if _LR_WORD.search(n)]
         # Never the same folder for two roles, and the shortest name when
         # several qualify: "SM Splats" over "SM Splats (old)".
-        hits = [n for n in hits if _join(project, n) not in found.values()]
-        if hits:
-            found[role] = _join(project, min(hits, key=len))
+        if ranked:
+            best = min(ranked, key=lambda rn: (rn[0], len(rn[1])))[1]
+            found[role] = _join(project, best)
+            taken.add(os.path.normcase(found[role]))
     return found
 
 
@@ -113,7 +278,8 @@ def _common_prefix(found: Dict[str, str]) -> str:
     prefixes = []
     for role, path in found.items():
         name = path.rsplit("/", 1)[-1]
-        at = min((name.lower().find(k) for k in _KEYWORDS[role] if k in name.lower()),
+        keys = _KEYWORDS[role] + _ALIASES.get(role, ())
+        at = min((name.lower().find(k) for k in keys if k in name.lower()),
                  default=-1)
         if at >= 0:
             prefixes.append(name[:at])
@@ -133,6 +299,7 @@ def stage_dirs(project: str) -> Dict[str, str]:
     DepthCrafter reads, DepthCrafter the ones Splatting reads, and so on.
     """
     found = find_stage_dirs(project)
+    found.update(overrides(project))        # an overridden folder, made or not
     prefix = _common_prefix(found)
     return {role: found.get(role) or _join(project, prefix + DEFAULT_NAMES[role])
             for role in ROLES}
@@ -243,6 +410,25 @@ def list_chapters(project: str) -> List[Tuple[int, str]]:
     return sorted(names.items())
 
 
+def is_flat(unit: str) -> bool:
+    """A unit worked on whole: no chapter folders in any stage folder, or clips
+    lying directly in its Source folder (or the finished/ below it). A unit
+    with no stage folders yet counts: the stages make them when they run."""
+    try:
+        if not list_chapters(unit):
+            return True
+        src = find_stage_dirs(unit).get("source")
+        return bool(src) and (has_clips(src) or has_clips(_join(src, "finished")))
+    except Exception:
+        return False
+
+
+def list_entries(unit: str) -> List[Tuple[int, str]]:
+    """list_chapters, with (WHOLE, WHOLE_NAME) first for a flat unit."""
+    out = list_chapters(unit)
+    return ([(WHOLE, WHOLE_NAME)] + out) if is_flat(unit) else out
+
+
 def _pick(candidates: List[str], ref: str) -> str:
     """The candidate closest to `ref`; LR holds two "Chapter 31" folders."""
     if len(candidates) == 1 or not ref:
@@ -261,6 +447,8 @@ def chapter_dirs(project: str, num: int, name_hint: str = "") -> Dict[str, str]:
     # Every stage, found or not: a missing stage folder is where that stage
     # will create its output (see stage_dirs).
     dirs = stage_dirs(project)
+    if num == WHOLE:                     # a flat unit: the stage folders themselves
+        return dict(dirs)
     found = {role: chapters_in(path).get(num, []) for role, path in dirs.items()}
     ref = (found.get("source") or [""])[0] or name_hint
     if not ref:
@@ -278,8 +466,12 @@ def locate_chapter(path: str, levels: int = 6) -> Optional[Tuple[str, int, str]]
     when it is not inside a project's stage folder. Any folder within the
     chapter counts: ".../SM Splats/Chapter 6 - Name/hires/finished" is chapter
     6 of the project holding "SM Splats" (user, 2026-10-02: the job handoff
-    and the Import buttons place a folder by it)."""
+    and the Import buttons place a folder by it).
+
+    A stage folder itself -- or its hires / lowres / finished below it -- is
+    the unit's WHOLE entry: (unit, WHOLE, "") (a flat unit, 2026-11-12)."""
     p = os.path.normpath(str(path or "")).replace("\\", "/").rstrip("/")
+    plain = True                    # only hires / lowres / finished passed so far
     for _ in range(levels):
         if not p or "/" not in p:
             return None
@@ -290,8 +482,18 @@ def locate_chapter(path: str, levels: int = 6) -> Optional[Tuple[str, int, str]]
             stages = {os.path.normcase(v) for v in find_stage_dirs(unit).values()}
             if os.path.normcase(head) in stages:
                 return unit, num, name
+        if plain and name.lower() not in _BELOW_STAGE:
+            if not head.endswith(":") and is_unit(head):
+                stages = {os.path.normcase(v) for v in find_stage_dirs(head).values()}
+                if os.path.normcase(p) in stages:
+                    return head, WHOLE, ""
+            plain = False
         p = head
     return None
+
+
+#: Folders below a stage folder that are still that stage's (locate_chapter).
+_BELOW_STAGE = {"hires", "lowres", "finished"}
 
 
 def stage_paths(stage: str, project: str, num: int, name_hint: str = "") -> Dict[str, str]:
@@ -299,7 +501,8 @@ def stage_paths(stage: str, project: str, num: int, name_hint: str = "") -> Dict
 
     Field roles are each stage's own ("input", "output", "source", "depth",
     "lowres", "hires", "inpainted", "original", "mask"); a role is missing
-    when the stage folder it comes from could not be found.
+    when the stage folder it comes from could not be found. `num` WHOLE: the
+    stage folders themselves (a flat unit).
     """
     if stage == "scenecut" and num < 0:
         # Whole movie: the clips are filed into chapter folders under Source.
@@ -322,6 +525,10 @@ def stage_paths(stage: str, project: str, num: int, name_hint: str = "") -> Dict
             "hires": _join(splats, "hires") if splats else None,
             "output": inpainted,
         },
+        # Inpainting V2 reads the hi-res splats (its record's "hires": Merging's Mask Folder)
+        "inpainting_v2": {"hires": _join(splats, "hires") if splats else None, "output": inpainted},
+        # Blend: Splatting's depth-map folder, where its blend goes too
+        "blend": {"depth": depth},
         "merging": {
             "inpainted": inpainted,
             "original": fin(src, 2),

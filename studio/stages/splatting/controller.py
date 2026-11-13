@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 from studio.gpu_jobs import wait_for_gpu
 from studio.outcome import Outcome, verdict
 import queue
@@ -775,7 +775,7 @@ class SplattingController(QObject):
     def start(self) -> None:
         """v1 start_processing: build, validate with the core, run on a thread."""
         from studio.clip_queue import move_pending
-        if self._busy or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
+        if self._busy or project_memory.refuse_start(self) or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
             return
         self.save()
         values = S.normalise(self._values())
@@ -792,7 +792,7 @@ class SplattingController(QObject):
         """Process Selected (user, 2026-09-30): the batch, on the clips ticked
         in Upcoming Jobs only (the From/To range doesn't apply)."""
         from studio.clip_queue import move_pending
-        if self._busy or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
+        if self._busy or project_memory.refuse_start(self) or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
             return
         picked = self.preview.queue.checked_paths()
         if not picked:
@@ -830,7 +830,7 @@ class SplattingController(QObject):
         self._start_single(need_loaded=True)
 
     def _start_single(self, need_loaded: bool) -> None:
-        if self._busy:
+        if self._busy or project_memory.refuse_start(self):
             return
         if need_loaded and not self.preview.loaded:
             self.toast.emit("warning", "Process Single Clip", "Please load a video in the Previewer first.")
@@ -867,7 +867,8 @@ class SplattingController(QObject):
 
     def _start_clip(self, path: str, test: bool) -> None:
         from studio.clip_queue import move_pending
-        if self._busy or not path or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
+        if self._busy or not path or project_memory.refuse_start(self) \
+                or move_pending(getattr(getattr(self, "preview", None), "queue", None), self.toast):
             return
         self._test_render = bool(test)
         self.preview.showClip(path)
@@ -1199,16 +1200,29 @@ class SplattingController(QObject):
     importDescription = Property(str, lambda self: self._import_desc, notify=importChanged)
     importOrigin = Property(str, lambda self: self._import_origin, notify=importChanged)
 
+    def _import_plan(self):
+        """With a project open: the chapter the Import fills source, depth and output from."""
+        from core.ui.job_handoff import get_source_record
+        return project_memory.import_plan(self, self._shell, "splatting", get_source_record("splatting"),
+                                          ("depth", "source"), ("depthcrafter", "vda", "dvd"))
+
     @Slot()
     def refreshImport(self) -> None:
         self._import_desc = ""
         try:
             from core.ui.job_handoff import describe, get_source_record, in_project, previous_stage_label
             record = get_source_record("splatting")
-            if record and (record.get("source") or record.get("depth")) \
+            plan = self._import_plan()
+            # the tab that made the maps (DVD, VDA, the Depth Map Editor) -- when the
+            # Import goes by its record; a chapter found on disk is DepthCrafter's
+            self._import_origin = previous_stage_label("splatting") or "DepthCrafter"
+            if plan:
+                self._import_desc = plan["description"]
+                if not plan["fromRecord"]:
+                    self._import_origin = "DepthCrafter"
+            elif record and (record.get("source") or record.get("depth")) \
                     and in_project(record, self._shell.projectFolder, ("depth", "source")):
                 self._import_desc = describe(record) or "DepthCrafter job"
-            self._import_origin = previous_stage_label("splatting") or "DepthCrafter"
         except Exception:
             logger.debug("Could not read the DepthCrafter handoff", exc_info=True)
         self.importChanged.emit()
@@ -1218,6 +1232,19 @@ class SplattingController(QObject):
         """v1 _import_from_previous_stage."""
         try:
             from core.ui.job_handoff import get_source_record, in_project, resolve_subfolder
+            plan = self._import_plan()
+            if plan:                # the whole stage from one chapter of the project (2026-11-12)
+                filled = project_memory.apply_import(self, plan)
+                # the record's own depth folder when it is somewhere else in that chapter
+                # (the Depth Map Editor's edited maps), as Merging does for Inpainting V2's
+                own = str((get_source_record("splatting") or {}).get("depth") or "")
+                if plan["fromRecord"] and own and os.path.isdir(own) \
+                        and not chapter_paths.same_place(own, plan["paths"].get("depth")):
+                    self._set("input_depth_maps", own.replace("\\", "/"))
+                    self._maybe_leave_chapter()
+                    self._save_timer.start()
+                self._set_status(f"Imported {filled} from {self._import_origin} ({plan['name']}).")
+                return
             record = get_source_record("splatting") or {}
             if not in_project(record, self._shell.projectFolder, ("depth", "source")):
                 record = {}
@@ -1249,6 +1276,13 @@ class SplattingController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this stage back on the open project."""
+        project_memory.reland(self)
 
     _CHAPTER_FIELDS = (("source", "input_source_clips"), ("depth", "input_depth_maps"),
                        ("output", "output_splatted"))

@@ -40,7 +40,8 @@ Item {
     // A picked chapter fills every path, so the rows are put away (v1's
     // collapse); Change Folders brings them back without leaving it.
     property bool foldersOpen: false
-    readonly property bool chapterMode: dc.hasProject && dc.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: dc.hasProject && (dc.chapterNum >= 0 || dc.needsChapter)
     // Manual paths: put away by Hide Folders, remembered (user, 2026-09-30)
     readonly property bool manualHidden: !!Shell.foldersHidden["depthcrafter"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
@@ -228,9 +229,10 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.dc.importFromSceneCut()
                     HoverTip {
-                        tip: "Fill Input Folder/File from the most recent Scene Cut split.\n"
-                             + "Clicking replaces whatever that field currently holds.\n\n"
-                             + "Most recent job:\n" + page.dc.sceneCutDescription
+                        tip: "Fill this stage's folders from the most recent Scene Cut split: in a project, "
+                             + "its chapter's folders, Output too.\n"
+                             + "Clicking replaces whatever those fields currently hold.\n\n"
+                             + (page.dc.hasProject ? "Fills:\n" : "Most recent job:\n") + page.dc.sceneCutDescription
                     }
                 },
 ChangeFoldersButton {

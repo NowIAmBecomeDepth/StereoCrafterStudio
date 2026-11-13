@@ -172,16 +172,16 @@
      may flash up for a moment while Studio checks that everything is installed; then the Studio
      window opens on the stage you used last.</p>
   <p><b>Your project folder</b> sits in the middle of the title bar, at the top of the window. Until you
-     choose one it reads <i>Select project folder…</i>: click it and pick the folder your project lives in.
-     From then on every stage keeps its input and output for each chapter inside it, and the project's name
-     shows there instead. Once you have a few projects in one folder, the same click lists them all as
-     tiles to switch between (<a href="#switch-project">Switching projects</a>; <a href="#project">section 4</a> shows how to lay a
+     choose one it reads <i>Select project folder…</i>: click it, click the <b>Add Project</b> tile, and pick
+     the folder your project lives in. From then on every stage keeps its input and output for each chapter
+     inside it, and the project's name shows there instead. Once you have a few projects, the same click
+     lists them all as tiles to switch between (<a href="#switch-project">Switching projects</a>; <a href="#project">section 4</a> shows how to lay a
      project out).</p>
   <figure class="shot">
     <div class="frame"><div class="canvas"><img src="shots/38_project_button.webp" alt="The project button in the middle of the title bar, its list of projects open"></div></div>
     <figcaption>The project button in the middle of the title bar, here on <b>Demo Project</b>, with the list
       it opens: each project a tile, its poster a picture from the project's folder.
-      <span class="btn">Open Other Project…</span> picks any folder.</figcaption>
+      The <b>Add Project</b> tile after the last poster adds any folder.</figcaption>
   </figure>
   <div class="tip"><b>A desktop shortcut</b><span>Right-click <code>StereoCrafter Studio.exe</code> and choose
      <b>Send to &gt; Desktop (create shortcut)</b> (on Windows 11, <b>Show more options</b> first) to start Studio
@@ -476,6 +476,14 @@
       too (such as <code>DM Converted LR Clips</code>), if you already use that.
       Anything else in the name is up to you: here every folder starts with the movie's initials,
       <code>DM</code>, so they're easy to tell apart from another movie's.</li>
+    <li><b>A few other names work too.</b> The Source folder can be called <code>input</code>,
+      <code>original</code> or <code>clips</code>, and the Merged folder <code>merge</code>,
+      <code>final</code>, <code>output</code> or <code>sbs</code>. These count only when the name holds no
+      other stage's word, so <code>Merged Clips</code> is still the Merged folder.</li>
+    <li><b>Folders whose name starts with <code>_</code> or <code>.</code> are never stage folders</b>, so
+      a working folder such as <code>_inpaint_resume</code> is left alone.</li>
+    <li><b>Studio guessed wrong?</b> Point that stage folder at the right one in
+      <a href="#project-folders">Project Folders</a>.</li>
     <li><b>Chapter folders are matched by their number</b>, not their whole name. Start each
       chapter folder's name with <code>Chapter</code> and its number (<code>Ch 2</code> and
       <code>C2</code> work too). If the name after the number differs a little between stages
@@ -486,7 +494,19 @@
       as Splatting's <code>hires</code> and <code>lowres</code>.</li>
   </ul>
 
-  <h3>TV shows</h3>
+  <h3 id="flat-project">A project without chapters</h3>
+  <p>A short film or a single scene doesn't need chapters. Its stage folders can hold the clips
+     directly, such as <code>LaCasa/input</code>, <code>LaCasa/depth</code>, <code>LaCasa/splat</code>,
+     <code>LaCasa/inpaint</code> and <code>LaCasa/merged</code>. Every stage's chapter list then shows
+     <b>Whole project</b>: pick it and the stage works on the stage folders themselves. A project with
+     chapter folders shows <b>Whole project</b> too when its Source folder also holds clips of its own.</p>
+  <p><b>A brand-new, empty folder</b> works as well. When you open one, <b>Project Folders</b> opens with it
+     and shows the five stage folders Studio would use (<code>Source Clips</code>, <code>DepthMaps</code>,
+     <code>Splats</code>, <code>Inpainted</code>, <code>Merged</code>). Press
+     <span class="btn">Create Missing Folders</span> to make them, or point each one at a folder you already
+     have (<a href="#project-folders">Project Folders</a>). Studio never makes them without asking.</p>
+
+  <h3 id="tv-shows">TV shows</h3>
   <p>A show has one more layer or two: seasons and episodes. Inside each episode's folder, lay out the
      stage folders exactly as for a movie:</p>
 
@@ -508,8 +528,9 @@
   <figcaption>Each episode is laid out like a movie. Number the stage folders (1. to 5.) if you like them in pipeline order; Studio goes by the word in each name.</figcaption>
 </figure>
 
-  <p>The chapter list then names each chapter with its episode, such as <b>S1E1 · Chapter 1</b>.
-     Studio counts a project as a TV show when it has a folder with <code>Episode</code> in its name
+  <p>The chapter list then names each chapter with its episode, such as <b>S1E1 · Chapter 1</b>. An
+     episode without chapter folders, its clips straight in the stage folders, is listed as
+     <b>S1E1 · Whole episode</b>. Studio counts a project as a TV show when it has a folder with <code>Episode</code> in its name
      somewhere inside. A movie kept one folder down (in a <code>Movie</code> folder, say) is still a
      movie.</p>
 
@@ -523,12 +544,14 @@
 
   <h3>Telling Studio where the project is</h3>
   <ol>
-    <li>Open <b>Settings</b> (the gear) → <b>Studio</b>, and next to <b>Set Project Folder</b> press
-        <span class="btn">Open</span>.</li>
+    <li>Click the project name in the middle of the title bar, and click the <b>Add Project</b> tile
+        after the last poster. (<b>Settings</b> (the gear) → <b>Studio</b> → <b>Set Project Folder</b>
+        does the same.)</li>
     <li>Choose the project folder itself: <code>Demo Movie</code> in the example, not one of the
         folders inside it.</li>
   </ol>
-  <p>The project's name then shows in the middle of the title bar.</p>
+  <p>The project's name then shows in the middle of the title bar, and the project stays on the list,
+     even after a restart and even when it lies outside your Projects Folder.</p>
 
   <h3 id="switch-project">Switching projects</h3>
   <p>If you keep all your projects in one folder, tell Studio where it is once: <b>Settings</b> →
@@ -545,12 +568,67 @@
         and shows mixed; or <code>Movies</code> and <code>TV Shows</code> folders inside it, each
         holding projects; or shows kept somewhere else entirely, with that folder set as the
         <b>TV Shows Folder</b> in Settings.</li>
-    <li><span class="btn">Open Other Project…</span> picks any folder, even one outside your projects
-        folder. <span class="btn">Change Projects Folder…</span> points Studio at a different one.</li>
+    <li><b>Add Project</b>, the dashed tile after the last poster, adds any folder, even one outside
+        your projects folder, and opens it. <span class="btn">Change Projects Folder…</span> points Studio
+        at a different projects folder.</li>
+    <li><b>Taking a project off the list</b>: hover its poster and click the <b>−</b> at its top-right
+        corner (or select it with the keyboard and press <kbd>Delete</kbd>). It only leaves Studio's list:
+        the folder and its files are not touched. Add it again with <b>Add Project</b> to bring it back.</li>
+    <li><b>A dimmed tile</b> is an added project whose folder Studio can't find now, such as one on a
+        drive that isn't plugged in. It can't be opened until the folder is back.</li>
+    <li><b>Hover a poster</b> to see that project's <a href="#project-folders">Project Folders</a> beside
+        the list. The panel stays while the mouse is over the poster or the panel, and closes a second
+        after it leaves both.</li>
   </ul>
   <p><b>Each project remembers where you were.</b> When you switch, every stage goes back to the
      chapter (or the folders) it last used in that project. Come back later, and DepthCrafter is still
-     on chapter 5 while Splatting is on chapter 3.</p>
+     on chapter 5 while Splatting is on chapter 3. In full, each stage takes the first of these that
+     fits:</p>
+  <ol>
+    <li>the chapter it last used in this project;</li>
+    <li>else the folders it last used in this project;</li>
+    <li>else the chapter the stages next to it in the pipeline are on;</li>
+    <li>else the project's only entry, such as <b>Whole project</b> or a single chapter;</li>
+    <li>else nothing: its chapter list reads <b>Pick a chapter</b> in amber, and
+        <span class="btn">Start</span> says <i>Pick a chapter first</i> until you pick one or set its
+        folders yourself.</li>
+  </ol>
+  <p>Folders that belong to another project are never carried over to this one. One message sums up
+     where the stages landed, such as <i>LaCasa: 4 stages on Whole project</i>.</p>
+
+  <h3 id="project-folders">Project Folders</h3>
+  <p>Project Folders shows the five stage folders Studio found for a project: <b>Source</b>,
+     <b>Depth Maps</b>, <b>Splats</b>, <b>Inpainted</b> and <b>Merged</b>, each with how many clips it
+     holds (<i>empty</i>, or <i>not made yet</i> in amber when it doesn't exist). For a TV show, pick the
+     episode at the top first. Open it by hovering a poster in the project list, with
+     <span class="btn">Project Folders…</span> under the list (for the open project), or from the chapter
+     chip in the title bar (<a href="#chapter-chip">below</a>).</p>
+  <ul>
+    <li><span class="btn">Change…</span> points a stage folder at the right one when Studio picked the wrong
+        folder or none. Every stage follows. A folder you chose shows in italics.</li>
+    <li><span class="btn">Reset</span> goes back to the folder Studio finds by its name.</li>
+    <li><span class="btn">Create Missing Folders</span> makes the stage folders that aren't there yet,
+        with the names shown.</li>
+  </ul>
+  <p>Your choices are saved in a small file inside the project folder, <code>.studio_project.json</code>,
+     so they travel with the project when you copy or move it. If Studio can't write there, it keeps
+     them in its own settings instead.</p>
+
+  <h3 id="chapter-chip">One chapter for every stage</h3>
+  <p>With a project open, a small chip just right of the project name in the title bar shows the chapter
+     every stage is on, or <i>Mixed</i> when the stages are on different chapters. Click it for the
+     <b>CHAPTER FOR EVERY STAGE</b> list: pick a chapter there and every stage moves to it at once.
+     <span class="btn">Project Folders…</span> is at the foot of that list. Each stage's own chapter list
+     can still change just that stage afterwards. (Inpainting V2 and Blend follow a pick there too, but the
+     chip doesn't count them.)</p>
+
+  <h3 id="foreign-folder">A folder from another project</h3>
+  <p>If a stage's folder field holds a folder from a different project, a small amber tag at the end of
+     the field says <b>In</b> and that project's name, such as <i>In LaCasa</i>. Click the tag to put the
+     stage back on the open project's folders. In the Depth Map Editor, clicking it clears the field so
+     <span class="btn">Browse</span> starts in the open project's folders; with a clip loaded it leaves
+     everything as it is, edits and all, and a message says whose clip it is. The tag doesn't show while
+     the folder fields are folded away.</p>
 
   <h3>Picking a chapter</h3>
   <p>Every stage's folder panel now has a chapter list at the top right. Pick a chapter, and the
@@ -567,7 +645,10 @@
   </figure>
   <p>Each stage has its own chapter choice, because you'll usually have different chapters at
      different stages: DepthCrafter can work on chapter 5 while Splatting is still on chapter 3.
-     Choose <b>Manual paths</b> at the top of the list to set the folders yourself again.</p>
+     Choose <b>Manual paths</b> at the top of the list to set the folders yourself again; editing a path by
+     hand switches back to it too. A project without chapter folders lists <b>Whole project</b>
+     (<a href="#flat-project">above</a>). To put every stage on the same chapter in one go, use the
+     <a href="#chapter-chip">chapter chip</a> in the title bar.</p>
 </section>
 
 <!-- ======================================================================== -->

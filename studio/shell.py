@@ -24,7 +24,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Property, QByteArray, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QByteArray, QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtCore import Qt
 
@@ -332,6 +332,22 @@ class StudioShell(QObject):
     # just before the project switches, with the old one: the stages hand in
     # their folders (project_memory.py)
     projectLeaving = Signal(str)
+    #: after a project switch has settled: one line on where the stages landed, for a toast
+    #: ("LaCasa: 4 stages on Whole project, Merging kept its own folders"; project_memory)
+    projectLanded = Signal(str)
+    #: the open project's stage folders changed (Project Folders panel, folders made): the
+    #: stages look again -- not a switch, nothing remembered or left
+    projectRefreshed = Signal()
+    #: projectEmpty / projectUnits / projectFolders may read differently
+    projectFoldersChanged = Signal()
+    #: (project path): a project's stage folders were changed or made -- the open one's or
+    #: another's (the project list's hover panel, 2026-11-12)
+    projectFoldersEdited = Signal(str)
+    #: a project was added to or removed from the project list (addProject / removeProject)
+    projectListChanged = Signal()
+    #: pickChapterForAll: every chaptered stage (not Scene Cut) on this chapter key
+    chapterForAll = Signal(int)
+    commonChapterChanged = Signal()
     focusWindowChanged = Signal()
     #: (id, path, size text): something too big for the Recycle Bin -- delete it for good?
     #: Main asks and answers with answerPermanentDelete (user, 2026-10-14)
@@ -354,6 +370,11 @@ class StudioShell(QObject):
         wanted = self._data.get("palette", "Graphite")
         wanted = _RENAMED_THEMES.get(wanted, wanted)
         self._palette_index = names.index(wanted) if wanted in names else 0
+        self._landings: List[tuple] = []          # (stage, kind, detail) during a switch
+        self._landing_chapters: Optional[dict] = None   # stage_chapters as the switch found them
+        self._landing_pending = False
+        self._known_cache = (0.0, None)
+        self._sync_overrides()
         app = QGuiApplication.instance()
         if app is not None:
             app.focusWindowChanged.connect(lambda *_a: self.focusWindowChanged.emit())
@@ -695,8 +716,23 @@ class StudioShell(QObject):
             # (before 2026-10-02 they were simply forgotten on a switch)
             self._data["stage_chapters"] = dict(self._project_memory(path).get("stage_chapters") or {})
             self._chapter_table = {}
+            self._chapter_units = None
+            self._sync_overrides()
             self.save()
-            self.projectChanged.emit()
+            # the stages land (project_memory): each says how, and the switch is summed
+            # up once it has settled; a stage follows its neighbours' chapters as the
+            # switch found them, not as the stages before it just landed
+            self._landings = []
+            self._landing_chapters = dict(self._data["stage_chapters"])
+            try:
+                self.projectChanged.emit()
+            finally:
+                self._landing_chapters = None
+            self.projectFoldersChanged.emit()
+            self.commonChapterChanged.emit()
+            if not self._landing_pending:
+                self._landing_pending = True
+                QTimer.singleShot(0, self._landing_settled)
 
     @Slot(str, "QVariantMap")
     def rememberStagePaths(self, stage: str, paths: dict) -> None:
@@ -734,18 +770,32 @@ class StudioShell(QObject):
         if not project or not os.path.isdir(project):
             return []
         from core.ui import chapters
-        units = chapters.find_units(project)
+        # a project with no stage folders yet is one flat unit: its stages make
+        # the folders (the default names) when they run (2026-11-12)
+        units = chapters.find_units(project) or [""]
         entries = []
         for i, unit in enumerate(units):
             base = os.path.join(project, unit).replace("\\", "/") if unit else project
-            for n, name in chapters.list_chapters(base):
+            # a flat unit (no chapter folders, or clips straight in Source) has a
+            # Whole entry too: its stage folders themselves
+            for n, name in chapters.list_entries(base):
                 key = n if unit == "" else (i + 1) * self.EPISODE_KEY + n
-                # a movie in a subfolder of its own (one unit) needs no prefix
-                label = name if unit == "" or len(units) == 1 else f"{chapters.unit_label(unit)} · {name}"
+                single = unit == "" or len(units) == 1
+                if n == chapters.WHOLE:
+                    name = chapters.WHOLE_NAME
+                    label = name if single else f"{chapters.unit_label(unit)} · Whole episode"
+                else:
+                    # a movie in a subfolder of its own (one unit) needs no prefix
+                    label = name if single else f"{chapters.unit_label(unit)} · {name}"
                 self._chapter_table[key] = (unit, n, name, label)
                 entries.append({"num": key, "name": label})
         self._chapter_units = units
         return entries
+
+    def _units(self) -> List[str]:
+        if getattr(self, "_chapter_units", None) is None:
+            self._build_chapter_table()
+        return getattr(self, "_chapter_units", None) or [""]
 
     def _chapter_entry(self, key: int):
         if key not in getattr(self, "_chapter_table", {}):
@@ -818,24 +868,44 @@ class StudioShell(QObject):
           their folders are projects, of that kind;
         * the optional TV Shows Folder: every folder in it is a show.
 
-        poster: a picture in the project folder, as a URL, or ""."""
+        poster: a picture in the project folder, as a URL, or "".
+        Plus the folders added on their own (Add Project, 2026-11-12: added True; missing
+        True when the folder isn't there now), less the ones removed from the list
+        (hidden_projects)."""
         from core.ui import chapters
         found: Dict[str, dict] = {}
+        hidden = set(self._pkey(p) for p in self._path_list("hidden_projects"))
+        added = self._path_list("added_projects")
+        added_keys = set(self._pkey(p) for p in added)
 
-        def add(folder: str, name: str, show) -> None:
-            path = os.path.join(folder, name).replace("\\", "/")
+        def add(path: str, name: str, show, missing: bool = False) -> None:
             key = path.lower()
-            if key in found:
+            if key in found or key in hidden:
                 return
             if show is None:
                 try:
-                    show = chapters.is_show(path)
+                    show = chapters.is_show(path) if not missing else False
                 except Exception:
                     show = False
             # the pictures here; a video's cover art (an ffprobe, maybe an ffmpeg, per
             # video on its first look) is read after, off the UI thread (bug sweep A2)
-            found[key] = {"name": name, "path": path, "show": bool(show), "poster": self._poster(path, video=False)}
+            found[key] = {"name": name, "path": path, "show": bool(show),
+                          "poster": "" if missing else self._poster(path, video=False),
+                          "added": key in added_keys, "missing": bool(missing)}
 
+        for path, name, show in self._root_folders():
+            add(path, name, show)
+        for path in added:
+            add(path, os.path.basename(path.rstrip("/")) or path, None, missing=not os.path.isdir(path))
+        bare = [p["path"] for p in found.values() if not p["poster"] and not p["missing"]]
+        if bare:
+            threading.Thread(target=self._find_video_posters, args=(bare,), name="project-posters",
+                             daemon=True).start()
+        return sorted(found.values(), key=lambda p: chapters._natural(p["name"]))
+
+    def _root_folders(self):
+        """(path, name, show or None for "look") for every folder the Projects / TV Shows
+        folders hold as a project -- hidden ones too."""
         root = str(self._pref("projects_root", "") or "")
         if root and os.path.isdir(root):
             for name in self._subfolders(root):
@@ -843,18 +913,89 @@ class StudioShell(QObject):
                 if low in self.MOVIE_FOLDERS or low in self.SHOW_FOLDERS:
                     sub = os.path.join(root, name)
                     for inner in self._subfolders(sub):
-                        add(sub, inner, low in self.SHOW_FOLDERS)
+                        yield os.path.join(sub, inner).replace("\\", "/"), inner, low in self.SHOW_FOLDERS
                 else:
-                    add(root, name, None)
+                    yield os.path.join(root, name).replace("\\", "/"), name, None
         shows = str(self._pref("shows_root", "") or "")
         if shows and os.path.isdir(shows):
             for name in self._subfolders(shows):
-                add(shows, name, True)
-        bare = [p["path"] for p in found.values() if not p["poster"]]
-        if bare:
-            threading.Thread(target=self._find_video_posters, args=(bare,), name="project-posters",
-                             daemon=True).start()
-        return sorted(found.values(), key=lambda p: chapters._natural(p["name"]))
+                yield os.path.join(shows, name).replace("\\", "/"), name, True
+
+    # -- projects added on their own / removed from the list (2026-11-12) ----
+    # studio.json "added_projects": folders added with the project list's Add Project tile
+    # (anywhere, listed whether or not they lie in the Projects Folder); "hidden_projects":
+    # folders in the Projects / TV Shows folders taken off the list. Both forward slashes.
+
+    def _pkey(self, path: str) -> str:
+        """A folder's key: case and slashes aside."""
+        p = str(path or "").strip()
+        return self._project_key(os.path.normpath(p)) if p else ""
+
+    def _path_list(self, key: str) -> List[str]:
+        return [str(p) for p in (self._data.get(key) or []) if isinstance(p, str) and p.strip()]
+
+    @staticmethod
+    def _clean_path(path: str) -> str:
+        p = os.path.normpath(str(path or "").strip()).replace("\\", "/")
+        return p if p.endswith(":/") else p.rstrip("/")
+
+    @Slot(str, result="QVariantMap")
+    def addProject(self, path: str) -> dict:
+        """Add a folder to the project list, for good: {path (as listed), show, added (new
+        to the list)}, or {} when it isn't a folder. One listed already (any case or
+        slashes) is just returned; one removed from the list comes back."""
+        if not str(path or "").strip() or not os.path.isdir(str(path)):
+            return {}
+        from core.ui import chapters
+        clean = self._clean_path(path)
+        key = self._pkey(clean)
+        hidden = self._path_list("hidden_projects")
+        kept = [p for p in hidden if self._pkey(p) != key]
+        changed = len(kept) != len(hidden)
+        self._data["hidden_projects"] = kept
+        listed, show = None, None
+        for p, _name, s in self._root_folders():
+            if self._pkey(p) == key:
+                listed, show = p, s
+                break
+        if listed is None:
+            listed = next((p for p in self._path_list("added_projects") if self._pkey(p) == key), None)
+        new = listed is None
+        if new:
+            listed = clean
+            self._data["added_projects"] = self._path_list("added_projects") + [clean]
+        if show is None:
+            try:
+                show = chapters.is_show(listed)
+            except Exception:
+                show = False
+        if new or changed:
+            self._known_cache = (0.0, None)
+            self.save()
+            self.projectListChanged.emit()
+        return {"path": listed, "show": bool(show), "added": new}
+
+    @Slot(str, result=bool)
+    def removeProject(self, path: str) -> bool:
+        """Take a project off the list -- nothing on disk is touched: an added one is
+        forgotten, one in the Projects / TV Shows folders hidden. The open project stays open."""
+        key = self._pkey(path)
+        if not key:
+            return False
+        added = self._path_list("added_projects")
+        kept = [p for p in added if self._pkey(p) != key]
+        changed = len(kept) != len(added)
+        self._data["added_projects"] = kept
+        found = next((p for p, _n, _s in self._root_folders() if self._pkey(p) == key), None)
+        hidden = self._path_list("hidden_projects")
+        if found is not None and not any(self._pkey(p) == key for p in hidden):
+            self._data["hidden_projects"] = hidden + [found]
+            changed = True
+        if changed:
+            self._known_cache = (0.0, None)
+            self.save()
+            self.projectListChanged.emit()
+        return changed
 
     def _find_video_posters(self, paths: List[str]) -> None:
         """listProjects' projects with no picture: their videos' cover art,
@@ -889,9 +1030,7 @@ class StudioShell(QObject):
         if entry is not None:
             unit = entry[0]
             return (os.path.join(project, unit) if unit else project).replace("\\", "/")
-        if getattr(self, "_chapter_units", None) is None:
-            self._build_chapter_table()
-        units = getattr(self, "_chapter_units", None) or [""]
+        units = self._units()
         if len(units) == 1:                     # a movie (in a subfolder of its own, maybe)
             return (os.path.join(project, units[0]) if units[0] else project).replace("\\", "/")
         return ""
@@ -907,7 +1046,7 @@ class StudioShell(QObject):
                 unit, n, real_name, _label = entry
                 base = os.path.join(project, unit).replace("\\", "/") if unit else project
                 paths = chapters.stage_paths(stage, base, n, real_name)
-            elif num < 0 and getattr(self, "_chapter_units", [""]) not in ([""], []):
+            elif num < 0 and project and self._units() != [""]:
                 return {}       # a show has no whole-movie Source folder: pick an episode's chapter
             else:
                 paths = chapters.stage_paths(stage, project, num, name)
@@ -920,7 +1059,15 @@ class StudioShell(QObject):
 
     @Slot(str, result="QVariantMap")
     def stageChapter(self, stage: str) -> dict:
-        saved = dict((self._data.get("stage_chapters") or {}).get(stage) or {})
+        return self._resolve_saved(dict((self._data.get("stage_chapters") or {}).get(stage) or {}))
+
+    def landingChapter(self, stage: str) -> dict:
+        """`stage`'s saved chapter in this project as the switch found it (while the
+        stages land; their current one otherwise) -- what a stage follows."""
+        table = self._landing_chapters if self._landing_chapters is not None else self._data.get("stage_chapters")
+        return self._resolve_saved(dict((table or {}).get(stage) or {}))
+
+    def _resolve_saved(self, saved: dict) -> dict:
         if "unit" in saved:             # a show's chapter: its key may have moved
             if not getattr(self, "_chapter_table", None):
                 self._build_chapter_table()
@@ -944,6 +1091,400 @@ class StudioShell(QObject):
             chapters.pop(stage, None)
         self._data["stage_chapters"] = chapters
         self.save()
+        self.commonChapterChanged.emit()
+
+    # -- where the stages landed on a switch (project_memory, 2026-11-12) ----
+
+    @Slot(str, str, str)
+    def noteLanding(self, stage: str, kind: str, detail: str = "") -> None:
+        """A stage's landing on the project just switched to: kind "chapter" (its own),
+        "folders" (its own), "followed" (detail: "<Stage>: <chapter>"), "only" (the
+        project's one entry), "needs" (no chapter yet), "kept" (left as it was)."""
+        self._landings.append((str(stage), str(kind), str(detail or "")))
+
+    def _landing_settled(self) -> None:
+        self._landing_pending = False
+        notes, self._landings = self._landings, []
+        project = self._get_project()
+        if not project or not notes:
+            return
+        from studio.project_memory import summary
+        text = summary(os.path.basename(project.rstrip("/")), notes)
+        if text:
+            self.projectLanded.emit(text)
+
+    # -- one chapter for every stage, and the title bar's chip ----------------
+
+    @Slot(int)
+    def pickChapterForAll(self, num: int) -> None:
+        """Every chaptered stage (Scene Cut keeps its whole movie) quietly on `num`."""
+        self.chapterForAll.emit(int(num))
+        self.commonChapterChanged.emit()
+
+    def registerChapterStage(self, stage: str) -> None:
+        """A stage that follows the project (project_memory.attach)."""
+        if not hasattr(self, "_chapter_stages"):
+            self._chapter_stages = []
+        if stage not in self._chapter_stages:
+            self._chapter_stages.append(stage)
+
+    def _common_chapter(self) -> str:
+        project = self._get_project()
+        if not project:
+            return ""
+        try:
+            if not getattr(self, "_chapter_table", None):
+                self._build_chapter_table()
+        except Exception:
+            return ""
+        if not self._chapter_table:
+            return ""
+        stages = [s for s in getattr(self, "_chapter_stages", []) if s != "scenecut"]
+        nums = [self.stageChapter(s).get("num") for s in stages]
+        picked = [n for n in nums if isinstance(n, int) and n in self._chapter_table]
+        if not picked:
+            return ""
+        if len(picked) == len(nums) and len(set(picked)) == 1:
+            return self._chapter_table[picked[0]][3]
+        return "Mixed"
+
+    #: The chapter every stage is on ("Chapter 6", "Whole project"); "Mixed" when they
+    #: differ; "" with no project, no chapters, or no stage on one.
+    commonChapter = Property(str, _common_chapter, notify=commonChapterChanged)
+
+    @Slot(str, result=int)
+    def chapterAt(self, path: str) -> int:
+        """The open project's chapter key `path` lies in (any folder within it, or a flat
+        unit's stage folder), or -1."""
+        project = self._get_project()
+        if not project or not path:
+            return -1
+        try:
+            from core.ui import chapters
+            at = chapters.locate_chapter(str(path))
+            if not at:
+                return -1
+            unit_abs, n, _name = at
+            proj = os.path.normpath(project).replace("\\", "/").rstrip("/").lower()
+            u = os.path.normpath(unit_abs).replace("\\", "/").rstrip("/").lower()
+            if u == proj:
+                rel = ""
+            elif u.startswith(proj + "/"):
+                rel = u[len(proj) + 1:]
+            else:
+                return -1
+            if not getattr(self, "_chapter_table", None):
+                self._build_chapter_table()
+            for key, (unit, num, _nm, _label) in self._chapter_table.items():
+                if num == n and unit.replace("\\", "/").lower() == rel:
+                    return key
+        except Exception:
+            logger.debug("Could not place %s in the project", path, exc_info=True)
+        return -1
+
+    # -- which project a folder belongs to ------------------------------------
+
+    def _known_projects(self) -> Dict[str, str]:
+        """{project key: its name} for every project Studio knows: those it has
+        remembered stages for, and the folders in the Projects / TV Shows folders."""
+        import time
+        now = time.monotonic()
+        stamp, for_project, cached = self._known_cache if len(self._known_cache) == 3 else (0.0, None, None)
+        if cached is not None and for_project == self._get_project() and now - stamp < 2.0:
+            return cached
+        found: Dict[str, str] = {}
+
+        def add(folder: str, name: str) -> None:
+            found.setdefault(self._project_key(os.path.join(folder, name)), name)
+
+        root = str(self._pref("projects_root", "") or "")
+        if root and os.path.isdir(root):
+            for name in self._subfolders(root):
+                low = name.strip().lower()
+                if low in self.MOVIE_FOLDERS or low in self.SHOW_FOLDERS:
+                    sub = os.path.join(root, name)
+                    for inner in self._subfolders(sub):
+                        add(sub, inner)
+                else:
+                    add(root, name)
+        shows = str(self._pref("shows_root", "") or "")
+        if shows and os.path.isdir(shows):
+            for name in self._subfolders(shows):
+                add(shows, name)
+        # the ones added on their own (2026-11-12); a removed one stays known
+        for path in self._path_list("added_projects"):
+            found.setdefault(self._pkey(path), os.path.basename(path.rstrip("/")) or path)
+        for key in (self._data.get("project_memory") or {}):
+            if key and key not in found:
+                found[key] = self._real_name(key)
+        self._known_cache = (now, self._get_project(), found)
+        return found
+
+    @staticmethod
+    def _real_name(key: str) -> str:
+        """A remembered project's folder name as it is on disk (the key is lower case)."""
+        parent, base = os.path.split(key.rstrip("/"))
+        try:
+            return next((n for n in os.listdir(parent) if n.lower() == base.lower()), base)
+        except OSError:
+            return base
+
+    @Slot(str, result=str)
+    def foreignProject(self, path: str) -> str:
+        """The name of ANOTHER project `path` lies in; "" when no project is open, the
+        path is empty, inside the open project, or outside every known project (a
+        scratch drive's folder is a fine manual path)."""
+        project = self._get_project()
+        if not project or not str(path or "").strip():
+            return ""
+        cur = self._project_key(os.path.normpath(project))
+        p = self._project_key(os.path.normpath(str(path)))
+        if p == cur or p.startswith(cur + "/"):
+            return ""
+        best, name = "", ""
+        for key, label in self._known_projects().items():
+            if key == cur or cur.startswith(key + "/"):
+                continue                    # the open project, or a folder holding it
+            if (p == key or p.startswith(key + "/")) and len(key) > len(best):
+                best, name = key, label
+        return name
+
+    @Slot(QObject, result="QVariantList")
+    def projectFieldKeys(self, owner) -> List[str]:
+        """The settings keys of `owner`'s project folder fields -- the ones its chapter
+        picker fills (project_memory.attach) -- for the fields' out-of-project tag."""
+        info = getattr(owner, "_landing_info", None)
+        return [str(k) for k in info[1]] if info else []
+
+    # -- the Project Folders panel (2026-11-12) -------------------------------
+
+    def _sync_overrides(self) -> None:
+        """The folder choices kept here (a unit folder not writable) handed to
+        core.ui.chapters, which reads the rest from each unit's own file: every
+        project's (the project list's hover panel shows any project, 2026-11-12), the
+        open project's last so its own win where two projects share a unit."""
+        try:
+            from core.ui import chapters
+            project = self._get_project()
+            open_key = self._project_key(project) if project else ""
+            memory = self._data.get("project_memory") or {}
+            mapping = {}
+            for key in sorted(memory, key=lambda k: k == open_key):
+                mem = memory.get(key)
+                folders = dict(mem.get("folders") or {}) if isinstance(mem, dict) else {}
+                where = project if (project and key == open_key) else key
+                for rel, roles in folders.items():
+                    base = os.path.join(where, rel).replace("\\", "/") if rel else where
+                    mapping[base] = dict(roles or {})
+            chapters.set_extra_overrides(mapping)
+        except Exception:
+            logger.debug("Could not hand over the project's folder choices", exc_info=True)
+
+    def _target(self, project: str = "") -> tuple:
+        """(project folder, is it the open one) for the panel's slots: `project`, or
+        the open project when "" ."""
+        cur = self._get_project()
+        if not str(project or "").strip():
+            return cur, bool(cur)
+        p = self._clean_path(project)
+        if cur and self._pkey(p) == self._pkey(cur):
+            return cur, True
+        return p, False
+
+    def _unit_base(self, unit: str, project: Optional[str] = None) -> str:
+        project = self._get_project() if project is None else project
+        unit = str(unit or "").replace("\\", "/").strip("/")
+        return (os.path.join(project, unit) if unit else project).replace("\\", "/")
+
+    def _folders_changed(self, project: Optional[str] = None, is_open: bool = True) -> None:
+        """A project's stage folders changed: the open one's stages look again; another
+        project's change is only said (projectFoldersEdited), its stages aren't open."""
+        if is_open:
+            self._chapter_table = {}
+            self._chapter_units = None
+            self.projectFoldersChanged.emit()
+            self.projectRefreshed.emit()
+            self.commonChapterChanged.emit()
+        self.projectFoldersEdited.emit(str(self._get_project() if project is None else project))
+
+    ROLE_LABELS = {"source": "Source", "depth": "Depth Maps", "splats": "Splats",
+                   "inpainted": "Inpainted", "merged": "Merged"}
+    CLIP_COUNT_CAP = 999
+
+    @Slot(result="QVariantList")
+    def projectUnits(self) -> List[dict]:
+        """[{unit, label}]: the open project's units -- one ("" for the project
+        itself) for a movie, an episode each for a show."""
+        return self.projectUnitsFor("")
+
+    @Slot(str, result="QVariantList")
+    def projectUnitsFor(self, project: str) -> List[dict]:
+        """projectUnits for any project folder ("" = the open one)."""
+        project, is_open = self._target(project)
+        if not project:
+            return []
+        from core.ui import chapters
+        if is_open:
+            units = self._units()
+        elif os.path.isdir(project):
+            try:
+                units = chapters.find_units(project) or [""]
+            except Exception:
+                units = [""]
+        else:
+            return []
+        name = os.path.basename(project.rstrip("/"))
+        return [{"unit": u, "label": chapters.unit_label(u) if u else name} for u in units]
+
+    @Slot(str, result="QVariantList")
+    def projectFolders(self, unit: str) -> List[dict]:
+        """The unit's five stage folders: [{role, label, path, exists, clips, overridden}].
+        path: the folder found (or chosen), else the one the stage would make; clips:
+        media files directly in it or in its chapter folders (capped)."""
+        return self.projectFoldersFor("", unit)
+
+    @Slot(str, str, result="QVariantList")
+    def projectFoldersFor(self, project: str, unit: str) -> List[dict]:
+        """projectFolders for any project folder ("" = the open one)."""
+        project, _is_open = self._target(project)
+        if not project:
+            return []
+        from core.ui import chapters
+        base = self._unit_base(unit, project)
+        dirs = chapters.stage_dirs(base)
+        own = chapters.overrides(base)
+        out = []
+        for role in chapters.ROLES:
+            path = dirs[role]
+            out.append({"role": role, "label": self.ROLE_LABELS[role], "path": path,
+                        "exists": os.path.isdir(path), "clips": self._count_clips(path, chapters),
+                        "overridden": role in own})
+        return out
+
+    def _count_clips(self, folder: str, chapters) -> int:
+        cap = self.CLIP_COUNT_CAP
+        count = 0
+
+        def scan(path: str, sub: bool) -> None:
+            nonlocal count
+            try:
+                with os.scandir(path) as it:
+                    for entry in it:
+                        if count >= cap:
+                            return
+                        if entry.is_file():
+                            if os.path.splitext(entry.name)[1].lower() in chapters.MEDIA_EXTS:
+                                count += 1
+                        elif sub and entry.is_dir() and chapters.chapter_number(entry.name) is not None:
+                            scan(entry.path, False)
+            except OSError:
+                pass
+        scan(folder, True)
+        return min(count, cap)
+
+    @Slot(str, str, str, result=bool)
+    def setUnitFolder(self, unit: str, role: str, path: str) -> bool:
+        """The unit's `role` stage folder is `path` (any folder, made or not), kept in
+        the unit's own .studio_project.json -- or here, when that cannot be written."""
+        return self.setUnitFolderFor("", unit, role, path)
+
+    @Slot(str, str, str, str, result=bool)
+    def setUnitFolderFor(self, project: str, unit: str, role: str, path: str) -> bool:
+        """setUnitFolder for any project folder ("" = the open one); kept here under that
+        project's own key when the unit can't be written. Only the open project's
+        stages look again."""
+        from core.ui import chapters
+        project, is_open = self._target(project)
+        path = str(path or "").strip().replace("\\", "/")
+        if not project or role not in chapters.ROLES:
+            return False
+        if not path:
+            return self.clearUnitFolderFor(project, unit, role)
+        unit = str(unit or "").replace("\\", "/").strip("/")
+        base = self._unit_base(unit, project)
+        mem = self._project_memory(project).setdefault("folders", {})
+        own = dict(chapters.read_override_file(base))
+        own[role] = path
+        if chapters.write_override_file(base, own):
+            kept = mem.get(unit) or {}
+            kept.pop(role, None)
+            if not kept:
+                mem.pop(unit, None)
+        else:
+            mem.setdefault(unit, {})[role] = chapters.stored_override(base, path)
+        self.save()
+        self._sync_overrides()
+        self._folders_changed(project, is_open)
+        return True
+
+    @Slot(str, str, result=bool)
+    def clearUnitFolder(self, unit: str, role: str) -> bool:
+        """The unit's `role` stage folder found by its name again. False when the
+        unit's own file holds the choice and cannot be written."""
+        return self.clearUnitFolderFor("", unit, role)
+
+    @Slot(str, str, str, result=bool)
+    def clearUnitFolderFor(self, project: str, unit: str, role: str) -> bool:
+        """clearUnitFolder for any project folder ("" = the open one)."""
+        from core.ui import chapters
+        project, is_open = self._target(project)
+        if not project or role not in chapters.ROLES:
+            return False
+        unit = str(unit or "").replace("\\", "/").strip("/")
+        base = self._unit_base(unit, project)
+        mem = self._project_memory(project).setdefault("folders", {})
+        kept = mem.get(unit) or {}
+        kept.pop(role, None)
+        if not kept:
+            mem.pop(unit, None)
+        ok = True
+        own = dict(chapters.read_override_file(base))
+        if role in own:
+            own.pop(role)
+            ok = chapters.write_override_file(base, own)
+        self.save()
+        self._sync_overrides()
+        self._folders_changed(project, is_open)
+        return ok
+
+    @Slot(str, result=bool)
+    def createProjectFolders(self, unit: str) -> bool:
+        """Make the unit's missing stage folders, by the default names (with the
+        prefix the others share) or the ones chosen for it."""
+        return self.createProjectFoldersFor("", unit)
+
+    @Slot(str, str, result=bool)
+    def createProjectFoldersFor(self, project: str, unit: str) -> bool:
+        """createProjectFolders for any project folder ("" = the open one)."""
+        from core.ui import chapters
+        project, is_open = self._target(project)
+        if not project:
+            return False
+        base = self._unit_base(unit, project)
+        if not os.path.isdir(base):
+            return False
+        try:
+            for path in chapters.stage_dirs(base).values():
+                os.makedirs(path, exist_ok=True)
+        except OSError:
+            logger.warning("Could not make the stage folders in %s", base, exc_info=True)
+            self._folders_changed(project, is_open)
+            return False
+        self._folders_changed(project, is_open)
+        return True
+
+    def _project_empty(self) -> bool:
+        project = self._get_project()
+        if not project or not os.path.isdir(project):
+            return False
+        try:
+            from core.ui import chapters
+            return not chapters.find_units(project)
+        except Exception:
+            return False
+
+    #: The open project has no stage folders yet (offer to make them).
+    projectEmpty = Property(bool, _project_empty, notify=projectFoldersChanged)
 
     # -- small helpers QML cannot do itself ---------------------------------
 

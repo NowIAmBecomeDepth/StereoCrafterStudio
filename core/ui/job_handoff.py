@@ -53,6 +53,13 @@ STAGE_ORDER = ("scenecut", "depthcrafter", "depthedit", "splatting", "inpainting
 #: that is not optional, and takes whichever of those records is newest.
 OPTIONAL_STAGES = frozenset({"depthedit"})
 
+#: A record's maker when it is not the stage it is filed under (user,
+#: 2026-11-12): DVD and VDA record as "depthcrafter" -- the chain is the same
+#: -- with "_origin" naming the tab, so Splatting's Import says which made
+#: the maps. Only that record carries it (not inherited downstream).
+ORIGIN_KEY = "_origin"
+_ORIGIN_LABELS = {"dvd": "DVD", "vda": "VDA"}
+
 #: Stages recorded beside a chain stage rather than in the chain. Inpainting
 #: V2 does Inpainting's job: its record inherits from the stages before
 #: Inpainting, but lives under its own key, so it never stands in for V1's
@@ -123,6 +130,9 @@ def _record_job(stage: str, fields: Dict[str, Any]) -> bool:
             logger.warning("%s could not be read; kept as %s and started afresh.", _RECORD_PATH, aside)
             all_records = {}
         inherited = dict(_inherit(all_records, SIDE_STAGES.get(stage, stage)))
+        # which tab made a record (DVD / VDA record as DepthCrafter) is that
+        # record's own: never carried down the chain
+        inherited.pop(ORIGIN_KEY, None)
         inherited.update({k: v for k, v in fields.items() if v not in (None, "")})
         _rebase(inherited, fields)
         inherited["_stage"] = stage
@@ -257,6 +267,28 @@ def in_project(record: Optional[Dict[str, Any]], project: str, keys) -> bool:
     return False
 
 
+#: Who says which project is open (2026-11-12): a callable Studio registers, so code with no
+#: shell -- the Depth Map Editor's engine -- offers only that project's jobs. None: no project.
+_project_provider = None
+
+
+def set_project_provider(provider) -> None:
+    """Register (or with None, drop) the callable that returns the open project's folder."""
+    global _project_provider
+    _project_provider = provider
+
+
+def current_project() -> str:
+    """The open project's folder, "" with none open or no provider registered."""
+    fn = _project_provider
+    if fn is None:
+        return ""
+    try:
+        return str(fn() or "")
+    except Exception:
+        return ""
+
+
 def resolve_subfolder(path: str, *parts: str) -> str:
     """Append `parts` to `path`, but only if the result actually exists.
 
@@ -301,8 +333,17 @@ _LABELS = {
 
 def previous_stage_label(for_stage: str) -> str:
     """Display name of the stage an import button would pull from right now."""
-    record = get_source_record(for_stage)
-    return _LABELS.get(str(record.get("_stage", "")), "") if record else ""
+    return record_label(get_source_record(for_stage))
+
+
+def record_label(record: Optional[Dict[str, Any]]) -> str:
+    """Display name of the stage (or tab: DVD, VDA) that made `record`."""
+    if not record:
+        return ""
+    origin = _ORIGIN_LABELS.get(str(record.get(ORIGIN_KEY, "") or ""))
+    if origin and record.get("_stage") == "depthcrafter":
+        return origin
+    return _LABELS.get(str(record.get("_stage", "")), "")
 
 
 def describe(record: Dict[str, Any]) -> str:

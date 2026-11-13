@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 import threading
 
 from studio.gpu_jobs import wait_for_gpu
@@ -292,7 +292,7 @@ class SceneCutController(QObject):
 
     @Slot()
     def start(self) -> None:
-        if self.is_busy():
+        if self.is_busy() or project_memory.refuse_start(self):
             return
         self.save()
         self._run += 1
@@ -468,6 +468,16 @@ class SceneCutController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # its folder was another project's and the project has no whole-movie folder for it:
+    # Start is refused until one is set (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": Scene Cut back on the open project."""
+        self.refreshChapters()
+        if self._chapter_num == -1:
+            project_memory.reland(self)
 
     #: the stage chapter saved once the user sets their own output folder
     MANUAL = {"num": -1, "name": "manual"}

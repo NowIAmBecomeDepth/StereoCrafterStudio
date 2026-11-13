@@ -178,6 +178,9 @@
     <tr><td><b>Merging</b></td><td>Ends in the format you chose: <code>_merged_full_sbs</code>,
       <code>_merged_half_sbs</code>, <code>_merged_full_sbsx</code> (cross-eye), <code>_merged_right_eye</code>,
       or <code>_merged_anaglyph</code>.</td></tr>
+    <tr><td><code>.studio_project.json</code></td><td>In the project folder (for a show, in each episode's):
+      the stage folders you chose in <b>Project Folders</b> (<a href="part1.html#project-folders">Part 1</a>),
+      so they travel with the project. Made when you first change one.</td></tr>
   </table>
 
   <h3>Beside your clips</h3>
@@ -228,7 +231,16 @@
       <b>StereoCrafter Studio</b> or <b>python</b> and end it, then start Studio again.</td></tr>
     <tr><td><b>The chapter list is empty</b></td><td>The project folder isn't laid out the way Studio
       expects: check the stage folders' names and that the chapter folders start with
-      <code>Chapter</code> and a number (<a href="part1.html#project">Part 1</a>).</td></tr>
+      <code>Chapter</code> and a number (<a href="part1.html#project">Part 1</a>). Hover the project's poster
+      to see which stage folders Studio found, and fix them in
+      <a href="part1.html#project-folders">Project Folders</a>.</td></tr>
+    <tr><td><b>A stage shows another project's folders</b></td><td>The field then carries an amber
+      <b>In</b> tag with the other project's name. Click the tag to put the stage back on the open project's
+      folders, or pick a chapter in the stage's chapter list. If the stage still lands on the wrong folders,
+      check them in <a href="part1.html#project-folders">Project Folders</a> (<a href="part1.html#foreign-folder">Part 1</a>).</td></tr>
+    <tr><td><b>A chapter list reads "Pick a chapter"</b></td><td>That stage has no chapter or folders in this
+      project yet, so <span class="btn">Start</span> waits. Pick a chapter, or set its folders yourself
+      (<a href="part1.html#switch-project">Part 1</a>).</td></tr>
     <tr><td><b>A stage says there are no clips</b></td><td>They may all be in its
       <code>finished</code> folder already. <b>Restore Finished</b> in the stage's File group brings them
       back.</td></tr>

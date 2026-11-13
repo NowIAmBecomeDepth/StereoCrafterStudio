@@ -37,23 +37,42 @@ ComboBox {
         return 0
     }
     onActivated: (i) => { dc.pickChapter(entries[i].num); picked(entries[i].num) }
+    // On the project with no chapter and no folders yet (project_memory, 2026-11-12):
+    // it says so, in amber, until a chapter is picked or a folder set
+    // (read on chapterChanged, not bound: reading it can settle the flag, which says
+    // chapterChanged again -- a binding loop)
+    property bool needs: false
+    function lookNeeds() { needs = !!dc && !!dc.needsChapter }
+    onDcChanged: lookNeeds()
+    Component.onCompleted: lookNeeds()
+    Connections {
+        target: box.dc
+        ignoreUnknownSignals: true
+        function onChapterChanged() { Qt.callLater(box.lookNeeds) }
+    }
+    displayText: needs ? "Pick a chapter" : currentText
 
     // Studio's own tooltip (user, 2026-10-02: Qt's attached one was black, and could run off the window); not while the list is open
     HoverTip {
-        tip: box.popup.visible ? "" : "Point this stage at one chapter of the movie. Studio finds the chapter's folder in each "
+        tip: box.popup.visible ? "" : (box.needs ? "This stage has no folders in this project yet. Pick a chapter here, "
+                                                   + "or set its folders by hand.\n\n" : "")
+             + "Point this stage at one chapter of the movie. Studio finds the chapter's folder in each "
              + "stage folder of the project and fills Input and Output from them.\n\n"
+             + "\"Whole project\" is a project whose stage folders hold the clips directly, with no chapter folders.\n\n"
              + "\"Manual paths\" leaves the fields as you set them. Editing a path by hand switches back to it."
     }
 
     contentItem: Row {
         leftPadding: 10
         spacing: 8
-        Icon { glyph: Theme.icon.project; size: 13; color: Theme.accentInk; anchors.verticalCenter: parent.verticalCenter }
+        Icon { glyph: box.needs ? Theme.icon.warning : Theme.icon.project; size: 13
+               color: box.needs ? Theme.warning : Theme.accentInk; anchors.verticalCenter: parent.verticalCenter }
         Text {
+            objectName: "chapterPickerText"
             anchors.verticalCenter: parent.verticalCenter
             width: box.width - 64
             text: box.displayText
-            color: Theme.fg
+            color: box.needs ? Theme.warning : Theme.fg
             font: box.font
             elide: Text.ElideRight
         }
@@ -69,9 +88,10 @@ ComboBox {
     }
     background: Rectangle {
         radius: 16
-        color: box.hovered ? Theme.alpha(Theme.accent, 0.16) : Theme.alpha(Theme.accent, 0.1)
+        readonly property color tone: box.needs ? Theme.warning : Theme.accent
+        color: box.hovered ? Theme.alpha(tone, 0.16) : Theme.alpha(tone, 0.1)
         border.width: 1
-        border.color: Theme.alpha(Theme.accent, box.popup.visible ? 0.8 : 0.4)
+        border.color: Theme.alpha(tone, box.popup.visible ? 0.8 : box.needs ? 0.6 : 0.4)
         Behavior on color { ColorAnimation { duration: Theme.dur(140) } }
     }
     delegate: ItemDelegate {

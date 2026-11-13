@@ -61,15 +61,21 @@ want = {"inpainted_folder": m("Inpainted"), "original_folder": m("Source Clips")
 check("...it fills Inpainted, Original, Mask and Output from the movie's chapter 6", got == want, got)
 check("...nothing of the show's", "My Show" not in "".join(got.values()))
 
+# 2026-11-12: an Import no longer vanishes when the last job was another project's -- it offers
+# the open project's own chapter (here the show's one), and never the other project's folders
 shell.setProperty("projectFolder", f(tmp / "Conversions" / "My Show")); pump(0.4)
-check("show picked: Import from Inpainting hidden (the job was the movie's)", mg.property("importDescription") == "")
-before = {k: mg._map.value(k) for k in want}
+desc = mg.property("importDescription")
+check("show picked: Import from Inpainting offers the show's own chapter, not the movie's job",
+      "My Show" in desc and "My Film" not in desc, desc)
 mg.importFromInpainting(); pump(0.3)
-check("...and an Import fills nothing", {k: mg._map.value(k) for k in want} == before)
+got = {k: f(mg._map.value(k)) for k in want}
+check("...and fills every folder from the show", all("My Show" in v for v in got.values()), got)
 check("Inpainting's Import from Splatting: offered with the show picked (the last Splatting job was the show's)",
       ip.property("importDescription") != "")
 shell.setProperty("projectFolder", f(movie)); pump(0.4)
-check("...hidden with the movie picked", ip.property("importDescription") == "")
+desc = ip.property("importDescription")
+check("...with the movie picked: the movie's own chapter 6, nothing of the show's",
+      desc != "" and "My Show" not in desc, desc)
 
 h1 = hashlib.sha256(rec.read_bytes()).hexdigest() if rec.exists() else None
 print("last_jobs unchanged:", h0 == h1, flush=True)

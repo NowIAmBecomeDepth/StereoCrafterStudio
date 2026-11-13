@@ -22,7 +22,8 @@ Item {
     readonly property var vda: VDA
     readonly property var st: vda.settings
     property bool foldersOpen: false
-    readonly property bool chapterMode: vda.hasProject && vda.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: vda.hasProject && (vda.chapterNum >= 0 || vda.needsChapter)
     readonly property bool manualHidden: !!Shell.foldersHidden["vda"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
     function toggleFolders() {
@@ -133,9 +134,10 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.vda.importFromSceneCut()
                     HoverTip {
-                        tip: "Fill Input Folder/File from the most recent Scene Cut split.\n"
-                             + "Clicking replaces whatever that field currently holds.\n\n"
-                             + "Most recent job:\n" + page.vda.sceneCutDescription
+                        tip: "Fill this stage's folders from the most recent Scene Cut split: in a project, "
+                             + "its chapter's folders, Output too.\n"
+                             + "Clicking replaces whatever those fields currently hold.\n\n"
+                             + (page.vda.hasProject ? "Fills:\n" : "Most recent job:\n") + page.vda.sceneCutDescription
                     }
                 },
                 ChangeFoldersButton {

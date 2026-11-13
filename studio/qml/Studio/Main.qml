@@ -328,7 +328,8 @@ ApplicationWindow {
         fitting = true
         try {
             WinFrame.attach(win, titleBar, titleBar.maxButton,
-                            [titleBar.minButton, titleBar.closeButton, titleBar.centerButton, titleBar.nameButton])
+                            [titleBar.minButton, titleBar.closeButton, titleBar.centerButton, titleBar.nameButton,
+                             titleBar.chipButton])
         } catch (e) {
             console.warn("Custom title bar did not attach:", e)
         } finally {
@@ -457,11 +458,74 @@ ApplicationWindow {
     ProjectPicker {
         id: projectPicker
         anchorItem: titleBar.centerButton
-        onBrowse: {
+        // its Add Project tile: a folder from anywhere, kept on the list and opened (2026-11-12)
+        onAddProject: {
             projectDlg.currentFolder = Shell.pathToUrl(Shell.projectsRoot || Shell.projectFolder)
             projectDlg.open()
         }
+        holdOpen: projectDlg.opened || (projectFolders.opened && projectFolders.hoverMode)
+        panelFor: projectFolders.visible && projectFolders.hoverMode ? projectFolders.target : ""
         onChooseRoot: projectsRootDlg.open()
+        onSwitchTo: (path) => win.switchProject(path)
+        onFolders: projectFolders.openFresh(false)
+        // a poster hovered: its project's folders beside the list
+        onHoverProject: (path, tile) => projectFolders.hoverEnter(path, tile, projectPicker)
+        onHoverEnded: (tile) => projectFolders.hoverLeave(tile)
+        onClosed: if (projectFolders.hoverMode) projectFolders.close()
+    }
+    // the title bar's chapter chip: one chapter for every stage (2026-11-12)
+    ChapterChipPopup {
+        id: chapterChipPopup
+        anchorItem: titleBar.chipButton
+        onFolders: projectFolders.openFresh(false)
+    }
+    ProjectFoldersPanel {
+        id: projectFolders
+        anchorItem: titleBar.centerButton
+    }
+
+    // A project switch the user made (the project list, Add Project): ONE toast, the
+    // stages' landing summed up (Shell.projectLanded) -- or, should none come, the plain one;
+    // a project with no stage folders yet opens Project Folders, once (2026-11-12)
+    property string switchName: ""
+    function switchProject(path) {
+        const was = Shell.projectFolder
+        Shell.projectFolder = path
+        if (Shell.projectFolder === was) return
+        switchName = Shell.projectName
+        switchFallback.restart()
+    }
+    // a folder added to the project list (its Add Project tile, Settings' Set Project
+    // Folder…) and opened; the list, if open, on its tab (2026-11-12)
+    function addProject(path) {
+        const r = Shell.addProject(path)
+        if (!r || !r.path) return
+        if (projectPicker.opened) projectPicker.showProject(r.path, r.show)
+        win.switchProject(r.path)
+    }
+    function switchSettled() {
+        switchName = ""
+        if (Shell.projectEmpty) {
+            if (projectPicker.opened) projectPicker.close()
+            projectFolders.openFresh(true)
+        }
+    }
+    Timer {
+        id: switchFallback
+        interval: 400                      // once: the summary comes on the next turn of the loop
+        onTriggered: if (win.switchName !== "") {
+            Theme.toast("success", "Project set", win.switchName)
+            win.switchSettled()
+        }
+    }
+    Connections {
+        target: Shell
+        function onProjectLanded(summary) {
+            const mine = win.switchName !== ""
+            switchFallback.stop()
+            Theme.toast("success", "Project set", summary)
+            if (mine) win.switchSettled()
+        }
     }
     FolderPicker {
         id: projectsRootDlg
@@ -475,12 +539,10 @@ ApplicationWindow {
     }
     FolderPicker {
         id: projectDlg
+        objectName: "projectDlg"
         title: "Project folder (holds the Source, DepthMaps, Splats... folders -- or a show's seasons and episodes)"
         currentFolder: Shell.pathToUrl(Shell.projectFolder)
-        onAccepted: {
-            Shell.projectFolder = Shell.urlToPath(selectedFolder)
-            Theme.toast("success", "Project folder set", Shell.projectFolder)
-        }
+        onAccepted: win.addProject(Shell.urlToPath(selectedFolder))   // kept on the list; its toast: switchProject
     }
 
     // ---- v1's shell menus, now Settings sections (SettingsDialog draws them) --
@@ -591,6 +653,9 @@ ApplicationWindow {
             centerText: Shell.projectName
             centerClickable: true
             onCenterClicked: projectPicker.opened ? projectPicker.close() : projectPicker.open()
+            // the chapter every stage is on (2026-11-12)
+            chipText: Shell.commonChapter
+            onChipClicked: chapterChipPopup.opened ? chapterChipPopup.close() : chapterChipPopup.open()
             // the name opens the manual at its contents (user, 2026-10-25)
             nameClickable: true
             onNameClicked: if (!Shell.openManual(""))

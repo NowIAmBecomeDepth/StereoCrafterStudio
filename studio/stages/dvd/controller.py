@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 from PySide6.QtCore import Property, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlPropertyMap
 
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 from studio.gpu_jobs import wait_for_gpu
 from studio.outcome import Outcome, verdict
 
@@ -364,7 +364,7 @@ class DvdController(QObject):
         """The batch -- or, from Upcoming Jobs, only the clips in `only`; `test`: a Test Render."""
         from studio.clip_queue import move_pending
         from studio.stages.depthcrafter.runner import InputError, discover_sources
-        if move_pending(getattr(self, "queue", None), self.toast):
+        if project_memory.refuse_start(self) or move_pending(getattr(self, "queue", None), self.toast):
             return
         if self._thread is not None and self._thread.is_alive():
             self.toast.emit("warning", "Busy", "A DVD job is running. Please wait.")
@@ -551,13 +551,22 @@ class DvdController(QObject):
     def sceneCutDescription(self):
         return self._scene_cut_desc
 
+    def _import_plan(self):
+        """With a project open: the chapter Import from Scene Cut fills input and output from."""
+        from core.ui.job_handoff import get_source_record
+        return project_memory.import_plan(self, self._shell, STAGE, get_source_record(STAGE), ("source",),
+                                          ("scenecut",))
+
     @Slot()
     def refreshSceneCut(self) -> None:
         self._scene_cut_desc = ""
         try:
             from core.ui.job_handoff import describe, get_source_record, in_project
+            plan = self._import_plan()
             record = get_source_record(STAGE)
-            if record and record.get("source") and in_project(record, self._shell.projectFolder, ("source",)):
+            if plan:
+                self._scene_cut_desc = plan["description"]
+            elif record and record.get("source") and in_project(record, self._shell.projectFolder, ("source",)):
                 self._scene_cut_desc = describe(record) or record["source"]
         except Exception:
             logger.debug("Could not read the Scene Cut handoff", exc_info=True)
@@ -567,6 +576,11 @@ class DvdController(QObject):
     def importFromSceneCut(self) -> None:
         try:
             from core.ui.job_handoff import get_source_record, in_project
+            plan = self._import_plan()
+            if plan:                # the whole stage from one chapter of the project (2026-11-12)
+                filled = project_memory.apply_import(self, plan)
+                self._on_status(f"Imported {filled} from Scene Cut ({plan['name']}).")
+                return
             record = get_source_record(STAGE) or {}
             source = record.get("source") if in_project(record, self._shell.projectFolder, ("source",)) else None
             if source:
@@ -584,7 +598,8 @@ class DvdController(QObject):
         try:
             from core.ui.job_handoff import record_job
             record_job(STAGE, {"source": opts.get("input_dir_or_file_var") or self._map.value("input_dir_or_file_var"),
-                               "depth": opts.get("output_dir") or self._map.value("output_dir")})
+                               "depth": opts.get("output_dir") or self._map.value("output_dir"),
+                               "_origin": OWNER})
         except Exception:
             logger.debug("Could not record job handoff", exc_info=True)
 
@@ -593,6 +608,13 @@ class DvdController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this stage back on the open project."""
+        project_memory.reland(self)
 
     @Slot()
     def refreshChapters(self) -> None:

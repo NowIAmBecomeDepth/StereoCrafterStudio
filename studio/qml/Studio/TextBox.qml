@@ -16,11 +16,16 @@ TextField {
     property bool numeric: true
     property int boxWidth: 110
 
+    // one of the folders the stage's chapter picker fills: tagged when it lies in
+    // another project (ForeignFolderTag, 2026-11-12). Read once; numbers never are.
+    readonly property bool projectField: !numeric && !!owner && key !== "" && typeof Shell !== "undefined"
+                                         && Shell.projectFieldKeys(owner).indexOf(key) >= 0
+
     implicitWidth: boxWidth
     implicitHeight: Theme.rowHeight
     width: boxWidth
     leftPadding: 10
-    rightPadding: 10
+    rightPadding: foreignTag.item && foreignTag.item.visible ? foreignTag.item.width + 14 : 10
     verticalAlignment: TextInput.AlignVCenter
     color: enabled ? Theme.fg : Theme.fgFaint
     selectionColor: Theme.alpha(Theme.accent, 0.45)
@@ -42,6 +47,18 @@ TextField {
         target: box.owner
         ignoreUnknownSignals: true
         function onFieldRejected(k) { if (k === box.key) shake.restart() }
+    }
+
+    Loader {
+        id: foreignTag
+        active: box.projectField
+        x: box.width - width - 6
+        anchors.verticalCenter: parent.verticalCenter
+        sourceComponent: ForeignFolderTag {
+            path: box.store && box.key ? String(box.store[box.key]) : ""
+            owner: box.owner
+            live: box.visible
+        }
     }
 
     background: Rectangle {

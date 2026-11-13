@@ -38,6 +38,8 @@ Item {
         target: page.bl
         function onToast(kind, title, message) { Theme.toast(kind, title, message) }
     }
+    // chapter folders made on disk since: in the picker's list when the page shows
+    onVisibleChanged: if (visible) bl.refreshChapters()
 
     FolderPicker {
         id: folderDlg
@@ -65,7 +67,9 @@ Item {
                     kind: "tonal"
                     onClicked: page.bl.useSplattingFolder()
                     HoverTip { tip: "Use Splatting's Input Depth Maps folder." }
-                }
+                },
+                // the open project's chapter: its Depth Maps folder (2026-11-12)
+                ChapterPicker { objectName: "blendChapterPicker"; visible: page.bl.hasProject; dc: page.bl }
             ]
             FieldRow {
                 label: "Depth Maps Folder"

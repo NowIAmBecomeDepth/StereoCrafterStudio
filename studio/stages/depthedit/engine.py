@@ -848,7 +848,11 @@ class DepthEditEngine:
         try:
             from core.ui.job_handoff import get_record
 
-            return get_record("depthcrafter") or {}
+            record = get_record("depthcrafter") or {}
+            from core.ui.job_handoff import current_project, in_project  # v2: the open project's only
+
+            project = current_project()
+            return record if not project or in_project(record, project, ("source", "depth")) else {}
         except Exception:
             return {}
 
@@ -856,7 +860,10 @@ class DepthEditEngine:
     def _pick_from_depthcrafter(self) -> None:
         record = self._depthcrafter_record()
         if not record.get("source"):
-            messagebox.showinfo("Depth Map Editor", "No finished DepthCrafter job is recorded yet.",
+            from core.ui.job_handoff import current_project  # v2: says "in this project" with one open
+
+            messagebox.showinfo("Depth Map Editor", "No finished DepthCrafter job is recorded yet"
+                                + (" in this project." if current_project() else "."),
                                 parent=self.winfo_toplevel())
             return
         from core.ui.job_handoff import resolve_subfolder

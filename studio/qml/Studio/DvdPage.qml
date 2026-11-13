@@ -22,7 +22,8 @@ Item {
     readonly property var dvd: DVD
     readonly property var st: dvd.settings
     property bool foldersOpen: false
-    readonly property bool chapterMode: dvd.hasProject && dvd.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: dvd.hasProject && (dvd.chapterNum >= 0 || dvd.needsChapter)
     readonly property bool manualHidden: !!Shell.foldersHidden["dvd"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
     function toggleFolders() {
@@ -126,9 +127,10 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.dvd.importFromSceneCut()
                     HoverTip {
-                        tip: "Fill Input Folder/File from the most recent Scene Cut split.\n"
-                             + "Clicking replaces whatever that field currently holds.\n\n"
-                             + "Most recent job:\n" + page.dvd.sceneCutDescription
+                        tip: "Fill this stage's folders from the most recent Scene Cut split: in a project, "
+                             + "its chapter's folders, Output too.\n"
+                             + "Clicking replaces whatever those fields currently hold.\n\n"
+                             + (page.dvd.hasProject ? "Fills:\n" : "Most recent job:\n") + page.dvd.sceneCutDescription
                     }
                 },
                 ChangeFoldersButton {

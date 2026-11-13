@@ -37,7 +37,8 @@ Item {
     // A picked chapter fills every path, so the rows are put away (v1's
     // collapse); Change Folders brings them back without leaving it.
     property bool foldersOpen: false
-    readonly property bool chapterMode: sp.hasProject && sp.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: sp.hasProject && (sp.chapterNum >= 0 || sp.needsChapter)
     // Manual paths: put away by Hide Folders, remembered (user, 2026-09-30)
     readonly property bool manualHidden: !!Shell.foldersHidden["splatting"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
@@ -474,10 +475,11 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.sp.importFromPrevious()
                     HoverTip {
-                        tip: "Fill Input Source Clips and Input Depth Maps from the most recent completed "
-                             + page.sp.importOrigin + " job -- whichever ran last, on this machine. There is "
-                             + "no picker: to use an older job, set the folders by hand.\n\nClicking replaces "
-                             + "whatever those two fields currently hold.\n\nMost recent job:\n"
+                        tip: "Fill this stage's folders from the most recent completed "
+                             + page.sp.importOrigin + " job -- whichever ran last, on this machine: in a project, "
+                             + "its chapter's folders, Output Splatted too. There is no picker: to use an older "
+                             + "job, set the folders by hand.\n\nClicking replaces whatever those fields currently "
+                             + "hold.\n\n" + (page.sp.hasProject ? "Fills:\n" : "Most recent job:\n")
                              + page.sp.importDescription
                     }
                 },

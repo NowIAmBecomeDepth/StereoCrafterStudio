@@ -10,13 +10,18 @@ Item {
     id: host
     width: 400
 
+    objectName: "toastHost"
     ListModel { id: toasts }
     property int serial: 0
+    // the last one asked for (checks: one toast per project switch)
+    property string lastTitle: ""
+    property string lastMessage: ""
     // how far down the stack reaches (GlassesFreeView: a hole in the woven preview)
     readonly property real stackHeight: toasts.count > 0 ? Math.min(height, list.contentHeight) : 0
     Component.onCompleted: Theme.toastHost = host
 
     function push(kind, title, message) {
+        lastTitle = title; lastMessage = message
         toasts.insert(0, { kind: kind, title: title, message: message, uid: ++serial })
         if (toasts.count > 5) toasts.remove(toasts.count - 1)
     }

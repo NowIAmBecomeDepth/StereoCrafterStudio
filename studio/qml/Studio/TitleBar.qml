@@ -36,6 +36,12 @@ Item {
     property bool nameClickable: false
     signal nameClicked()
     readonly property alias nameButton: nameBtn
+    // Main (2026-11-12): a chip right of the project name, the chapter every stage is on
+    // (Shell.commonChapter); "" hides it, and so does a window too narrow for it (it gives
+    // way before the name does). Client area too (Main hands chipButton to WinFrame).
+    property string chipText: ""
+    signal chipClicked()
+    readonly property alias chipButton: chip
 
     implicitHeight: 32
 
@@ -181,6 +187,50 @@ Item {
         HoverTip {
             tip: bar.centerClickable ? (centre.empty ? "Pick the project folder: a movie's, or a show's (its seasons and episodes are found inside)."
                                                      : "The project: click to pick another project folder.") : ""
+        }
+    }
+
+    // The chapter chip, just right of the project name
+    Item {
+        id: chip
+        objectName: "titleChapterChip"
+        readonly property real gap: 6
+        width: Math.min(chipLabel.implicitWidth + 22, 200)
+        height: 22
+        x: centre.x + centre.width + gap
+        anchors.verticalCenter: parent.verticalCenter
+        // shown only while it clears the caption buttons
+        visible: bar.chipText !== "" && centre.visible && !centre.empty
+                 && x + width <= bar.width - buttons.width - 16
+
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: chipTap.pressed ? Theme.alpha(Theme.accent, 0.26)
+                   : chipHover.hovered ? Theme.alpha(Theme.accent, 0.18) : Theme.alpha(Theme.accent, 0.1)
+            border.width: 1
+            border.color: Theme.alpha(Theme.accent, chipHover.hovered ? 0.7 : 0.4)
+            Behavior on color { ColorAnimation { duration: Theme.dur(120) } }
+        }
+        Text {
+            id: chipLabel
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, chip.width - 18)
+            text: bar.chipText
+            elide: Text.ElideRight
+            color: bar.windowActive ? Theme.accentInk : Theme.fgFaint
+            font.family: Theme.bodyFont
+            font.pixelSize: 12
+            font.italic: bar.chipText === "Mixed"
+        }
+        HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: chipTap; onTapped: bar.chipClicked() }
+        HoverTip {
+            tip: bar.chipText === "Mixed"
+                 ? "The stages are on different chapters. Click to put every stage on one chapter; each stage's "
+                   + "own chapter picker can still change just that stage."
+                 : "One chapter for every stage. Click to pick another; each stage's own chapter picker can "
+                   + "still change just that stage."
         }
     }
 

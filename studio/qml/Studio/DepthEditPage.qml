@@ -208,13 +208,30 @@ Item {
     component Field: TextField {
         id: fld
         property string varName
+        // a clip / map / output path: tagged "In <other>" when it lies in another project (2026-11-12)
+        property bool projectField: false
         implicitHeight: Theme.rowHeight
         text: page.s[varName] !== undefined ? String(page.s[varName]) : ""
         color: Theme.fg
         font.family: Theme.bodyFont
         font.pixelSize: Theme.bodySize
+        rightPadding: foreignTag.item && foreignTag.item.visible ? foreignTag.item.width + 14 : padding
         background: Rectangle { radius: 6; color: Theme.field; border.width: 1; border.color: fld.activeFocus ? Theme.accent : Theme.border }
         onEditingFinished: if (text !== String(page.s[varName] || "")) page.de.setVar(varName, text)
+        Loader {
+            id: foreignTag
+            active: fld.projectField
+            x: fld.width - width - 6
+            anchors.verticalCenter: parent.verticalCenter
+            // its click never re-points a loaded clip (DepthEdit.useProjectFolders: a toast says whose it is)
+            sourceComponent: ForeignFolderTag {
+                path: fld.text
+                owner: page.de
+                live: fld.visible
+                clickTip: page.s.hasClip ? "The loaded clip stays as it is, edits and all."
+                                         : "Click to clear it: Browse then starts in " + Shell.projectName + "'s folders."
+            }
+        }
     }
     component VarCheck: AnimCheck {
         property string varName
@@ -307,11 +324,14 @@ Item {
             Layout.fillWidth: true
             spacing: 8
             Caption { text: "Source video:" }
-            Field { varName: "rgb_path"; Layout.fillWidth: true; HoverTip { tip: page.help("rgb_path") } }
-            AccentButton { text: "Browse..."; kind: "outline"; onClicked: rgbDlg.open() }
+            Field { varName: "rgb_path"; projectField: true; Layout.fillWidth: true; HoverTip { tip: page.help("rgb_path") } }
+            // the dialogs start in the open project's folders when the field is empty or another project's
+            AccentButton { text: "Browse..."; kind: "outline"
+                           onClicked: { rgbDlg.currentFolder = Shell.pathToUrl(page.de.dialogFolder("rgb_path")); rgbDlg.open() } }
             Caption { text: "Depth map:"; Layout.leftMargin: 8 }
-            Field { varName: "depth_path"; Layout.fillWidth: true; HoverTip { tip: page.help("depth_path") } }
-            AccentButton { text: "Browse..."; kind: "outline"; onClicked: depthDlg.open() }
+            Field { varName: "depth_path"; projectField: true; Layout.fillWidth: true; HoverTip { tip: page.help("depth_path") } }
+            AccentButton { text: "Browse..."; kind: "outline"
+                           onClicked: { depthDlg.currentFolder = Shell.pathToUrl(page.de.dialogFolder("depth_path")); depthDlg.open() } }
             Btn { objectName: "deLoad"; op: "_load_clip"; text: "Load Clip"; kind: "filled"; tip: page.help("load_clip"); Layout.leftMargin: 6 }
             // the loaded map again at the source's size, layers kept (user, 2026-10-05)
             AccentButton {
@@ -1935,8 +1955,9 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
                         Caption { text: "Folder:" }
-                        Field { varName: "output_dir"; Layout.fillWidth: true; HoverTip { tip: page.help("output_dir") } }
-                        AccentButton { text: "Browse..."; kind: "outline"; onClicked: outDlg.open() }
+                        Field { varName: "output_dir"; projectField: true; Layout.fillWidth: true; HoverTip { tip: page.help("output_dir") } }
+                        AccentButton { text: "Browse..."; kind: "outline"
+                                       onClicked: { outDlg.currentFolder = Shell.pathToUrl(page.de.dialogFolder("output_dir")); outDlg.open() } }
                     }
                     VarCheck { varName: "handoff"; text: "Offer the result to Splatting's import button"; tip: page.help("send_to_splatting") }
                     VarCheck { objectName: "deRenderHires"; varName: "render_hires"; text: "Render at source resolution"; tip: page.help("render_hires") }

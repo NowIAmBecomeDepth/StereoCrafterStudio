@@ -12,6 +12,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
 from studio.stages.inpainting import settings as IS
 from studio.stages.merging import preview_engine as PE
 

@@ -40,7 +40,8 @@ Item {
     property bool foldersOpen: false
     // Preview Scale's Fit, as Splatting's (user, 2026-10-18: the default): on until a percentage is picked
     property bool previewFitOn: true
-    readonly property bool chapterMode: mg.hasProject && mg.chapterNum >= 0
+    // (no chapter yet in the project, 2026-11-12: folded too -- the picker says "Pick a chapter")
+    readonly property bool chapterMode: mg.hasProject && (mg.chapterNum >= 0 || mg.needsChapter)
     // Manual paths: put away by Hide Folders, remembered (user, 2026-09-30)
     readonly property bool manualHidden: !!Shell.foldersHidden["merging"]
     readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
@@ -294,12 +295,11 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.mg.importFromInpainting()
                     HoverTip {
-                        tip: "Fill the Inpainted, Original and Mask folders from the most\n"
-                             + "recent completed Inpainting job -- whichever ran last, on this\n"
-                             + "machine. There is no picker: to use an older job, set the\n"
-                             + "folders by hand.\n\n"
-                             + "Clicking replaces whatever those three fields currently hold.\n\n"
-                             + "Most recent job:\n" + page.mg.importDescription
+                        tip: "Fill this stage's folders from the most recent completed Inpainting job -- "
+                             + "whichever ran last, on this machine: in a project, its chapter's folders, "
+                             + "Output too. There is no picker: to use an older job, set the folders by hand.\n\n"
+                             + "Clicking replaces whatever those fields currently hold.\n\n"
+                             + (page.mg.hasProject ? "Fills:\n" : "Most recent job:\n") + page.mg.importDescription
                     }
                 },
                 AccentButton {
@@ -310,11 +310,11 @@ Item {
                     iconGlyph: Theme.icon.importIcon
                     onClicked: page.mg.importFromInpaintingV2()
                     HoverTip {
-                        tip: "Fill the Inpainted, Original and Mask folders from the most\n"
-                             + "recent completed Inpainting V2 (Wan VACE) job. Mask gets the\n"
-                             + "splats V2 read; Original, Splatting's source clips.\n\n"
-                             + "Clicking replaces whatever those three fields currently hold.\n\n"
-                             + "Most recent job:\n" + page.mg.importV2Description
+                        tip: "Fill this stage's folders from the most recent completed Inpainting V2 (Wan VACE) "
+                             + "job: in a project, its chapter's folders, Output too. Mask gets the splats V2 "
+                             + "read; Original, Splatting's source clips.\n\n"
+                             + "Clicking replaces whatever those fields currently hold.\n\n"
+                             + (page.mg.hasProject ? "Fills:\n" : "Most recent job:\n") + page.mg.importV2Description
                     }
                 },
                 ChangeFoldersButton {

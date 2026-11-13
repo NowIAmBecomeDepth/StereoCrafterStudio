@@ -625,6 +625,43 @@ Popup {
                                     }
                                     Rectangle { width: parent.width - 16; x: 8; height: 1; color: Theme.border }
                                     SmallHeading { text: "This PC"; leftPadding: 8; topPadding: 6; bottomPadding: 4 }
+                                    // every drive, one click away (user, 2026-11-12): the tree below opens out to
+                                    // the folder shown, which pushes the other drives out of sight
+                                    Flow {
+                                        objectName: "pickerDrives"
+                                        x: 8
+                                        width: parent.width - 16
+                                        spacing: 4
+                                        bottomPadding: 6
+                                        Repeater {
+                                            model: (picker.opened, picker.rev, Folders.drives())
+                                            Rectangle {
+                                                id: driveChip
+                                                required property var modelData
+                                                objectName: "pickerDrive"
+                                                readonly property bool on: picker.path.toLowerCase().startsWith(
+                                                                               String(modelData.name).toLowerCase())
+                                                width: driveText.implicitWidth + 16
+                                                height: 24
+                                                radius: 12
+                                                color: on ? Theme.alpha(Theme.accent, 0.22)
+                                                          : driveHover.hovered ? Theme.alpha(Theme.fg, 0.1) : Theme.alpha(Theme.fg, 0.05)
+                                                border.width: 1
+                                                border.color: on ? Theme.alpha(Theme.accent, 0.7) : Theme.border
+                                                Text {
+                                                    id: driveText
+                                                    anchors.centerIn: parent
+                                                    text: driveChip.modelData.name
+                                                    color: driveChip.on ? Theme.accentInk : Theme.fg
+                                                    font.family: Theme.bodyFont
+                                                    font.pixelSize: Theme.bodySize
+                                                }
+                                                HoverHandler { id: driveHover; cursorShape: Qt.PointingHandCursor }
+                                                TapHandler { onTapped: picker.go(driveChip.modelData.path) }
+                                                HoverTip { tip: "Go to drive " + driveChip.modelData.name }
+                                            }
+                                        }
+                                    }
                             }
                         ListView {
                             id: navList

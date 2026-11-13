@@ -7,6 +7,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+import studio.tests  # noqa: E402,F401  -- the data redirect first: tests never touch the user's data
 from core.common import flat_sbs  # noqa: E402
 
 CPU = {"codec": "H.264", "encoding_encoder": "Force CPU", "encoding_quality": "Fast", "output_crf": 1,

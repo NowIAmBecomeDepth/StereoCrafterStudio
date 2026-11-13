@@ -141,6 +141,9 @@ def build(app: QGuiApplication):
     # 2026-10-14) -- not Windows' own box, which came up from job threads, ownerless
     from core.common import recycle_bin as _recycle_bin
     _recycle_bin.ASK_PERMANENT = shell.ask_permanent
+    # the open project, for code with no shell (the Depth Map Editor's Pick From Last DepthCrafter Job)
+    from core.ui import job_handoff as _job_handoff
+    _job_handoff.set_project_provider(lambda: shell.projectFolder)
     backdrop = Backdrop()
     depthcrafter = DepthCrafterController(shell)
     vda = VdaController(shell)          # DepthCrafter's VDA tab (user, 2026-10-25)

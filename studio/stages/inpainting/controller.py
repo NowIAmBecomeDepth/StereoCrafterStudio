@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 from studio.gpu_jobs import wait_for_gpu
 from studio.outcome import Outcome, verdict
 import threading
@@ -458,7 +458,7 @@ class InpaintingController(QObject):
 
     def _start(self, only, test: bool = False) -> None:
         from studio.clip_queue import move_pending
-        if self._busy or move_pending(getattr(self, "queue", None), self.toast):
+        if self._busy or project_memory.refuse_start(self) or move_pending(getattr(self, "queue", None), self.toast):
             return
         # v1's shell _sibling_guard: V1 and V2 never run at once, and V2's
         # 14B engine (kept loaded between its batches) is released first --
@@ -643,13 +643,22 @@ class InpaintingController(QObject):
 
     importDescription = Property(str, lambda self: self._import_desc, notify=importChanged)
 
+    def _import_plan(self):
+        """With a project open: the chapter the Import fills lo-res, hi-res and output from."""
+        from core.ui.job_handoff import get_source_record
+        return project_memory.import_plan(self, self._shell, "inpainting", get_source_record("inpainting"),
+                                          ("hires", "lowres", "splat_out"), ("splatting",))
+
     @Slot()
     def refreshImport(self) -> None:
         self._import_desc = ""
         try:
             from core.ui.job_handoff import describe, get_source_record, in_project
             record = get_source_record("inpainting")
-            if record and (record.get("lowres") or record.get("hires")) \
+            plan = self._import_plan()
+            if plan:
+                self._import_desc = plan["description"]
+            elif record and (record.get("lowres") or record.get("hires")) \
                     and in_project(record, self._shell.projectFolder, ("hires", "lowres")):
                 self._import_desc = describe(record) or "Splatting job"
         except Exception:
@@ -660,6 +669,11 @@ class InpaintingController(QObject):
     def importFromSplatting(self) -> None:
         try:
             from core.ui.job_handoff import get_source_record, in_project
+            plan = self._import_plan()
+            if plan:                # the whole stage from one chapter of the project (2026-11-12)
+                filled = project_memory.apply_import(self, plan)
+                self._on_status(f"Imported {filled} from Splatting ({plan['name']}).")
+                return
             record = get_source_record("inpainting") or {}
             if not in_project(record, self._shell.projectFolder, ("hires", "lowres")):
                 record = {}
@@ -689,6 +703,13 @@ class InpaintingController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Start is refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this stage back on the open project."""
+        project_memory.reland(self)
 
     _CHAPTER_FIELDS = (("lowres", "input_folder"), ("hires", "hires_blend_folder"), ("output", "output_folder"))
 

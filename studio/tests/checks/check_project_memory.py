@@ -55,8 +55,10 @@ check("A: Splatting on chapter 1, DepthCrafter on hand-set folders",
       sp._map.value("output_splatted"))
 
 shell.setProperty("projectFolder", PB); pump(0.3)
-check("B, new to it: Splatting left as it was (nothing remembered there)",
-      norm(sp._map.value("output_splatted")).endswith("Movie A/MA Splats/Chapter 1 - One") and sp.property("chapterNum") == -1,
+# (2026-11-12: it kept Movie A's folders here -- the flat-project tester's mix-up. Nothing of
+# its own in B and no neighbour on a chapter there, two chapters: it waits for one.)
+check("B, new to it: Splatting waits for a chapter, A's folders gone",
+      norm(sp._map.value("output_splatted")) == "" and sp.property("chapterNum") == -1 and sp.property("needsChapter"),
       (sp._map.value("output_splatted"), sp.property("chapterNum")))
 sp.pickChapter(num_of(sp, "Chapter 2")); pump(0.2)
 n_toasts = len(toasts)

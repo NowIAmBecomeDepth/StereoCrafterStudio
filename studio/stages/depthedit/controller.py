@@ -1128,6 +1128,77 @@ class DepthEditController(QObject):
         if asked:
             self.pickFile.emit(str(asked.get("title", "")), str(asked.get("initialdir", "")))
 
+    # ---- the open project (2026-11-12): only defaults -- a loaded clip is never re-pointed -----------
+
+    #: The editor's path vars and the open project's folder each starts in (stage_paths' Splatting roles):
+    #: the clip from the chapter's Source clips, the map from its Depth Maps, the output beside them.
+    _PROJECT_ROLES = {"rgb_path": "source", "depth_path": "depth", "output_dir": "depth"}
+
+    def _project_folders(self) -> Dict[str, str]:
+        """{var: folder} in the open project: the chapter Splatting (else DepthCrafter) is on there, else
+        the project's one entry. {} with no project open or no chapter to go by."""
+        shell = self._shell
+        if not getattr(shell, "projectFolder", ""):
+            return {}
+        try:
+            entries = {c["num"]: str(c.get("name", "")) for c in (shell.listChapters() or [])}
+            num = None
+            for stage in ("splatting", "depthcrafter"):
+                n = (shell.stageChapter(stage) or {}).get("num")
+                if isinstance(n, int) and n in entries:
+                    num = n
+                    break
+            if num is None and len(entries) == 1:
+                num = next(iter(entries))
+            if num is None:
+                return {}
+            paths = shell.stagePaths("splatting", num, entries[num]) or {}
+        except Exception:
+            logger.debug("No project folders for the Depth Map Editor", exc_info=True)
+            return {}
+        return {var: str(paths[role]) for var, role in self._PROJECT_ROLES.items() if paths.get(role)}
+
+    def _path_var(self, name: str) -> str:
+        eng = self._engine
+        var = getattr(eng, name + "_var", None) if eng is not None and name in self._PROJECT_ROLES else None
+        return str(var.get() or "").strip() if var is not None else ""
+
+    @Slot(str, result=str)
+    def dialogFolder(self, name: str) -> str:
+        """Where a Browse dialog for `name` starts: the field's own path, unless it is empty or lies in
+        another project -- then the open project's folder for it. The field is left as it is."""
+        from studio import project_memory
+        value = self._path_var(name)
+        if value and not project_memory.foreign(self._shell, value):
+            return value
+        return self._project_folders().get(name, "") or value
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A path field's "In <other project>" tag. A loaded clip is never re-pointed (its edits are its
+        own): a toast says whose it is. With no clip loaded, the fields in another project are cleared,
+        so the Browse dialogs start in the open project's folders."""
+        from studio import project_memory
+        eng = self._engine
+        if eng is None:
+            return
+        others = {n: project_memory.foreign(self._shell, self._path_var(n)) for n in self._PROJECT_ROLES}
+        others = {n: o for n, o in others.items() if o}
+        if not others:
+            return
+        here = str(getattr(self._shell, "projectName", "") or "this project")
+        other = next(iter(others.values()))
+        if getattr(eng, "codes", None) is not None or getattr(eng, "project", None) is not None \
+                or getattr(eng, "_busy_job", None):
+            self.toast.emit("warning", "This clip is " + other + "'s",
+                            f"The loaded clip belongs to {other}, not {here}. It stays loaded, edits and all: "
+                            f"load a clip from {here} to work there.")
+            return
+        for name in others:
+            self.setVar(name, "")
+        self.toast.emit("info", "Fields cleared", f"{other}'s files are out of the fields: Browse starts in "
+                                                  f"{here}'s folders.")
+
     # ---- the pointer (v1 _on_press / _on_release / _on_right_click) -----------------------
 
     @Slot(float, float, bool)

@@ -36,7 +36,7 @@ from PySide6.QtCore import Property, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlPropertyMap
 
 from ... import settings_store
-from studio import chapter_paths
+from studio import chapter_paths, project_memory
 from . import settings as S
 
 logger = logging.getLogger("studio.stages.edgefill")
@@ -349,6 +349,7 @@ class EdgeFillController(QObject):
         self._map.insert("mask_folder", str(masks or "").replace("\\", "/"))
         self._on_value_changed("merged_folder", self._map.value("merged_folder"))
         self._on_value_changed("mask_folder", self._map.value("mask_folder"))
+        project_memory.needs_chapter(self)       # folders set: no longer waiting for a chapter
 
     def _follow_project(self) -> None:
         merging = getattr(self, "merging", None)
@@ -360,7 +361,9 @@ class EdgeFillController(QObject):
         # a project this page has been on keeps its own chapter / folders (project_memory) -- but
         # an empty pair remembered is no memory (it restored blank folders and stopped this)
         remembered = self._shell.rememberedStagePaths("edgefill") or {}
-        if self._chapter_num >= 0 or any(str(v or "").strip() for v in remembered.values()):
+        # (nor are another project's folders -- project_memory dropped them, 2026-11-12)
+        if self._chapter_num >= 0 or any(str(v or "").strip() and not project_memory.foreign(self._shell, v)
+                                         for v in remembered.values()):
             return
         v = merging._values()
         self._restoring = True                   # a project switch: no "Chapter selected" toast
@@ -374,6 +377,13 @@ class EdgeFillController(QObject):
     chapters = Property("QVariantList", lambda self: self._chapters, notify=chapterChanged)
     chapterNum = Property(int, lambda self: self._chapter_num, notify=chapterChanged)
     hasProject = Property(bool, lambda self: bool(self._shell.projectFolder), notify=chapterChanged)
+    # on the project with no chapter and no folders yet: Look / Fill are refused (project_memory)
+    needsChapter = Property(bool, lambda self: project_memory.needs_chapter(self), notify=chapterChanged)
+
+    @Slot()
+    def useProjectFolders(self) -> None:
+        """A folder's "Use <project>'s folder": this page back on the open project."""
+        project_memory.reland(self)
 
     def _chapter_paths(self, num: int) -> Dict[str, str]:
         name = next((c["name"] for c in self._chapters if c["num"] == num), "")
@@ -486,6 +496,8 @@ class EdgeFillController(QObject):
     def scan(self) -> None:
         """The merged folder's clips, each with its splat mask looked up -> scanned; then each
         one's strip, for the grid -> measured (remembered ones at once, the rest one by one)."""
+        if project_memory.refuse_start(self):
+            return
         merged, masks = self._folders()
         self._look.set()                     # an earlier look's measuring, if still going
         look = self._look = threading.Event()
@@ -621,7 +633,7 @@ class EdgeFillController(QObject):
     @Slot("QVariantList")
     def fill(self, names) -> None:
         """Fill the edges of the last scan's clips called `names`, one after another."""
-        if self._scan is None:
+        if self._scan is None or project_memory.refuse_start(self):
             return
         # the folders the grid was looked at in, not the fields as typed since (sweep 2026-10-14)
         merged = os.path.abspath(self._scan["folder"])

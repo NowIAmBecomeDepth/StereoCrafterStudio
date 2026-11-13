@@ -27,6 +27,19 @@ Item {
     readonly property bool mmgp: String(st.offload_mode).toLowerCase().indexOf("mmgp") === 0
     readonly property var tips: wan.tips
     readonly property real requiredHeight: content.y + content.implicitHeight + 16
+    // The open project's chapter fills both paths (2026-11-12: as V1's), so the rows are put away;
+    // Change Folders brings them back. No chapter yet in the project: folded too ("Pick a chapter").
+    property bool foldersOpen: false
+    readonly property bool chapterMode: wan.hasProject && (wan.chapterNum >= 0 || wan.needsChapter)
+    // Manual paths: put away by Hide Folders, remembered
+    readonly property bool manualHidden: !!Shell.foldersHidden["inpainting_v2"]
+    readonly property bool pathsFolded: chapterMode ? !foldersOpen : manualHidden
+    function toggleFolders() {
+        if (chapterMode) foldersOpen = !foldersOpen
+        else Shell.setFoldersHidden("inpainting_v2", !manualHidden)
+    }
+    // chapter folders made on disk since: in the list when the page shows
+    onVisibleChanged: if (visible) wan.refreshChapters()
 
     component WBox: TextBox { store: page.st; owner: page.wan }
     component Half: FieldRow { labelWidth: 130; Layout.fillWidth: true; Layout.preferredWidth: 1 }
@@ -204,7 +217,20 @@ Item {
         Section {
             id: pathsSection
             title: "Paths"
+            bodyShown: !page.pathsFolded
+            enabled: !page.wan.busy
+            headerRight: [
+                ChangeFoldersButton {
+                    open: !page.pathsFolded
+                    manual: !page.chapterMode
+                    onClicked: page.toggleFolders()
+                    paths: [{ label: "Input", value: page.st.input_folder },
+                            { label: "Output Folder", value: page.st.output_folder }]
+                },
+                ChapterPicker { objectName: "v2ChapterPicker"; visible: page.wan.hasProject; dc: page.wan; onPicked: page.foldersOpen = false }
+            ]
             FieldRow {
+                visible: !page.pathsFolded
                 label: "Input file/folder:"
                 help: "A single video file (processed alone) or a folder of videos (every supported video is batch-processed)."
                 labelWidth: 130
@@ -218,6 +244,7 @@ Item {
                 }
             }
             FieldRow {
+                visible: !page.pathsFolded
                 label: "Output folder:"
                 // how V2 writes (user, 2026-10-11): Inpainting's Encoding Settings, and what 10-bit gives V2
                 help: "Where the inpainted videos are written. They're encoded as Encoding Options (the button at the "
