@@ -3068,6 +3068,9 @@ class InpaintingEngine:
 
         # --- INITIALIZE HI-RES VARIABLES & FIND MATCH (STEP 1) ---
         hires_video_path: Optional[str] = self._find_high_res_match(input_video_path)
+        if hires_video_path and (getattr(self, "_run_settings", None) or {}).get("skip_hires_blend_var"):
+            logger.info("Skip Hi-Res Blend is on: the low-res inpaint is the output.")  # v2
+            hires_video_path = None
         is_hires_blend_enabled = False
         hires_H, hires_W = 0, 0
 

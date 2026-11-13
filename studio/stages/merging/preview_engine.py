@@ -1480,6 +1480,54 @@ class MergingPreviewEngine:
     INFO_KEYS = ("current_filename", "current_resolution", "current_total_frames", "current_flip_status",
                  "border_info")
 
+    # Depth Map / Mesh Warp for a dual-splat clip (a tester, 2026-11-11: "the depth map preview doesn't work"):
+    # only a quad splat carries the depth map in its grid, so a _splatted2 clip silently showed the blend.
+    # Its map is Splatting's <clip>_depth.* in the depth folders: one frame is read from it here.
+    def _preview_depth_frame(self, meta, ref):
+        """[1, 3, H, W] 0..1 on ref's device, sized to ref -- or None (and why, in the log) when the clip's
+        depth map can't be found or read."""
+        import cv2
+        core = (meta or dict()).get("core_name") or ""
+        folders = list(getattr(self, "depth_sidecar_folders", None) or [])
+        path = None
+        for folder in folders:
+            if os.path.isfile(folder):
+                folder = os.path.dirname(folder)
+            for sub in ("", "finished", os.path.join("finished", "finished")):
+                for ext in (".mp4", ".mkv", ".mov"):
+                    cand = os.path.join(folder, sub, core + "_depth" + ext)
+                    if core and os.path.isfile(cand):
+                        path = cand
+                        break
+                if path:
+                    break
+            if path:
+                break
+        if not path:
+            logger.warning("Depth Map preview: no %s_depth map in %s", core, folders)
+            return None
+        cap = getattr(self, "_depth_cap", None)
+        if cap is None or getattr(self, "_depth_cap_path", None) != path:
+            if cap is not None:
+                cap.release()
+            cap = cv2.VideoCapture(path)
+            self._depth_cap, self._depth_cap_path = cap, path
+        try:
+            idx = int(self.previewer.frame_scrubber_var.get())
+        except Exception:
+            idx = 0
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, bgr = cap.read()
+        if not ok:
+            logger.warning("Depth Map preview: could not read frame %s of %s", idx, path)
+            return None
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        t = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().div(255.0).to(ref.device)
+        if t.shape[2] != ref.shape[2] or t.shape[3] != ref.shape[3]:
+            t = torch.nn.functional.interpolate(t, size=(ref.shape[2], ref.shape[3]), mode="bilinear",
+                                                align_corners=False)
+        return t
+
     APP_DEFAULTS = {
         "inpainted_folder": "./completed_output",
         "original_folder": "./input_source_clips",
@@ -2324,6 +2372,10 @@ class MergingPreviewEngine:
             preview_source = self.preview_source_var.get()
             final_frame_4d = None
 
+            if depth_map_vis is None and preview_source in ("Depth Map", "Mesh Warp"):
+                depth_map_vis = self._preview_depth_frame(current_source_metadata, blended_frame)  # v2
+                if depth_map_vis is not None and flip_horizontal:
+                    depth_map_vis = torch.flip(depth_map_vis, dims=[3])
             if preview_source == "Blended Image":
                 final_frame_4d = blended_frame
             elif preview_source == "Inpainted Right Eye":

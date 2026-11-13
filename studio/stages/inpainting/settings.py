@@ -47,6 +47,9 @@ DEFAULTS: Dict[str, Any] = {
     "enable_post_inpainting_blend": False,
     "enable_color_transfer": True,
     "keep_inpaint_cache": False,
+    # Skip Hi-Res Blend (a tester, 2026-11-11): long clips ran out of RAM in the hi-res finish; off = the low-res
+    # inpaint is the output, no hi-res splat is read
+    "skip_hires_blend": False,
     "move_to_finished": True,
     "inpaint_direction": "Forward",
     "use_sageattention": True,
@@ -115,6 +118,7 @@ RESET_VALUES: Dict[str, Any] = {
     "mask_blur_kernel_size": "7",
     "blend_mask_source": "hybrid",
     "keep_inpaint_cache": False,
+    "skip_hires_blend": False,
     "move_to_finished": True,
     "enable_post_inpainting_blend": False,
     "enable_color_transfer": True,

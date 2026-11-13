@@ -223,6 +223,7 @@ ChangeFoldersButton {
                         paths: [{ label: "Lo-Res Blend Folder", value: page.st.input_folder },
                                 { label: "Hi-Res Blend Folder", value: page.st.hires_blend_folder },
                                 { label: "Output Folder", value: page.st.output_folder }]
+                                .filter(function (p) { return !(p.label === "Hi-Res Blend Folder" && page.st.skip_hires_blend) })
                     },
                     ChapterPicker { visible: page.ip.hasProject; dc: page.ip; onPicked: page.foldersOpen = false }
                 ]
@@ -240,7 +241,7 @@ ChangeFoldersButton {
                     }
                 }
                 FieldRow {
-                    visible: !page.pathsFolded
+                    visible: !page.pathsFolded && !page.st.skip_hires_blend
                     label: "Hi-Res Blend Folder"
                     help: page.help("hires_blend_folder")
                     labelWidth: 150
@@ -372,6 +373,7 @@ ChangeFoldersButton {
                             // fill in with more control. Its mask rows went with it.
                             IpCheck { key: "enable_color_transfer"; shown: !page.bh["inp.color_transfer"]; text: "Enable Color Transfer"; help: page.help("enable_color_transfer") }
                             IpCheck { key: "keep_inpaint_cache"; shown: !page.bh["inp.keep_cache"]; text: "Keep Inpaint Cache For Re-Merge"; help: page.help("keep_inpaint_cache") }
+                            IpCheck { key: "skip_hires_blend"; text: "Skip Hi-Res Blend"; help: "Skips the hi-res blending step: the output is the low-res inpaint, and no hi-res clip is read. Turn it on for long clips that run out of RAM in the hi-res finish." }
                             IpCheck { key: "move_to_finished"; text: "Resume"; help: page.help("move_to_finished") }
                         }
 
