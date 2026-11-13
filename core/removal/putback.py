@@ -64,7 +64,10 @@ DEFAULTS = {"enabled": False, "mode": "Add", "parallax": 0.0, "opacity": 1.0,
             # Disparity (user, 2026-10-16): the object's depth strength, % of the scene's (Depth Map only)
             "disp": 100.0,
             # Original Eyes (user, 2026-10-16): where the original clip's merge is (a folder, or a file in it)
-            "eyes": ""}
+            "eyes": "",
+            # Over's pixels from this clip instead of the original (user, 2026-11-09: a web drawn as clean lines
+            # where the original's strands are a defocused blur over the background) -- "" = the original
+            "layer": ""}
 MODES = ("Add", "Over")
 DEPTHS = ("Original Eyes", "Original Depth", "Depth Map", "Parallax", "Glass Plane")
 #: Over's depths and Add's: Add lays what erasing took away back -- glass's reflections, dust -- at one parallax,
@@ -348,7 +351,8 @@ class PutBack:
             eyes = self.eyes()
             if eyes is not None:
                 return self._apply_eyes(left, right, eyes, frames, idx, w, h, flipped)
-            o, a = frames(self.original), mask(self.object_mask)
+            layer = s.get("layer") or ""
+            o, a = frames(layer if os.path.isfile(layer) else self.original), mask(self.object_mask)
             dm = self.depth_map_layer()
             if dm is not None:
                 # the object warped with the original's depth map, as Splatting warped the scene

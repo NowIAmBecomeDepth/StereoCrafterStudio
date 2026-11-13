@@ -405,7 +405,7 @@ Popup {
                                     ["Up · Down", "Previous · next clip (also Ctrl+Left · Ctrl+Right)"],
                                     ["Space", "Play or pause"],
                                     ["Shift+Space", "Fast forward"],
-                                    ["F11", "Full Preview, full screen (Splatting, Merging); Escape or F11 closes it"]] },
+                                    ["F11", "Full Preview, full screen (Splatting, Merging); Escape or F11 closes it. Up · Down, Left · Right, Home · End and Space work there too"]] },
                                 { title: "Splatting", rows: [
                                     ["Ctrl+S", "Create or update the clip's sidecar"],
                                     ["Ctrl+T", "Detect Text"],

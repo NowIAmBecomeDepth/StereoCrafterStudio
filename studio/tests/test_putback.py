@@ -270,5 +270,45 @@ class MergingControlsTest(unittest.TestCase):
         R.keep_original_depth(clip, depth)                                   # erased again
         self.assertEqual(R.load_settings(clip)["depth"], "Parallax", "a choice made isn't undone")
 
+
+class LayerTest(unittest.TestCase):
+    """Over's pixels from a layer clip (user, 2026-11-09: a web drawn as clean lines where the original's
+    strands are a blur over the background); without one, the original as before."""
+
+    def _putback(self, layer):
+        import os
+        import tempfile
+        from core.removal import putback as R
+        d = tempfile.mkdtemp()
+        clip = os.path.join(d, "shot.mp4")
+        os.makedirs(os.path.join(d, "edit_history"))
+        original = os.path.join(d, "edit_history", "shot.original.mp4")
+        paths = [clip, original, R.object_mask_path(clip)] + ([os.path.join(d, "edit_history", "shot.putback_layer.mkv")] if layer else [])
+        for p in paths:
+            with open(p, "wb") as f:
+                f.write(b"x")
+        s = dict(R.DEFAULTS, enabled=True, mode="Over", layer=paths[3] if layer else "")
+        R.save_settings(clip, s)
+        s = R.load_settings(clip)
+        self.assertEqual(s["layer"], paths[3] if layer else "")
+        pb = R.PutBack(clip, s, {"original": original, "method": "web_lines"})
+        h, w = 8, 8
+        pix = {original: np.full((1, h, w, 3), 50, np.uint8), R.object_mask_path(clip): np.zeros((1, h, w, 3), np.uint8)}
+        pix[R.object_mask_path(clip)][:, 2:6, 2:6] = 255
+        if layer:
+            pix[paths[3]] = np.full((1, h, w, 3), 200, np.uint8)
+        pb._read = lambda path, idx, w_, h_: pix[path]
+        return pb
+
+    def test_over_takes_the_layer(self):
+        import torch
+        for layer, want in ((True, 200 / 255.0), (False, 50 / 255.0)):
+            pb = self._putback(layer)
+            left, right = pb.apply(torch.zeros(1, 3, 8, 8), torch.zeros(1, 3, 8, 8), 0)
+            self.assertAlmostEqual(float(left[0, 0, 4, 4]), want, places=4)
+            self.assertAlmostEqual(float(right[0, 0, 4, 4]), want, places=4)
+            self.assertEqual(float(left[0, 0, 0, 0]), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

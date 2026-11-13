@@ -166,6 +166,14 @@ for o in [o for o in fpw.findChildren(QObject) if "Shortcut" in o.metaObject().c
 fpw.show(); fpw.requestActivate(); pump(0.4)
 QTest.keyClick(fpw, Qt.Key_Right); settle()
 check("Full Preview Right steps the preview", pv.frame == 9 and not _amb, f"{pv.frame} {_amb}")
+# a tester, 2026-11-12: Down / Up change the clip in Full Preview too (anaglyph, VR glasses in clone mode)
+_i0 = pv.property("videoIndex")
+QTest.keyClick(fpw, Qt.Key_Down); settle()
+_i1 = pv.property("videoIndex")
+QTest.keyClick(fpw, Qt.Key_Up); settle()
+check("Full Preview Down / Up go to the next / previous clip, still full screen",
+      _i1 != _i0 and pv.property("videoIndex") == _i0 and fpw.isVisible() and not _amb,
+      f"{_i0} -> {_i1} -> {pv.property('videoIndex')} visible {fpw.isVisible()} {_amb}")
 fpw.close(); sm.requestActivate(); pump(0.3)
 cur0 = stage.property("current")
 QTest.keyClick(sm, Qt.Key_Tab, Qt.ControlModifier); pump(0.3)

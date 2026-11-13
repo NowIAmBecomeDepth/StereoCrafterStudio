@@ -270,4 +270,10 @@ Window {
     Shortcut { enabled: win.keysLive; sequence: "Right"; onActivated: win.pv.stepFrames(1) }
     Shortcut { enabled: win.keysLive; sequence: "Home"; onActivated: win.pv.seek(0) }   // first / last frame (2026-10-02)
     Shortcut { enabled: win.keysLive; sequence: "End"; onActivated: win.pv.seek(Math.max(0, win.pv.frameCount - 1)) }
+    // ...and the clip keys, as on the page: Up the clip above, Down the one below (a tester, 2026-11-12:
+    // checking clip after clip in anaglyph, or on VITURE glasses in clone mode, without leaving full screen)
+    Shortcut { objectName: "fullClipUpShortcut"; enabled: win.keysLive; sequence: "Up"; onActivated: win.pv.step(-1) }
+    Shortcut { objectName: "fullClipDownShortcut"; enabled: win.keysLive; sequence: "Down"; onActivated: win.pv.step(1) }
+    Shortcut { enabled: win.keysLive; sequence: "Ctrl+Left"; onActivated: win.pv.step(-1) }
+    Shortcut { enabled: win.keysLive; sequence: "Ctrl+Right"; onActivated: win.pv.step(1) }
 }
