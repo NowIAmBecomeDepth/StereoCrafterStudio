@@ -527,6 +527,12 @@
       from the normal way (about one level in a thousand). Needs NVIDIA TensorRT installed once, from Settings &gt;
       Studio &gt; Models. Off by default.</td></tr>
     <tr><td><b>Normalise</b></td><td>As on the VDA tab: <b>Whole clip</b> or <b>EMA</b>.</td></tr>
+    <tr><td><b>Output Format</b></td><td>How the map is saved. <b>H.265 10-bit lossless</b> (the default) keeps
+      every depth level exactly, as DepthCrafter's maps do. <b>H.265 10-bit</b> is nearly the same at a fraction of
+      the size. <b>H.265 8-bit</b> and <b>H.264 8-bit</b> have 256 depth levels, for other tools and players
+      (H.264 plays almost anywhere); flat areas can show steps once splatted. <b>PNG 16-bit</b> and <b>PNG
+      8-bit</b> save one greyscale picture a frame (black far, white near) in a <code>&lt;clip&gt;_depth</code>
+      folder. Splatting reads the videos, not the PNGs.</td></tr>
   </table>
   <p><b>Replacing another map.</b> A DepthCrafter or VDA map of the clip already in the output folder moves into a
      <code>DepthCrafter</code> or <code>VDA</code> folder inside it, and the new map takes its place, with a

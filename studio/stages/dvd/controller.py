@@ -82,6 +82,12 @@ HELP: Dict[str, str] = {
            "frames ahead each frame's range looks (30 is iw3's).",
     "process_length": "Only the first this many frames of each clip; -1 for all of them.",
     "output_suffix": "Added to the clip's name: Splatting looks for _depth.",
+    "output_format": "How the depth map is saved. H.265 10-bit lossless: every 10-bit value exactly, as DepthCrafter's "
+                     "maps (the default). H.265 10-bit: near-lossless, a fraction of the size. H.265 8-bit / H.264 "
+                     "8-bit: 256 depth levels, for tools and players that want 8-bit (H.264 plays almost anywhere); "
+                     "flat areas can show steps once splatted. PNG 16-bit / 8-bit: one greyscale picture a frame "
+                     "(black far, white near) in a folder <clip>_depth beside the videos -- 16-bit keeps every "
+                     "bit DVD gave. Splatting reads the videos, not the PNGs.",
     "move_to_finished": "On: each clip whose depth map is done moves into a 'finished' folder inside the input "
                         "folder (a failed one into 'failed'), so the next Start skips it and an interrupted batch "
                         "picks up where it stopped. Off: the clips stay where they are, and every Start runs them "
@@ -452,6 +458,8 @@ class DvdController(QObject):
             text += ("\nThe map it replaced is kept in " + os.path.dirname(moved[0]["set_aside"])
                      if len(moved) == 1 else
                      f"\nThe {len(moved)} maps it replaced are kept in their own kind's folder.")
+        if runner is not None and runner.made and str(runner.opts.get("output_format", "")).startswith("PNG"):
+            text += "\nSaved as PNG pictures: Splatting reads depth maps as videos, so pick a video Output Format for it."
         self.toast.emit(v.kind, ("Test render: " if test else "") + v.title, text)
         if runner is not None and not test:
             self._show_in_splatting(runner.made)

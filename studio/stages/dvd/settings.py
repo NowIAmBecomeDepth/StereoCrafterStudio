@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 from core.dvd.model import (DEFAULT_INPUT, DEFAULT_OVERLAP, DEFAULT_WIDTH, DEFAULT_WINDOW, MAX_WINDOW, MIN_WINDOW,
                             snap_input, snap_width, snap_window)
+from core.vda.formats import FORMATS as OUTPUT_FORMATS
 from core.vda.normalize import MODES as NORMALISE_MODES
 from studio.default_folders import localize as _localize
 
@@ -30,6 +31,7 @@ DEFAULTS: Dict[str, Any] = {
     "ema_buffer": 30,
     "process_length": -1,
     "output_suffix": "_depth",
+    "output_format": OUTPUT_FORMATS[0],     # core.vda.formats (user, 2026-11-13); the first: the maps as they were
     "move_to_finished": True,
     "use_tensorrt": False,          # the VAE on TensorRT (core.dvd.vae_trt; user, 2026-11-07)
 }
@@ -42,7 +44,8 @@ WINDOWS = list(range(MIN_WINDOW, MAX_WINDOW + 1, 9))
 
 
 def choices() -> Dict[str, list]:
-    return {"normalise_mode": list(NORMALISE_MODES), "input_size": list(INPUT_SIZES), "window": list(WINDOWS)}
+    return {"normalise_mode": list(NORMALISE_MODES), "input_size": list(INPUT_SIZES), "window": list(WINDOWS),
+            "output_format": list(OUTPUT_FORMATS)}
 
 
 def coerce(key: str, value: Any) -> Any:

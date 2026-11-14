@@ -355,6 +355,11 @@ Item {
                     enabled: page.idle
                     FieldRow { label: "Process Max Frames (-1 All)"; labelWidth: 176; help: page.help("process_length"); VBox { key: "process_length" } }
                     FieldRow { label: "Output Suffix"; labelWidth: 176; help: page.help("output_suffix"); VBox { key: "output_suffix"; numeric: false; boxWidth: 150 } }
+                    FieldRow {
+                        label: "Output Format"; labelWidth: 176
+                        help: page.help("output_format")
+                        VDrop { objectName: "dvdOutputFormat"; key: "output_format"; model: page.dvd.choices.output_format }
+                    }
                     VCheck { objectName: "dvdResume"; key: "move_to_finished"; text: "Resume"; help: page.help("move_to_finished") }
                 }
 

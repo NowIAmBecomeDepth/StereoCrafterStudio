@@ -244,20 +244,19 @@ class VdaRunner:
         Raises Stopped on Stop (now). Shared with DVD's runner (studio/stages/dvd)."""
         import numpy as np
         import torch
-        from core.common.partial_output import discard, part_path
-        from core.depthedit.depth_io import ClipInfo, DepthWriter
+        from core.vda import formats as F
         from core.vda import normalize as N
         from core.vda import output as OUT
 
         o = self.opts
         oh, ow = map_size
         kind, tag_name = self.TAG_KIND
-        final = OUT.map_path(o["output_dir"], base, o.get("output_suffix") or "_depth")
-        part = part_path(final)
+        # DVD's Output Format (core.vda.formats; user, 2026-11-13); VDA has no such setting: the lossless 10-bit
+        fmt = o.get("output_format") or F.LOSSLESS
+        final = F.final_path(o["output_dir"], base, o.get("output_suffix") or "_depth", fmt)
         ranges = N.ranges(o["normalise_mode"], lows, highs, float(o["ema_decay"]), int(o["ema_buffer"]))
-        writer = DepthWriter(part, ClipInfo(path=final, width=ow, height=oh, num_frames=got, fps=info.fps,
-                                            pix_fmt="yuv420p10le", full_range=False),
-                             metadata={"comment": getattr(OUT, tag_name)})
+        writer = F.open_writer(fmt, final, ow, oh, info.fps, metadata={"comment": getattr(OUT, tag_name)})
+        done = False
         try:
             tick = self.ticker(got, "encode", os.path.basename(path))
             for a in range(0, got, ENCODE_BATCH):
@@ -267,20 +266,18 @@ class VdaRunner:
                 block = torch.from_numpy(np.asarray(raw[a:b])).to(device).float()
                 ks = torch.tensor([N.scale(*ranges[i])[0] for i in range(a, b)], device=device).view(-1, 1, 1)
                 offs = torch.tensor([N.scale(*ranges[i])[1] for i in range(a, b)], device=device).view(-1, 1, 1)
-                codes = (block * ks + offs).round_().clamp_(0, 1023).to(torch.int32).cpu().numpy().astype(np.uint16)
-                for c in codes:
-                    writer.write(c)
+                writer.write(block * ks + offs)            # 10-bit codes as float; the writer quantises
                 tick(b)
-            writer.close()
-            writer = None
-            moved = OUT.publish(part, final, new_kind=kind)
-            part = None
+            part = writer.close()
+            if F.is_png(fmt):
+                moved = F.publish_pngs(part, final)
+            else:
+                moved = OUT.publish(part, final, new_kind=kind)
+            done = True
             return final, moved
         finally:
-            if writer is not None:
-                writer.abort()
-            if part:
-                discard(part)
+            if not done:
+                writer.abort()          # the partial file / folder goes (a finished one not put in place too)
 
     # ---- finished / failed (DepthCrafter's _move_original_source) -----------------------------
 
