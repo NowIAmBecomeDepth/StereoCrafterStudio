@@ -46,6 +46,23 @@ class DepthFrame(unittest.TestCase):
             fake._depth_cap.release()
 
 
+class PreviewGetsTheFolders(unittest.TestCase):
+    """The preview's own engine is told the depth folders (testers, 2026-11-13: only the job's engine was)."""
+
+    def test_render_hands_the_controllers_folders_to_the_engine(self):
+        from PySide6.QtGui import QGuiApplication
+        from studio.stages.merging.preview import MergingPreview
+        app = QGuiApplication.instance() or QGuiApplication(["t"])  # noqa: F841
+        with tempfile.TemporaryDirectory() as d:
+            pv = MergingPreview(lambda: {})
+            pv.depth_folders_fn = lambda: [d]
+            pv._thread = object()            # no worker: the job is run here
+            pv._submit("render")
+            kind, arg, changes, _gen = pv._jobs.popleft()
+            pv._do(kind, arg, changes)
+            self.assertEqual(pv._engine.depth_sidecar_folders, [d])
+
+
 class SkipHires(unittest.TestCase):
     def test_setting_default_and_run_view(self):
         self.assertIs(IS.DEFAULTS["skip_hires_blend"], False)

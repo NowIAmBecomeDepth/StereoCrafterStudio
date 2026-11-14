@@ -282,6 +282,7 @@ class MergingController(QObject):
         self._applying_preview = False
         self._preview_info: Dict[str, Any] = {}
         self.preview = MergingPreview(self._values, self)
+        self.preview.depth_folders_fn = self._depth_folders   # its Depth Map view, as the job's Frame Break
         # Upcoming Jobs keeps the job's clips (and their bars) while it runs
         self.stateChanged.connect(lambda: self.preview.queue.hold(self._busy))
         self.preview.settingsWritten.connect(self._take_preview_writes)

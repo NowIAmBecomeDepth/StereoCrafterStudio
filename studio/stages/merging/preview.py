@@ -502,6 +502,15 @@ class MergingPreview(QObject):
     # ---- the worker -------------------------------------------------------------
 
     def _submit(self, kind: str, arg: Any = None) -> None:
+        # Depth Map / Mesh Warp of a dual-splat clip read <clip>_depth.* from the depth folders, but only the
+        # job's engine was ever told them (testers, 2026-11-13: "still can't see the depth map"): asked here,
+        # on the GUI thread, of the controller (its _depth_folders), and handed to the engine in _do.
+        fn = getattr(self, "depth_folders_fn", None)
+        if fn is not None and kind in ("load", "render", "seek", "nav", "jump"):
+            try:
+                self._depth_folders_now = list(fn() or [])
+            except Exception:
+                logger.debug("No depth folders for the Depth Map preview", exc_info=True)
         # With no engine there is nothing to clear -- unless a job that is
         # about to build one (the first load, importing) is queued or running:
         # then the release goes behind it (audit #14).
@@ -582,6 +591,7 @@ class MergingPreview(QObject):
     def _do(self, kind: str, arg: Any, changes: Dict[str, Any]) -> Dict[str, Any]:
         eng = self._ensure_engine()
         eng.store.values.update(changes)
+        eng.depth_sidecar_folders = list(getattr(self, "_depth_folders_now", None) or [])
         pv = eng.previewer
         if kind == "load":
             # v1 _handle_load_refresh: re-scan the folders, then load.
