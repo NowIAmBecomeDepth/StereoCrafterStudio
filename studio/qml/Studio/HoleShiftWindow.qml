@@ -101,7 +101,7 @@ Window {
         defaultValue: 0; fillFrom: 0
         enabled: win.hasSelection
         onMoved: (v) => win.setOffset(key, v)
-        onReleased: (v) => win.setOffset(key, v)     // also the right-click reset
+        onReleased: (v) => win.setOffset(key, v)     // also a typed value and Reset (right-click)
     }
 
     PromptDialog { id: confirmDlg }

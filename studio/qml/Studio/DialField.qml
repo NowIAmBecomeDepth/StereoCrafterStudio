@@ -8,8 +8,8 @@ import Studio
 // so a page can swap one for the other. The look is the showcase's RingDial
 // (prototypes/qt_showcase): a 270 degree arc filled up to the knob, the value
 // in the middle, the label under it. Drag round it, one step per wheel notch
-// or arrow key; right-click or double-click resets to the default (a tick on
-// the arc).
+// or arrow key; double-click resets to the default (a tick on the arc);
+// right-click opens a box to type the value (ValueEntry, with a Reset).
 //
 // Dials sit side by side where sliders take a row each: that is the height
 // they save (Merging's mask parameters, user 2026-09-26).
@@ -96,9 +96,34 @@ Item {
         write(defaultValue)
         released(defaultValue)
     }
+    // Right-click: type the value (user, 2026-11-13); the box's Reset does what the
+    // right-click did before. A typed value goes where a turn would: the setting
+    // (unless writesStore is off), moved(), then released().
+    function openEntry() {
+        entry.current = value
+        entry.openAt(dial)
+    }
+    function setTyped(v) {
+        v = snap(v)
+        if (writesStore) write(v)
+        moved(v)
+        released(v)
+    }
+    function snap(v) {
+        return Math.max(from, Math.min(to, Math.round((v - from) / step) * step + from))
+    }
+    ValueEntry {
+        id: entry
+        from: root.from
+        to: root.to
+        decimals: root.decimals
+        defaultValue: root.defaultValue
+        onAccepted: (v) => root.setTyped(v)
+        onResetAsked: root.reset()
+    }
     function write(v) {
         if (!store || !key) return
-        v = Math.max(from, Math.min(to, Math.round((v - from) / step) * step + from))
+        v = snap(v)
         const text = Number(v.toFixed(Math.max(decimals, 6))).toString()
         if (typeof stored === "string")
             store[key] = text.indexOf(".") < 0 && text.indexOf("e") < 0 ? text + ".0" : text
@@ -239,10 +264,12 @@ Item {
             Behavior on width { NumberAnimation { duration: Theme.dur(120) } }
         }
 
-        TapHandler {
+        // a MouseArea, not a TapHandler: the Dial took the right press too and moved to it
+        MouseArea {
+            anchors.fill: parent
+            z: 10
             acceptedButtons: Qt.RightButton
-            enabled: !isNaN(root.defaultValue)
-            onTapped: root.reset()
+            onPressed: (m) => { m.accepted = true; root.openEntry() }
         }
 
     }

@@ -252,7 +252,7 @@ Item {
     // An edit control, as a dial (user, 2026-10-01: as in Splatting and
     // Merging). The controller hands it its range in the units shown -- video
     // pixels, in half-pixel steps, for the edge and size settings -- and its
-    // readout for the middle. Right-click or double-click resets it to the
+    // readout for the middle. Double-click (or Reset in the right-click box) resets it to the
     // value a new layer / frame starts with. `proxy` carries the dial's writes
     // to the controller and the controller's value back.
     component Ctl: DialField {

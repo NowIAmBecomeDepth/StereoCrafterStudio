@@ -48,6 +48,7 @@ UpdateDialog 1.0 UpdateDialog.qml
 ModelsDialog 1.0 ModelsDialog.qml
 SliderRow 1.0 SliderRow.qml
 DialField 1.0 DialField.qml
+ValueEntry 1.0 ValueEntry.qml
 PreviewAutoFit 1.0 PreviewAutoFit.qml
 GlassesFreeView 1.0 GlassesFreeView.qml
 JobRate 1.0 JobRate.qml

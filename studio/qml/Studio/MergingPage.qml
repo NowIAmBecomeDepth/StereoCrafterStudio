@@ -605,7 +605,7 @@ Item {
                             visible: String(page.st.preview_source) === "Wigglegram"
                             store: Shell; key: "wiggleSpeed"; label: "Wiggle Speed:"; labelWidth: 100
                             from: 2; to: 20; step: 0.5; decimals: 1; defaultValue: 7.5
-                            help: "How fast the wigglegram switches between the left and right eye, in switches per second. Right-click resets it."
+                            help: "How fast the wigglegram switches between the left and right eye, in switches per second. Right-click to type a value or reset it."
                             Layout.fillWidth: true
                             Layout.minimumWidth: 170
                             Layout.maximumWidth: 300

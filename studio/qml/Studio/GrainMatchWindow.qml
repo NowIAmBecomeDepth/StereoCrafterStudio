@@ -304,7 +304,7 @@ Window {
                         text: "Reset to Default"; kind: "outline"
                         onClicked: win.pv.grainOp("reset_fill", [])
                         HoverTip { tip: "Sets Red Reduce and Brightness to 0 and Contrast to 1, then saves them now.\n\n"
-                                        + "Grain settings above are left alone; right-click any single slider\nto reset just that one." }
+                                        + "Grain settings above are left alone; right-click any single slider\nto type a value or reset just that one." }
                     }
                 }
                 GSlider { key: "fill_red_reduce"; label: "Red Reduce:"; from: 0; to: 1; step: 0.01; decimals: 2; defaultValue: 0 }

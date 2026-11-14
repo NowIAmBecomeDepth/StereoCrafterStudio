@@ -5,8 +5,9 @@ import Studio
 
 // v1's labelled slider (core/ui/widgets.create_single_slider_with_label_updater):
 // "Label:" right-aligned, the track, the value as text. Snaps to `step`, one
-// step per wheel notch, right-click resets to `defaultValue` (drawn as a tick
-// on the track), and `fill` shades the track up to the knob.
+// step per wheel notch, right-click opens a box to type the value (ValueEntry;
+// its Reset goes back to `defaultValue`, drawn as a tick on the track), and
+// `fill` shades the track up to the knob.
 //
 // The value is written in the type the setting already holds: a v1 StringVar
 // keeps a string ("23.0"), a DoubleVar/IntVar a number.
@@ -52,9 +53,33 @@ Item {
     implicitHeight: Theme.rowHeight
     implicitWidth: labelWidth + 120 + valueWidth
 
+    // Right-click: type the value (user, 2026-11-13); the box's Reset does what the
+    // right-click did before.
+    function snap(v) {
+        return Math.max(from, Math.min(to, Math.round((v - from) / step) * step + from))
+    }
+    function openEntry() {
+        entry.current = value
+        entry.openAt(slider)
+    }
+    function setTyped(v) {
+        v = snap(v)
+        write(v)
+        moved(v)
+        released(v)
+    }
+    ValueEntry {
+        id: entry
+        from: row.from
+        to: row.to
+        decimals: row.decimals
+        defaultValue: row.defaultValue
+        onAccepted: (v) => row.setTyped(v)
+        onResetAsked: { row.write(row.defaultValue); row.released(row.defaultValue) }
+    }
     function write(v) {
         if (!store || !key) return
-        v = Math.max(from, Math.min(to, Math.round((v - from) / step) * step + from))
+        v = snap(v)
         const text = Number(v.toFixed(Math.max(decimals, 6))).toString()
         if (typeof raw === "string") {
             // v1's StringVar held str(float): "23.0", not "23".
@@ -154,10 +179,12 @@ Item {
             Behavior on x { enabled: !slider.pressed; NumberAnimation { duration: Theme.dur(140) } }
             HoverHandler { id: hh }
         }
-        TapHandler {
+        // a MouseArea, not a TapHandler: the Slider took the right press too and moved to it
+        MouseArea {
+            anchors.fill: parent
+            z: 10
             acceptedButtons: Qt.RightButton
-            enabled: !isNaN(row.defaultValue)
-            onTapped: { row.write(row.defaultValue); row.released(row.defaultValue) }
+            onPressed: (m) => { m.accepted = true; row.openEntry() }
         }
     }
 
