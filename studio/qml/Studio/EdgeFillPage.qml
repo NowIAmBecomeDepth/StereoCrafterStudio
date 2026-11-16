@@ -50,7 +50,10 @@ Item {
     readonly property var clips: info.clips || []
 
     readonly property int requiredWidth: 1000
-    readonly property real requiredHeight: 620
+    // the left column's own height, as the other stages ask (2026-11-15: a fixed 620 put the action bar
+    // over Fill Settings once those had grown past it); the clip grid scrolls, so 620 stays the floor
+    readonly property real requiredHeight: Math.max(620, left.y + left.implicitHeight + Theme.gap
+                                                         + actionBar.implicitHeight + 12)
     readonly property real preferredHeight: requiredHeight
     readonly property int leftWidth: 330
 
