@@ -3,14 +3,15 @@
 A Windows app for non-commercial research, education and experimentation that turns 2D video into stereoscopic 3D
 with the StereoCrafter pipeline, one stage at a time:
 
-    Scene Cut -> DepthCrafter -> Splatting -> Inpainting -> Merging
-                 depth maps      warp to 3D   fill holes    final side-by-side
+    Scene Cut -> Depth Map -> Splatting -> Inpainting -> Merging
+                 DepthCrafter, warp to 3D  fill holes    final side-by-side
+                 VDA or DVD
 
 plus the **Depth Map Editor** (fix a depth map object by object, erase objects from a clip) and **Edge Fill**
 (refill the strip a strong 3D shift uncovers at the frame's edge). Each stage hands its output to the next, and
 a project folder keeps every chapter of a long video in order.
 
-![Splatting, with an anaglyph preview of the demo clip](assets/readme/splatting.webp)
+![Splatting in the Warm Carbon theme, with an anaglyph preview of the demo clip](assets/readme/splatting.webp)
 
 The full manual is inside Studio: press **F1**, or open `docs/manual/index.html`.
 
@@ -27,21 +28,39 @@ The full manual is inside Studio: press **F1**, or open `docs/manual/index.html`
 - **Scene Cut** finds a long video's shot boundaries and cuts it into clips, one folder per chapter: AutoShot,
   TransNetV2 or OmniShotCut, optional AI validation, frame-exact 10-bit HEVC clips, and the video's own chapter
   markers to split it.
-- **DepthCrafter** makes a depth map for each clip, sized for you (Auto Size, per-ratio presets, your own presets).
-- **Splatting** warps each clip to the right eye's view: Pop-Out Boost, keyframes on its dials (with LFO and
-  custom-curve shapers), **Rain** separated onto its own layer, burned-in text kept flat on the screen
-  (**Detect Text**), and a 3D preview -- anaglyph, side by side, or a glasses-free 3D display.
+- **Depth Map** makes a depth map for each clip, with a tab for each depth model:
+  - **DepthCrafter**, sized for you (Auto Size, per-ratio presets, your own presets). A clip with no depth, such as end
+    credits, can go straight to the merged folder as 2D (Render as 2D Full SBS).
+  - **Video Depth Anything** (Small, Base or Large). It can use the VDA weights you already have from iw3.
+  - **DVD**, a third depth model that fits 8 and 12 GB cards.
+  - **Blend**, which mixes a clip's DepthCrafter map with its VDA or DVD map into one, with no extra model.
+- **Splatting** warps each clip to the right eye's view:
+  - **Auto 3D** gives each clip its own Disparity from how close its shot is (less for wide shots, more for
+    close-ups), and **1-Click Convergence** sets the focus where you click.
+  - Pop-Out Boost and Hole Shift, with keyframes on the dials (with LFO and custom-curve shapers).
+  - **Special FX**: **Rain** separated onto its own layer (SEA-RAFT on moving shots; lightning and scene textures
+    no longer fool it), and burned-in text kept flat on the screen (**Detect Text**).
+  - A 3D preview: anaglyph, side by side, or a glasses-free 3D display.
+  - **High VRAM Mode** works on 2 to 4 clips at once on 24-32 GB cards, and 4K Full Resolution fits a 12 GB card.
 - **Inpainting** fills the holes with StereoCrafter (V1) or, for problem scenes, **StereoCrafter2 on Wan VACE**
-  (V2, experimental) -- with a one-click **Download V2 Weights** that fetches only the 46.6 GB V2 uses.
-- **Merging** puts each filled right eye back with its full-resolution source: colour matching, **film grain** on
-  the fills, every common output format with colour tags, erased objects laid back in at their own depth
-  (**Put Back**), and **Merge All** to join a whole project into one side-by-side video.
+  (V2, experimental, splats only; dual-eye splats get both eyes filled). A one-click **Download V2 Weights**
+  fetches only the 46.6 GB V2 uses, and **Encoding Options** set the output format.
+- **Merging** puts each filled right eye back with its full-resolution source:
+  - colour matching and **film grain** on the fills;
+  - every common output format, with the **Color Tags** you pick;
+  - a depth-map preview, even for dual splats;
+  - erased objects laid back in at their own depth (**Put Back**);
+  - **Merge All to One Video**, which joins a whole project into one side-by-side video in Merging's output format.
 - **Depth Map Editor**: **SAM 3** selects and tracks objects (or draw a shape on a still shot); change their depth,
   draw gradients for things that recede, keyframe it, take out DepthCrafter's left-edge specks (Despeck), and
   **erase objects from the clip itself with ROSE**. Undo / Redo, a 3D check before rendering, and an edit history
   Splatting reads.
-- **Edge Fill** refills the dark strip a strong 3D shift leaves at the frame's edge, with ROSE, from a grid of
-  every clip's strip.
+- **Edge Fill** refills the dark strip a strong 3D shift leaves at the frame's edge, from a grid of every clip's
+  strip, with play and fill buttons on each clip:
+  - **Copy From Other Frames** first copies the real picture into the strip. It uses **AllTracker** by default, or
+    SEA-RAFT.
+  - The rest is filled by an inpainter: **MiniMax-Remover** (6 or 12 steps; higher quality and less noisy) or ROSE.
+  - **Depth Aware**, **Black Bar** and **Zoom**, and settings saved per clip in sidecars.
 
 ### Faster
 
@@ -62,6 +81,12 @@ Measured on a 16 GB RTX 5060 Ti against the GUIs Studio grew from:
   - Segments saved uncompressed, frames counted without decoding and no extra copies when merging: less waiting
     on the disk.
   - A larger decode chunk: **7% less flicker** at the same speed.
+- **TensorRT** for DepthCrafter, Inpainting and DVD: **up to twice as fast**, on 8 GB cards and up. Install it
+  from Settings > Studio > Models (2.3 GB of packages), then tick the TensorRT box on the stage's page.
+- **Merging up to 2x faster** (its chunk sized to your GPU memory) and **Grain Match about 3x faster**;
+  **Splatting up to 1.3x faster**; **Erase up to 1.4x faster** and faster SAM 3 tracking; faster video reading in
+  every stage and less waiting between Inpainting clips.
+- **SageAttention 1** for RTX 20 series cards, from Settings > Studio > Models.
 - **Inpainting V2**: stopped or crashed clips **resume from their last finished chunk** instead of starting over;
   a 64-px tile overlap by default (**12% faster** than 128, no visible seam); MMGP streaming and FP8 modes for
   16-24 GB cards.
@@ -77,12 +102,15 @@ Measured on a 16 GB RTX 5060 Ti against the GUIs Studio grew from:
   glance, and a **Current Clip Info** panel with the clip's resolution and settings as it's worked on.
 - Every stage laid out the same way: folders, the clip list, the settings, then one action bar to start, stop
   and follow the job.
+- Right-click a dial or slider to type its value; Up / Down change the clip, in Full Preview too; folders are
+  picked with Windows Explorer's own picker.
 
 ### Built for end-to-end conversion
 
 - **Projects**: folder layouts for one long video or an episodic series, a project picker in the title bar, a
-  chapter picker on every stage, and each stage remembering where it was per project.
-- **Hand-offs**: Import from the previous stage and Send to the next, so folders are never typed twice.
+  chapter picker on every stage, and every stage following the open project.
+- **Hand-offs**: Import from the previous stage and Send to the next, so folders are never typed twice, and
+  a right-click sends a clip back to the stage before for another pass.
 - **Upcoming Jobs** on every stage: tick clips and Process Selected, finished clips turn green, badges for edited
   depth, erased objects and Rain; right-click to play a clip, open it in Explorer, Test Render it or move it on.
 - **Stop the way you mean it**: now, after this chunk, or after this clip -- and carry on later.
@@ -111,7 +139,7 @@ The example footage is from *Tears of Steel* (CC-BY 3.0, (CC) Blender Foundation
   </tr>
   <tr>
     <td><img src="assets/readme/depth_map_editor.webp" alt="Depth Map Editor"><br><b>Depth Map Editor</b>: select objects with SAM 3, change their depth, erase them</td>
-    <td><img src="assets/readme/edge_fill.webp" alt="Edge Fill"><br><b>Edge Fill</b>: every clip's edge strip at a glance, refilled with ROSE</td>
+    <td><img src="assets/readme/edge_fill.webp" alt="Edge Fill"><br><b>Edge Fill</b>: every clip's edge strip at a glance, ready to refill</td>
   </tr>
   <tr>
     <td><img src="assets/readme/erase_before.webp" alt="A man on the street"><br><b>Erase from Clip</b>: before</td>
@@ -126,7 +154,7 @@ The example footage is from *Tears of Steel* (CC-BY 3.0, (CC) Blender Foundation
 
 <table>
   <tr>
-    <td width="33%"><img src="assets/readme/theme_warm_carbon.webp" alt="Warm Carbon"><br>Warm Carbon</td>
+    <td width="33%"><img src="assets/readme/theme_graphite.webp" alt="Graphite"><br>Graphite</td>
     <td width="33%"><img src="assets/readme/theme_nord.webp" alt="Nord"><br>Nord</td>
     <td width="33%"><img src="assets/readme/theme_plum.webp" alt="Plum"><br>Plum</td>
   </tr>
@@ -140,13 +168,15 @@ The example footage is from *Tears of Steel* (CC-BY 3.0, (CC) Blender Foundation
 ## Requirements
 
 - Windows 10 or 11, 64-bit.
-- An **NVIDIA graphics card**, RTX 20 series or newer. 16 GB of VRAM is what the defaults are set for; on 8-12 GB,
-  turn on DepthCrafter's *Process as Segments (Low VRAM Mode)* and use smaller Splatting batches.
+- An **NVIDIA graphics card**, RTX 20 series or newer. 16 GB of VRAM is what the defaults are set for. On 8-12 GB,
+  use TensorRT for DepthCrafter and Inpainting (on 8 GB, DepthCrafter fits up to 768x320 or 704x384 at Window 40;
+  768x448 needs 12 GB), or the DVD tab for depth, and smaller Splatting batches. 24-32 GB cards can turn on
+  Splatting's High VRAM Mode.
 - **NVIDIA driver 580 or newer.** The CUDA Toolkit is **not** needed: PyTorch brings its own CUDA.
 - **FFmpeg** -- a full build, with `ffprobe` -- with its `bin` folder on your PATH.
 - Git (the installer installs it with winget if it's missing).
 - About 30 GB of disk for Studio and its core models; more for the optional ones below (Inpainting V2 takes
-  46.6 GB, plus 17.4 GB for its FP8 mode).
+  46.6 GB, plus 17.4 GB for its FP8 mode; DVD 4.5 GB; MiniMax-Remover 2.8 GB; TensorRT 2.3 GB).
 
 Studio checks the driver and FFmpeg when it starts and tells you what's missing.
 
@@ -194,12 +224,19 @@ to download again. A model that folder doesn't have downloads into it; ROSE need
 | DepthCrafter (3.0 GB) | DepthCrafter | `DepthCrafter` | Models |
 | StereoCrafter (3.0 GB) | Inpainting | `StereoCrafter` | Models |
 | SAM 3 (gated, 3.4 GB) | Depth Map Editor | `SAM3/sam3.pt` | Models, or **Download Weights** on the editor's Segment page |
+| Video Depth Anything Small (116 MB), Base (458 MB) or Large (1.5 GB); Base and Large non-commercial (CC-BY-NC-4.0) | Depth Map's VDA tab | `VideoDepthAnything` | Models, or point VDA at the weights in your iw3 folder |
+| DVD v1.1 (4.5 GB, non-commercial: CC-BY-NC-4.0) | Depth Map's DVD tab | `DVD` | Models |
+| CLIP ViT-B/32 (605 MB) | Splatting's Auto 3D | `AutoStrength` | Models |
 | ROSE (about 3.7 GB, its own environment) | Erase from Clip, Edge Fill | `ROSE` | **Set Up ROSE** in the Depth Map Editor's Erase panel |
+| MiniMax-Remover (2.8 GB, non-commercial: CC-BY-NC-4.0) | Edge Fill's inpainter | `MiniMax-Remover` | Models (its two code files come from the authors' GitHub) |
+| AllTracker (66 MB; needs about 6 GB of VRAM) or SEA-RAFT (79 MB) | Edge Fill's Copy From Other Frames; SEA-RAFT also Rain | `AllTracker`, `SEA-RAFT` | Models |
 | OmniShotCut (164 MB) | Scene Cut | `SceneCut/OmniShotCut_ckpt.pth` | Models |
 | TransNetV2 | Scene Cut | comes with Studio (the `transnetv2-pytorch` package) | -- |
 | AutoShot | Scene Cut | `SceneCut/ckpt_0_200_0.pth` | only in the [SceneCutGUI checkpoint bundle](https://drive.google.com/file/d/1aJ96eJE4DstJ_HBzAusuYLvfU01Jnc92/view?usp=sharing) on Google Drive |
 | DINOv3 ViT-L/16 (gated, 1.2 GB) + SSCD (178 MB) | Scene Cut's cut validation | `SceneCut/DINOv3/`, `SceneCut/sscd_disc_large.torchscript.pt` | Models |
 | Wan 2.1 VACE's text encoder, VAE and tokenizer (11.9 GB) + StereoCrafter2 (34.7 GB): 46.6 GB | Inpainting V2 (experimental) | `Wan2.1-VACE-14B-diffusers`, `StereoCrafter2` | Models, or **Download V2 Weights** on Inpainting V2's page (not VACE's own 59 GB transformer); FP8 resident mode: StereoCrafter2 FP8 (17.4 GB, `StereoCrafter2-FP8`) |
+| NVIDIA TensorRT (2.3 GB of Python packages) | DepthCrafter, Inpainting, DVD (their TensorRT boxes) | Studio's own environment | Models |
+| SageAttention 1 (0.3 GB of packages) | DepthCrafter, Inpainting on RTX 20 series | Studio's own environment | Models |
 
 Each stage says which model it's missing when you press Start.
 
