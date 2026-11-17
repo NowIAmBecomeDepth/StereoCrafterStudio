@@ -941,6 +941,29 @@ class ClipQueue(QObject):
         return [{"text": f"Open {kind} in Explorer", "path": p}
                 for kind, p in self._related(path) if p and os.path.exists(p)]
 
+    def _let_go_elsewhere(self):
+        """The other stages' previews let go of their clips before a move (GpuJobs.let_go_of_files):
+        [(preview, done)], [] without a GpuJobs."""
+        owner = self.parent()
+        jobs = getattr(owner, "jobs", None) or getattr(owner.parent() if owner is not None else None, "jobs", None)
+        if jobs is None or not hasattr(jobs, "let_go_of_files"):
+            return []
+        try:
+            return jobs.let_go_of_files(owner)
+        except Exception:
+            logger.exception("The other previews could not let go before a move")
+            return []
+
+    @staticmethod
+    def _wait_let_go(released) -> None:
+        from studio.gpu_jobs import GpuJobs
+        GpuJobs.wait_let_go(released)
+
+    @staticmethod
+    def _put_back(released) -> None:
+        from studio.gpu_jobs import GpuJobs
+        GpuJobs.put_back(released)
+
     def _move_to_finished(self, wanted) -> None:
         if self._hold or self._moving:
             return
@@ -964,14 +987,16 @@ class ClipQueue(QObject):
             current = ""
         self._moving = True
         self.checkedChanged.emit()
+        released = self._let_go_elsewhere()      # another stage's preview may have these clips open
 
         def work():
             from core.common.file_organizer import move_files_to_finished
+            self._wait_let_go(released)
             try:
                 move_files_to_finished(moves, logger=logger, wait_before_move=0.3, max_retries=5, retry_delay=0.5)
             except Exception:
                 logger.exception("Move Selected to Finished failed")
-            self._sig_moved.emit((rows, current))
+            self._sig_moved.emit((rows, current, released))
 
         def go():
             threading.Thread(target=work, name=f"{self._kind}-move-finished", daemon=True).start()
@@ -982,8 +1007,9 @@ class ClipQueue(QObject):
             go()
 
     def _on_moved(self, out) -> None:
-        rows, current = out
+        rows, current, released = out if len(out) == 3 else (*out, [])
         self._moving = False
+        self._put_back(released)
         left = [os.path.basename(p) for p, _ in rows if os.path.exists(p)]
         moved = len(rows) - len(left)
         owner = self.parent()
@@ -1047,7 +1073,11 @@ class ClipQueue(QObject):
         except Exception:
             plan["shown"] = ""
 
+        released = []
+
         def work():
+            self._wait_let_go(released)
+            plan["released"] = released
             try:
                 plan["failed"] = send_back.apply(plan, logger)
             except Exception as e:
@@ -1060,6 +1090,7 @@ class ClipQueue(QObject):
         if not plan.get("moves") and not plan.get("aside"):
             self._on_sent((plan, target_ctl))      # Resume off: nothing to move
             return
+        released.extend(self._let_go_elsewhere())     # another stage's preview may have these files open
         release = getattr(owner, "release_for_job", None)
         if release is not None:
             release(go)
@@ -1069,6 +1100,7 @@ class ClipQueue(QObject):
     def _on_sent(self, out) -> None:
         plan, target_ctl = out
         self._moving = False
+        self._put_back(plan.pop("released", None))
         self.checkedChanged.emit()
         owner = self.parent()
         if owner is not None and (plan.get("moves") or plan.get("aside")):

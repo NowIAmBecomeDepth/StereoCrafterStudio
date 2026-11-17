@@ -151,10 +151,10 @@ jc.rescan()
 sq = find_all(win.contentItem(), lambda c: c.objectName() == "splatJobQueue")[0]
 check("Splatting: two clips listed", until(lambda: len(rows(sq)) == 2, 30))
 opened, texts = action(sq, "clipB", "splat")
-# Rerun with Video Depth Anything beside it (user, 2026-10-25)
-check("right-click a clip: Splat This Clip Now, Test Render, Rerun in DepthCrafter and with Video Depth Anything",
+# Rerun with Video Depth Anything beside it (user, 2026-10-25), and with DVD (its tab, 2026-11-07)
+check("right-click a clip: Splat This Clip Now, Test Render, Rerun in DepthCrafter, with VDA and with DVD",
       opened and texts == ["Splat This Clip Now", "Test Render", "Rerun in DepthCrafter",
-                           "Rerun with Video Depth Anything"], str(texts))
+                           "Rerun with Video Depth Anything", "Rerun with DVD"], str(texts))
 run_to_end(sp)
 outs = sorted(os.path.basename(p) for p in glob.glob(str(FIX / "out" / "**" / "*.mp4"), recursive=True))
 check("Splat This Clip Now splats that clip only (clipB)", outs and all(o.startswith("clipB") for o in outs), str(outs))

@@ -172,6 +172,49 @@ class GpuJobs(QObject):
         _claimed_at[stage_id] = time.monotonic()
         return True
 
+    def let_go_of_files(self, owner) -> List[Tuple[Any, threading.Event]]:
+        """Before a stage moves clips (Move to Finished, Rerun in): every OTHER stage's preview lets go of
+        the clip it has open -- Windows won't move or overwrite an open file. A tester, 2026-11-17: after
+        "Rerun in", Splatting showed the clip again (its source and depth map open), so DVD's Move to
+        Finished said "still in use" and a rerun's files ended up as "name (2)" or failed. `owner` is the
+        moving stage's controller or preview (its own preview lets go through its queue already). Returns
+        [(preview, done)]: wait on each `done` OFF the UI thread (the previews finish their release there),
+        then hand the list to put_back on the UI thread."""
+        out: List[Tuple[Any, threading.Event]] = []
+        for _sid, name, ctl in self._stages:
+            pv = getattr(ctl, "preview", None)
+            if ctl is owner or pv is None or pv is owner or not hasattr(pv, "release_for_job") \
+                    or not hasattr(pv, "restore_after_job") or any(pv is q for q, _ in out):
+                continue
+            try:
+                idle = pv._worker_idle() if hasattr(pv, "_worker_idle") else True
+                if not (bool(pv.property("loaded")) or not idle):
+                    continue
+                done = threading.Event()
+                pv.release_for_job(done.set)
+                out.append((pv, done))
+                logger.info("%s's preview lets go of its clip for a move", name)
+            except Exception:
+                logger.exception("%s's preview could not let go of its clip", name)
+        return out
+
+    @staticmethod
+    def wait_let_go(released, timeout: float = 30.0) -> None:
+        """From the moving thread: until every preview let_go_of_files asked has let go."""
+        deadline = time.monotonic() + timeout
+        for _pv, done in released or []:
+            if not done.wait(max(0.0, deadline - time.monotonic())):
+                logger.warning("A preview had not let go of its clip after %.0f s; moving anyway.", timeout)
+
+    @staticmethod
+    def put_back(released) -> None:
+        """On the UI thread, after the move: the previews come back on their clips (those still there)."""
+        for pv, _done in released or []:
+            try:
+                pv.restore_after_job()
+            except Exception:
+                logger.exception("A preview could not come back after a move")
+
     def wait_for_releases(self, timeout: float = 60.0) -> None:
         """From the claimant's JOB thread, before it loads anything: block
         until every release the claim asked for has really happened, then
