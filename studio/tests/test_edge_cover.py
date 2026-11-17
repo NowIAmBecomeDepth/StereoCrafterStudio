@@ -106,6 +106,30 @@ class CoverTest(unittest.TestCase):
             self.assertGreater(np.abs(left[i] - orig_l[i]).mean(), 3.0)
         self.assertEqual(len(left), N)
 
+    def test_zoom_fit_16_9_grows_the_frame_taller(self):
+        """The clips are 320x144 an eye (2.22:1): Fit 16:9 covers the strip without cropping the top or
+        bottom -- the frame grows taller instead (user, 2026-11-16), every file alike."""
+        g = F.find_groups(self.out)[0]
+        g, r = self.cover("Zoom", zoom_mode="Fit 16:9")
+        px = self.expected_px()
+        pw, nh, pad_l = F.fit_plan(W, H, px, 0)
+        self.assertEqual((pw, pad_l), (W, 0), "a wide clip: the strip all covered")
+        self.assertGreater(nh, H)
+        self.assertLessEqual(nh, W * 9 // 16)
+        for k, p in g.files.items():
+            size = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                   "stream=width,height", "-of", "csv=p=0", p], capture_output=True, text=True).stdout
+            self.assertEqual(size.strip(), f"{2 * W if k == 'sbs' else W},{nh}", k)
+        left = [f.astype(int) for f in E._reader(g.files["L"], W, nh, "rgb24")]
+        right = [f.astype(int) for f in E._reader(g.files["R"], W, nh, "rgb24")]
+        sbs = [f.astype(int) for f in E._reader(g.files["sbs"], 2 * W, nh, "rgb24")]
+        for i in (0, N // 2, N - 1):
+            self.assertGreater(np.abs(right[i][:, :8] - np.array(DARK)).mean(), 30, "the dark strip is gone")
+            self.assertLess(np.abs(left[i] - right[i]).mean(), 4.0, f"frame {i}: the eyes match")
+            self.assertLess(np.abs(sbs[i][:, :W] - sbs[i][:, W:]).mean(), 4.0)
+        self.assertEqual(len(left), N)
+        self.assertEqual(F._record(self.out)[os.path.basename(g.files["sbs"])]["zoom_mode"], "Fit 16:9")
+
     def test_a_second_cover_starts_from_the_original(self):
         g, _ = self.cover("Zoom")
         orig_l = _frames(F.kept_original(g.files["L"]), W)
@@ -207,6 +231,22 @@ class GraphTest(unittest.TestCase):
         two = F.cover_graph("Zoom", [(0, 1920), (1920, 1920)], 1080, 48, 0)
         self.assertIn("crop=1872:1052:1968:14", two)
         self.assertTrue(two.startswith("split=2[e0][e1];") and two.endswith("hstack=inputs=2"), two)
+
+    def test_fit_16_9(self):
+        # 2.39: the strip covered, the frame a little taller
+        self.assertEqual(F.fit_plan(1920, 804, 48, 0), (1920, 824, 0))
+        # 1.85 with a wide strip: 16:9 reached first, the rest of the strip a narrower black bar
+        self.assertEqual(F.fit_plan(1920, 1038, 200, 0), (1790, 1080, 130))
+        # already 16:9: no growth, the strip all bar
+        self.assertEqual(F.fit_plan(1920, 1080, 48, 0), (1872, 1080, 48))
+        # Half SBS: 16:9 of the eye as shown (1920 wide), not of its 960 squeezed px
+        self.assertEqual(F.fit_plan(960, 804, 24, 0, 0.5), (960, 824, 0))
+        # both sides: the bar split as the strips are
+        self.assertEqual(F.fit_plan(1920, 1080, 40, 20), (1860, 1080, 40))
+        g = F.cover_graph("Zoom", [(0, 1920)], 1038, 200, 0, "Fit 16:9")
+        self.assertEqual(g, "crop=1720:1038:200:0,scale=1790:1080:flags=lanczos,pad=1920:1080:130:0:black")
+        self.assertEqual(F.cover_graph("Zoom", [(0, 1920)], 804, 48, 0, "Fit 16:9"),
+                         "crop=1872:804:48:0,scale=1920:824:flags=lanczos")
 
     def test_black_bar_boxes_each_eye(self):
         g = F.cover_graph("Black Bar", [(0, 960), (960, 960)], 540, 24, 10)

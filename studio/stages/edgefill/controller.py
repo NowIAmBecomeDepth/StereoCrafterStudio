@@ -45,9 +45,16 @@ HELP: Dict[str, str] = {
     "method": (
         "How the strip is dealt with. Fill: the Inpainter paints it (the settings below). Black Bar: the strip "
         "is painted black -- on both eyes, the same width, so the two still match. Zoom: the strip is cropped "
-        "off both eyes and the rest scaled back up to the frame, a little of the top and bottom going too, "
-        "so the shape stays. Black Bar and Zoom need no models and take one quick pass; each clip is covered "
+        "off both eyes and the rest scaled back up -- keeping the shape, or fitting a 16:9 screen (Zoom, "
+        "below). Black Bar and Zoom need no models and take one quick pass; each clip is covered "
         "by its own measured strip, so Zoom's amount can differ from clip to clip."),
+    "zoom_mode": (
+        "How Zoom covers the strip. Keep Aspect Ratio: the strip and a little of the top and bottom are cropped "
+        "off and the rest scaled back up, so the frame keeps its size and shape. Fit 16:9: nothing more is "
+        "cropped -- the picture grows evenly and the frame gets taller with it, until the strip is covered or "
+        "the eye reaches 16:9, whichever comes first. A wide 2.39 clip just becomes a little taller; a 1.85 clip "
+        "with a wide strip grows to 16:9 and the rest of the strip stays as a narrower black bar. A clip already "
+        "16:9 or taller can't grow, so its strip is all black bar."),
     "merged_folder": (
         "The merged clips to look at and fill: Full SBS files and / or their _L / _R eyes, as Merging writes "
         "them (<clip>_<width>_merged_full_sbs...)."),
@@ -222,6 +229,7 @@ class EdgeFillController(QObject):
     prefills = Property("QVariantList", lambda self: list(S.PREFILLS), constant=True)
     inpainters = Property("QVariantList", lambda self: list(S.INPAINTERS), constant=True)
     methods = Property("QVariantList", lambda self: list(S.METHODS), constant=True)
+    zoomModes = Property("QVariantList", lambda self: list(S.ZOOM_MODES), constant=True)
     copiers = Property("QVariantList", lambda self: list(S.COPIERS), constant=True)
     mmrSteps = Property("QVariantList", lambda self: list(S.MMR_STEPS), constant=True)
 
@@ -805,7 +813,7 @@ class EdgeFillController(QObject):
                     try:
                         if o["method"] != "Fill":
                             r = edge_fill.cover(g, mask, progress, self._stop, method=o["method"], settings=enc,
-                                                both_edges=o["both_edges"])
+                                                both_edges=o["both_edges"], zoom_mode=o["zoom_mode"])
                         else:
                             r = edge_fill.fill(g, mask, progress, self._stop, steps=o["steps"], grain=o["grain"],
                                                settings=enc, rose_height=o["height"], detail=o["detail"],

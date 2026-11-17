@@ -28,6 +28,10 @@ STRINGS: Dict[str, str] = {
     # Method (user, 2026-11-07): Fill paints the strip (the Inpainter); Black Bar and Zoom hide it, the
     # same on both eyes, in one quick pass (core/removal/edge_fill.cover)
     "method": "Fill",
+    # Zoom's way (user, 2026-11-16): Keep Aspect Ratio (as before: the top and bottom cropped by the strip's
+    # share), or Fit 16:9 (the picture grows evenly, the frame taller, until the strip is covered or the eye
+    # is 16:9; what's left of the strip a black bar) -- core/removal/edge_fill.ZOOM_MODES
+    "zoom_mode": "Keep Aspect Ratio",
     # Copy From Other Frames' model (user, 2026-11-07): AllTracker (the default; core/removal/track_fill.py)
     # or SEA-RAFT (flow_fill.py)
     "copy_with": "AllTracker",
@@ -65,6 +69,8 @@ INPAINTERS = ["MiniMax-Remover", "ROSE"]
 COPIERS = ["AllTracker", "SEA-RAFT"]
 #: Fill, or the cheap covers (core/removal/edge_fill.METHODS)
 METHODS = ["Fill", "Black Bar", "Zoom"]
+#: Zoom's ways (core/removal/edge_fill.ZOOM_MODES)
+ZOOM_MODES = ["Keep Aspect Ratio", "Fit 16:9"]
 #: MiniMax-Remover's steps (core/removal/minimax_env.STEP_CHOICES)
 MMR_STEPS = ["6", "12"]
 
@@ -72,7 +78,7 @@ MMR_STEPS = ["6", "12"]
 #: A clip's sidecar (user, 2026-11-07: "different models/settings per clip and run them all after", saved "like
 #: splatting" with a Create / Update Sidecar button): the fill's settings; the folders, the grid and Right Edge Too
 #: (the strips are measured on it) stay the page's
-CLIP_KEYS = ("method", "inpainter", "mmr_steps", "steps", "size", "prefill", "grain", "detail", "copy_frames",
+CLIP_KEYS = ("method", "zoom_mode", "inpainter", "mmr_steps", "steps", "size", "prefill", "grain", "detail", "copy_frames",
              "copy_with", "depth_aware")
 #: ...kept beside the merged clips, by clip name, as the fill's record and strips are
 CLIPS_FILE = ".edge_fill_sidecars.json"
@@ -121,7 +127,7 @@ def fill_options(values: Dict[str, Any]) -> Dict[str, Any]:
         steps = 6
     if v["inpainter"] == "MiniMax-Remover":           # its own Steps: 6 or 12
         steps = int(v["mmr_steps"])
-    return {"method": v["method"], "inpainter": v["inpainter"], "steps": steps, "height": height(v["size"]),
+    return {"method": v["method"], "zoom_mode": v["zoom_mode"], "inpainter": v["inpainter"], "steps": steps, "height": height(v["size"]),
             "size": str(v["size"]).split(" ")[0], "prefill": v["prefill"], "grain": bool(v["grain"]),
             "detail": bool(v["detail"]), "both_edges": bool(v["both_edges"]), "copy_frames": bool(v["copy_frames"]),
             "copier": v["copy_with"], "depth_aware": bool(v["depth_aware"])}
@@ -129,6 +135,8 @@ def fill_options(values: Dict[str, Any]) -> Dict[str, Any]:
 
 def describe(o: Dict[str, Any]) -> str:
     """fill_options() said in a few words, for the console."""
+    if o["method"] == "Zoom":
+        return f"Zoom ({o.get('zoom_mode', ZOOM_MODES[0])}), both eyes"
     if o["method"] != "Fill":
         return f"{o['method']}, both eyes"
     how = (f"MiniMax-Remover, {o['steps']} steps" if o["inpainter"] == "MiniMax-Remover"
@@ -169,6 +177,8 @@ def coerce(key: str, value: Any) -> Any:
             return value if value in COPIERS else STRINGS["copy_with"]
         if key == "method":
             return value if value in METHODS else STRINGS["method"]
+        if key == "zoom_mode":
+            return value if value in ZOOM_MODES else STRINGS["zoom_mode"]
         if key == "mmr_steps":
             return str(value) if str(value) in MMR_STEPS else STRINGS["mmr_steps"]
         if key in STRINGS:

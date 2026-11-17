@@ -228,6 +228,18 @@ Item {
                     boxWidth: 190
                 }
             }
+            // Zoom's way (user, 2026-11-16): keep the shape, or grow to fit a 16:9 screen
+            FieldRow {
+                visible: page.st.method === "Zoom"
+                label: "Zoom"; labelWidth: 110
+                help: page.help("zoom_mode")
+                Dropdown {
+                    objectName: "fillEdgesZoomMode"
+                    store: page.st; key: "zoom_mode"
+                    model: page.ef.zoomModes
+                    boxWidth: 190
+                }
+            }
             FieldRow {
                 visible: !page.covering
                 label: "Inpainter"; labelWidth: 110

@@ -1399,6 +1399,10 @@ def _write(path: str, probe: Dict, places, n: int, settings: Dict, stop: threadi
 # the originals kept and the record written as fill() does, so a clip can be filled or covered again.
 
 METHODS = ("Fill", "Black Bar", "Zoom")
+#: Zoom's two ways (user, 2026-11-16): Keep Aspect Ratio crops the top and bottom by the strip's share;
+#: Fit 16:9 crops nothing more -- the picture grows evenly, the frame taller with it, until the strip is
+#: covered or the eye is 16:9, whichever comes first; what the strip still shows then stays a black bar
+ZOOM_MODES = ("Keep Aspect Ratio", "Fit 16:9")
 
 
 def cover_sides(strips: Dict) -> Dict[str, int]:
@@ -1431,9 +1435,30 @@ def cover_px(px: int, mask_w: int, eye_w: int, squeeze: float = 1.0) -> int:
     return _even_up((math.ceil(strip) + STRIP_PAD) * squeeze)
 
 
-def cover_graph(method: str, eyes: List[Tuple[int, int]], h: int, left: int, right: int) -> str:
+def fit_plan(ew: int, h: int, left: int, right: int, squeeze: float = 1.0) -> Tuple[int, int, int]:
+    """Fit 16:9 for one eye `ew` x `h` file px (`squeeze` 0.5 in a Half SBS, so its shown width is
+    ew / squeeze) with `left` / `right` px cut: (picture width, new height, black on the left). The
+    rest of the eye -- the picture's height uncut -- grows evenly until it spans the eye or the eye
+    reaches 16:9; an eye already 16:9 or taller doesn't grow, its strip all black bar."""
+    kw = ew - left - right
+    need = ew / float(kw)
+    h_max = int(ew / squeeze * 9 / 16) // 2 * 2
+    s = min(need, max(1.0, h_max / float(h)))
+    if s >= need - 1e-9:
+        pw = ew
+    else:
+        pw = min(ew, max(kw, int(round(kw * s / 2.0)) * 2))
+    nh = max(h, min(max(h, h_max), int(round(h * s / 2.0)) * 2))
+    gap = ew - pw
+    pad_l = min(gap, int(round(gap * left / float(left + right) / 2.0)) * 2) if gap else 0
+    return pw, nh, pad_l
+
+
+def cover_graph(method: str, eyes: List[Tuple[int, int]], h: int, left: int, right: int,
+                zoom_mode: str = "Keep Aspect Ratio", squeeze: float = 1.0) -> str:
     """The -vf graph that covers `left` / `right` px of each eye ((x, width) in a frame `h` high):
-    black boxes, or each eye cropped (its height by as much, the shape kept) and scaled back up."""
+    black boxes, or each eye cropped (its height by as much, the shape kept) and scaled back up --
+    or, Fit 16:9 (fit_plan()), the eye's height kept, scaled up evenly and padded black to the eye."""
     if method == "Black Bar":
         boxes = []
         for x, ew in eyes:
@@ -1447,6 +1472,11 @@ def cover_graph(method: str, eyes: List[Tuple[int, int]], h: int, left: int, rig
     zooms = []
     for x, ew in eyes:
         kw = ew - left - right
+        if zoom_mode == "Fit 16:9":
+            pw, nh, pad_l = fit_plan(ew, h, left, right, squeeze)
+            z = f"crop={kw}:{h}:{x + left}:0,scale={pw}:{nh}:flags=lanczos"
+            zooms.append(z + (f",pad={ew}:{nh}:{pad_l}:0:black" if pw < ew else ""))
+            continue
         kh = min(h, max(2, int(round(h * kw / float(ew) / 2.0)) * 2))
         y = (h - kh) // 4 * 2
         zooms.append(f"crop={kw}:{kh}:{x + left}:{y},scale={ew}:{h}:flags=lanczos")
@@ -1460,13 +1490,15 @@ def cover_graph(method: str, eyes: List[Tuple[int, int]], h: int, left: int, rig
 
 def cover(group: Group, mask_path: str, progress: Progress, stop: threading.Event,
           method: str = "Black Bar", settings: Optional[Dict] = None, strips: Optional[Dict] = None,
-          both_edges: bool = False) -> Dict:
-    """Hide the edge strips of one merged clip -- `method` "Black Bar" or "Zoom" -- the same on both
-    eyes, its files rewritten in place as fill() does (the originals kept; doing it again starts from
-    them). Returns {"method", "edges": [{"eye": "both", "edge", "strip"}], "files": [...]} or
-    {"skipped": why}. Raises E.Stopped, RuntimeError."""
+          both_edges: bool = False, zoom_mode: str = "Keep Aspect Ratio") -> Dict:
+    """Hide the edge strips of one merged clip -- `method` "Black Bar" or "Zoom" (`zoom_mode` one of
+    ZOOM_MODES) -- the same on both eyes, its files rewritten in place as fill() does (the originals
+    kept; doing it again starts from them). Returns {"method", "edges": [{"eye": "both", "edge",
+    "strip"}], "files": [...]} or {"skipped": why}. Raises E.Stopped, RuntimeError."""
     if method not in METHODS[1:]:
         raise ValueError(f"Not a cover: {method}")
+    if zoom_mode not in ZOOM_MODES:
+        zoom_mode = ZOOM_MODES[0]
     from studio.merge_all import probe as probe_file
     src = {k: kept_original(p) or p for k, p in group.files.items()}
     probes = {p: probe_file(p) for p in src.values()}
@@ -1474,7 +1506,7 @@ def cover(group: Group, mask_path: str, progress: Progress, stop: threading.Even
     strips = edges_wanted(strips or measure(mask_path, stop), both_edges)
     sides = cover_sides(strips)
     mask_w = int(strips.get("width") or 0)
-    plans = []                                   # (key, path, eyes, h, left, right)
+    plans = []                                   # (key, path, eyes, h, left, right, squeeze)
     shown = {}                                   # side -> px at the eye's full width, for the record
     for key, path in group.files.items():
         p = probes[src[key]]
@@ -1488,21 +1520,28 @@ def cover(group: Group, mask_path: str, progress: Progress, stop: threading.Even
                 shown[s] = max(shown.get(s, 0), full)
         if cut["left"] + cut["right"] >= eyes[0][1] // 2:
             return {"skipped": f"The edge strip ({max(cut.values())} px) is too wide for the frame."}
-        plans.append((key, path, eyes, p["h"], cut["left"], cut["right"]))
+        plans.append((key, path, eyes, p["h"], cut["left"], cut["right"], 0.5 if half else 1.0))
     if not shown:
         return {"skipped": "No edge strip wide enough to need it in its splat mask."}
     edges = [{"eye": "both", "edge": s, "strip": px} for s, px in sorted(shown.items())]
-    logger.info(f"  {method}: " + ", ".join(f"{e['edge']} edge {e['strip']} px" for e in edges)
+    how = f" ({zoom_mode})" if method == "Zoom" else ""
+    logger.info(f"  {method}{how}: " + ", ".join(f"{e['edge']} edge {e['strip']} px" for e in edges)
                 + f", both eyes (mask {os.path.basename(mask_path)})")
+    if method == "Zoom" and zoom_mode == "Fit 16:9":
+        key, _p, eyes, h, left, right, sq = plans[0]
+        if left or right:
+            pw, nh, _pl = fit_plan(eyes[0][1], h, left, right, sq)
+            logger.info(f"  Fit 16:9: {h} -> {nh} px high"
+                        + (f", {eyes[0][1] - pw} px of the strip left black" if pw < eyes[0][1] else ""))
     progress(0.08, f"{method}: starting")
     from core.common.partial_output import discard
     sweep(group.folder)
     parts = []
     try:
-        for fi, (key, path, eyes, h, left, right) in enumerate(plans):
+        for fi, (key, path, eyes, h, left, right, sq) in enumerate(plans):
             if not (left or right):
                 continue
-            vf = cover_graph(method, eyes, h, left, right)
+            vf = cover_graph(method, eyes, h, left, right, zoom_mode, sq)
             parts.append((path, _write_cover(
                 path, probes[src[key]], vf, settings or {}, stop,
                 lambda d, fi=fi, path=path: progress(0.08 + 0.92 * (fi + d) / len(plans),
@@ -1512,8 +1551,10 @@ def cover(group: Group, mask_path: str, progress: Progress, stop: threading.Even
         for _path, part in parts:
             discard(part)
         raise
-    written = _put_in_place(group, src, parts, {"method": method, "mask": os.path.basename(mask_path),
-                                                "edges": edges})
+    record = {"method": method, "mask": os.path.basename(mask_path), "edges": edges}
+    if method == "Zoom":
+        record["zoom_mode"] = zoom_mode
+    written = _put_in_place(group, src, parts, record)
     progress(1.0, f"{method}: done")       # its own bar to the end (the controller's "cover")
     return {"method": method, "edges": edges, "files": written}
 
