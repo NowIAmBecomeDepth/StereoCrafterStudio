@@ -1251,6 +1251,12 @@ def build_encode_cmd(
 
     # Check for color_tags_mode to force 10-bit if needed
     color_tags_mode = str(video_stream_info.get("color_tags_mode", "")).lower() if video_stream_info else ""
+    # The stage's own Colour Tags pick wins (tester, 2026-11-17: Inpainting wrote BT.2020 PQ -- the input
+    # splat's tags -- with BT.709 F picked); Auto / Off leave the input's tags to be copied, as before.
+    picked = str((encoding_options or {}).get("color_tags") or "").lower()
+    if picked in _FORCED_COLOR_TAGS:
+        color_tags_mode = picked
+    forced_tags = _FORCED_COLOR_TAGS.get(color_tags_mode)
     if color_tags_mode in ("bt.2020 pq", "bt.2020 hlg", "bt.2020"):
         output_codec = "hevc_nvenc" if nvenc_available() else "libx265"
         output_pix_fmt = "yuv420p10le"
@@ -1318,6 +1324,12 @@ def build_encode_cmd(
         output_codec, output_profile, output_pix_fmt = "dnxhd", _dnx[3], _dnx[5]
         override_preset, override_extra_args = None, []
 
+    # A picked Colour Tags value: the pixels made with its matrix and range, not only tagged so (BT.709 F
+    # tagged full range over limited pixels would play washed out)
+    if forced_tags:
+        matrix = "bt2020" if forced_tags["color_space"].startswith("bt2020") else "bt709"
+        ffmpeg_cmd.extend(["-vf", _build_output_filters(0, 0, matrix, False, forced_tags["color_range"])])
+
     # Build ffmpeg command
     ffmpeg_cmd.extend(["-c:v", output_codec])
 
@@ -1337,15 +1349,16 @@ def build_encode_cmd(
     if output_profile:
         ffmpeg_cmd.extend(["-profile:v", output_profile])
 
-    if video_stream_info:
+    if video_stream_info or forced_tags:
         for k, f in [
             ("color_primaries", "-color_primaries"),
             ("transfer_characteristics", "-color_trc"),
             ("color_space", "-colorspace"),
             ("color_range", "-color_range"),
         ]:
-            if video_stream_info.get(k):
-                ffmpeg_cmd.extend([f, video_stream_info[k]])
+            val = forced_tags[k] if forced_tags else (video_stream_info or {}).get(k)
+            if val:
+                ffmpeg_cmd.extend([f, val])
 
     if os.path.splitext(final_output_mp4_path)[1].lower() in (".mp4", ".mov", ".m4v"):
         ffmpeg_cmd.extend(["-movflags", "+write_colr"])

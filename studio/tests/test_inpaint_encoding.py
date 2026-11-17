@@ -200,5 +200,63 @@ class DefaultOffTest(unittest.TestCase):
             self.assertFalse([k for k in preset if k.startswith("dnxhr")], name)
 
 
+
+#: a splat from an HDR source: ffprobe's tags of a BT.2020 PQ clip, as Inpainting reads its input
+PQ_SPLAT = {"pix_fmt": "yuv420p10le", "codec_name": "hevc", "color_primaries": "bt2020",
+            "transfer_characteristics": "smpte2084", "color_space": "bt2020nc", "color_range": "tv"}
+
+
+class ColourTagsTest(unittest.TestCase):
+    """Encoding Settings > Colour Tags reaches Inpainting's encode (tester, 2026-11-17: "bt 2020pq is being
+    outputted when I have bt 709 f selected"). The engine's encoding options left the setting out, so the
+    encode copied the input splat's own tags -- PQ from an HDR source -- whatever was picked. Real encodes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @staticmethod
+    def engine_options(app_config):
+        from studio.legacy import install
+        install()
+        from studio.stages.inpainting.engine import InpaintingEngine
+        engine = InpaintingEngine.__new__(InpaintingEngine)      # only its settings: nothing else is built
+        engine.app_config = dict(app_config)
+        return engine._encoding_options()
+
+    def encode(self, name, colour_tags):
+        import numpy as np
+        import cv2
+        from core.common.video_io import encode_frames_to_mp4
+        d = tempfile.mkdtemp(dir=self.tmp)
+        ramp = (np.linspace(0, 65535, 320)[None, :, None] * np.ones((176, 1, 3))).astype(np.uint16)
+        for i in range(3):
+            cv2.imwrite(os.path.join(d, f"{i:05d}.png"), ramp)
+        opts = self.engine_options({"codec": "H.264", "encoding_encoder": "Force CPU", "encoding_quality": "Fastest",
+                                    "color_tags": colour_tags})
+        out = os.path.join(self.tmp, name)
+        self.assertTrue(encode_frames_to_mp4(d, out, 24, 3, dict(PQ_SPLAT), user_output_crf=28,
+                                             encoding_options=opts), name)
+        got = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=color_primaries,color_transfer,color_space,color_range", "-of", "json", out],
+                             capture_output=True, text=True)
+        s = (json.loads(got.stdout or "{}").get("streams") or [{}])[0]
+        return (s.get("color_primaries"), s.get("color_transfer"), s.get("color_space"), s.get("color_range"))
+
+    def test_the_engine_passes_the_colour_tags(self):
+        self.assertEqual(self.engine_options({"color_tags": "BT.709 F"})["color_tags"], "BT.709 F")
+        self.assertEqual(self.engine_options({})["color_tags"], "Auto")
+
+    def test_a_pq_splat_comes_out_as_picked(self):
+        self.assertEqual(self.encode("709f.mp4", "BT.709 F"), ("bt709", "bt709", "bt709", "pc"))
+        self.assertEqual(self.encode("709l.mp4", "BT.709 L"), ("bt709", "bt709", "bt709", "tv"))
+        # Auto keeps the input's own tags, as before
+        self.assertEqual(self.encode("auto.mp4", "Auto"), ("bt2020", "smpte2084", "bt2020nc", "tv"))
+
+
 if __name__ == "__main__":
     unittest.main()

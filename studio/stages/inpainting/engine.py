@@ -702,6 +702,9 @@ class InpaintingEngine:
             # v2: Enable DNxHR (user, 2026-10-11)
             "dnxhr": bool(self.app_config.get("dnxhr_fullres_split", False)),
             "dnxhr_profile": self.app_config.get("dnxhr_profile", "HQX (10-bit 4:2:2)"),
+            # Colour Tags (tester, 2026-11-17): left out, the encode copied the input splat's own tags --
+            # BT.2020 PQ from an HDR source -- whatever was picked
+            "color_tags": self.app_config.get("color_tags", "Auto"),
         }
 
     def _stream_encoder_for(self, width, height):
