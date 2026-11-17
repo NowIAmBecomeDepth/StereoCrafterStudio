@@ -18,6 +18,8 @@ Item {
 
     readonly property var bl: Blend
     readonly property var st: bl.settings
+    // the first map: DepthCrafter's, or DVD's blended with VDA's (user, 2026-11-17)
+    readonly property string first: st.first || "DepthCrafter"
     readonly property bool idle: !bl.busy
     readonly property real colMin: 370
     readonly property int requiredWidth: 36 + colMin + Theme.gap + 520
@@ -84,8 +86,8 @@ Item {
             }
             Caption {
                 text: page.bl.clips.length
-                      ? page.bl.clips.length + (page.bl.clips.length === 1 ? " clip has" : " clips have") + " both a DepthCrafter and a " + page.st.other + " map here."
-                      : "No clip here has both a DepthCrafter and a " + page.st.other + " map yet: make the " + page.st.other
+                      ? page.bl.clips.length + (page.bl.clips.length === 1 ? " clip has" : " clips have") + " both a " + page.first + " and a " + page.st.other + " map here."
+                      : "No clip here has both a " + page.first + " and a " + page.st.other + " map yet: make the " + page.st.other
                         + " map on its tab (or Splatting's right-click Rerun with " + (page.st.other === "DVD" ? "DVD" : "Video Depth Anything") + ")."
             }
         }
@@ -104,7 +106,9 @@ Item {
                     // a clip with its own settings (user, 2026-11-07): the panel is that clip's
                     title: page.bl.previewOwn ? "Blend: " + (page.bl.clips[page.bl.previewClip] || "") + " only" : "Blend"
                     enabled: page.idle
-                    // the map blended with DepthCrafter's: VDA's or DVD's (user, 2026-11-07)
+                    // the first map: DepthCrafter's or DVD's (user, 2026-11-17: "allow dvd and vda depth map blending")
+                    FieldRow { label: "First Map"; help: page.help("first"); BDrop { objectName: "blendFirst"; key: "first"; model: page.bl.choices.first } }
+                    // the map blended with the first: VDA's or DVD's (user, 2026-11-07)
                     FieldRow { label: "Other Map"; help: page.help("other"); BDrop { objectName: "blendOther"; key: "other"; model: page.bl.choices.other } }
                     FieldRow { label: "Mode"; help: page.help("mode"); BDrop { objectName: "blendMode"; key: "mode"; model: page.bl.choices.mode } }
                     // By Depth (user, 2026-11-07): Near / Far Mix in place of one Mix
@@ -147,7 +151,7 @@ Item {
                     }
                     Caption {
                         visible: page.st.mode === "Mix"
-                        text: "0 = DepthCrafter, 1 = " + page.st.other
+                        text: "0 = " + page.first + ", 1 = " + page.st.other
                         font.pixelSize: Theme.bodySize - 1
                     }
                     FieldRow { label: "Base"; help: page.help("base"); BDrop { objectName: "blendBase"; key: "base"; model: page.bl.choices.base } }
@@ -277,8 +281,9 @@ Item {
                     Layout.fillWidth: true
                     spacing: 0
                     Repeater {
-                        model: ["DepthCrafter", page.st.other, "Blend"]
+                        model: [page.first, page.st.other, "Blend"]
                         Text {
+                            objectName: "blendColumn"
                             required property string modelData
                             Layout.fillWidth: true
                             Layout.preferredWidth: 1

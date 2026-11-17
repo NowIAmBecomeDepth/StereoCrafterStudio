@@ -203,6 +203,18 @@ st.setProperty("other", "VDA"); pump(0.6)
 check("...back to VDA: Base follows it (DVD -> VDA)", st.value("base") == "VDA", str(st.value("base")))
 st.setProperty("base", "DepthCrafter"); pump(0.2)
 
+# First Map (user, 2026-11-17: "allow dvd and vda depth map blending"): DVD's map blended with VDA's
+check("First Map on the page", one("blendFirst") is not None)
+st.setProperty("first", "DVD"); pump(0.6)
+check("First Map DVD: clipA's DVD and VDA maps listed; Other Map offers VDA only; Base follows (DepthCrafter -> DVD)",
+      list(bl.property("clips")) == ["clipA"] and list(bl.property("choices")["other"]) == ["VDA"]
+      and list(bl.property("choices")["base"]) == ["DVD", "VDA"] and st.value("base") == "DVD",
+      f"{list(bl.property('clips'))} {list(bl.property('choices')['other'])} {st.value('base')}")
+_cols = lambda: [str(c.property("modelData")) for c in find_all(win.contentItem(), lambda c: c.objectName() == "blendColumn")]
+check("...the preview's columns name them", until(lambda: _cols() == ["DVD", "VDA", "Blend"], 10), str(_cols()))
+st.setProperty("first", "DepthCrafter"); pump(0.6)
+check("...back to DepthCrafter: Base follows (DVD -> DepthCrafter)", st.value("base") == "DepthCrafter", str(st.value("base")))
+
 other = tmp / "elsewhere"; other.mkdir()
 objs["Splatting"]._set("input_depth_maps", str(other)); pump(0.3)
 bl.useSplattingFolder(); pump(0.3)

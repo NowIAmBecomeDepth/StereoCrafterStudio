@@ -58,6 +58,11 @@ logger = logging.getLogger(__name__)
 MODES = ("Mix", "Layout + Detail")
 #: The model whose map is blended with DepthCrafter's (its kind in core.vda.output: the name, lower case).
 OTHERS = ("VDA", "DVD")
+#: The first map, the one the other is blended with: DepthCrafter's, or DVD's (then the other is VDA's; user,
+#: 2026-11-17: "allow dvd and vda depth map blending"). The code's "dc" names this map whichever model it is.
+FIRSTS = ("DepthCrafter", "DVD")
+#: each model's kind in core.vda.output
+KINDS = {"DepthCrafter": "dc", "VDA": "vda", "DVD": "dvd"}
 #: Base and Output Size name DepthCrafter or the other map (its name: the page lists only the one picked).
 BASES = ("DepthCrafter",) + OTHERS
 ALIGNS = ("Per clip", "Per frame", "Off")
@@ -74,15 +79,25 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # ---- the maps ------------------------------------------------------------------------------------
 
-def pairs(folder: str, suffix: str = "_depth", other: str = "VDA") -> List[Dict[str, str]]:
-    """Each clip in `folder` with both a DepthCrafter map and `other`'s (OTHERS): [{name, clip, dc, other, out}]
-    by name. `out` is where Splatting reads the clip's map -- where the blend goes."""
+def first_of(opts: Dict) -> str:
+    """The first map's model in a run's settings (DepthCrafter when none is named)."""
+    first = opts.get("first") or "DepthCrafter"
+    return first if first in FIRSTS else "DepthCrafter"
+
+
+def pairs(folder: str, suffix: str = "_depth", other: str = "VDA", first: str = "DepthCrafter") -> List[Dict[str, str]]:
+    """Each clip in `folder` with both `first`'s map (FIRSTS) and `other`'s (OTHERS): [{name, clip, dc, other,
+    out}] by name -- "dc" the first map's path, whichever model it is. `out` is where Splatting reads the
+    clip's map -- where the blend goes."""
     if not folder or not os.path.isdir(folder):
         return []
     kind = other.lower() if other in OTHERS else "vda"
+    fk = KINDS.get(first, "dc")
+    if fk == kind:
+        return []
     tail = suffix + ".mp4"
     names = set()
-    for sub in ("", OUT.KIND_FOLDERS["dc"], OUT.KIND_FOLDERS[kind]):
+    for sub in ("", OUT.KIND_FOLDERS[fk], OUT.KIND_FOLDERS[kind]):
         try:
             names.update(n for n in os.listdir(os.path.join(folder, sub)) if n.lower().endswith(tail.lower()))
         except OSError:
@@ -91,16 +106,16 @@ def pairs(folder: str, suffix: str = "_depth", other: str = "VDA") -> List[Dict[
     for name in sorted(names, key=str.lower):
         root = os.path.join(folder, name)
         here = OUT.kind_of(root) if os.path.isfile(root) else ""
-        dc = root if here == "dc" else os.path.join(folder, OUT.KIND_FOLDERS["dc"], name)
+        dc = root if here == fk else os.path.join(folder, OUT.KIND_FOLDERS[fk], name)
         oth = root if here == kind else os.path.join(folder, OUT.KIND_FOLDERS[kind], name)
         if os.path.isfile(dc) and os.path.isfile(oth):
             out.append({"name": name, "clip": name[: -len(tail)], "dc": dc, "other": oth, "out": root})
     return out
 
 
-def output_size(dc_info, vda_info, choice: str) -> Tuple[int, int]:
-    """(width, height) of the blend: the larger map's, or the one named."""
-    if choice == "DepthCrafter":
+def output_size(dc_info, vda_info, choice: str, first: str = "DepthCrafter") -> Tuple[int, int]:
+    """(width, height) of the blend: the larger map's, or the one named (`first`: the first map's model)."""
+    if choice == first:
         return dc_info.width, dc_info.height
     if choice in OTHERS:
         return vda_info.width, vda_info.height
@@ -271,11 +286,11 @@ def measure(dc_info, vda_info, frames: int, stop: Optional[threading.Event] = No
     return np.array(rows, dtype=np.float64).reshape(-1, STATS)
 
 
-def _fit(s, base: str) -> Tuple[float, float]:
+def _fit(s, base: str, first: str = "DepthCrafter") -> Tuple[float, float]:
     """(a, b): base ~ a * other + b from summed STATS `s`. A scale of 0 or less is never an answer (it turns
     near into far): the fit then matches the two maps' mean and spread instead."""
     n, sx, sy, sxx, syy, sxy = (float(v) for v in s)
-    if base != "DepthCrafter":              # fit DepthCrafter (y) onto VDA (x): swap the roles
+    if base != first:                       # fit the first map (y) onto the other (x): swap the roles
         sx, sy, sxx, syy = sy, sx, syy, sxx
     if n <= 1:
         return 1.0, 0.0
@@ -289,18 +304,18 @@ def _fit(s, base: str) -> Tuple[float, float]:
     return a, (sy - a * sx) / n
 
 
-def fits(stats: np.ndarray, base: str, align: str) -> np.ndarray:
+def fits(stats: np.ndarray, base: str, align: str, first: str = "DepthCrafter") -> np.ndarray:
     """(frames, 2): each frame's (a, b) fitting the other map onto the base one."""
     n = len(stats)
     if align == "Off" or n == 0:
         return np.tile([1.0, 0.0], (n, 1))
     if align == "Per clip":
-        return np.tile(_fit(stats.sum(axis=0), base), (n, 1))
+        return np.tile(_fit(stats.sum(axis=0), base, first), (n, 1))
     csum = np.vstack([np.zeros((1, STATS)), np.cumsum(stats, axis=0)])
     out = np.empty((n, 2))
     for i in range(n):
         lo, hi = max(0, i - FRAME_WINDOW), min(n, i + FRAME_WINDOW + 1)
-        out[i] = _fit(csum[hi] - csum[lo], base)
+        out[i] = _fit(csum[hi] - csum[lo], base, first)
     return out
 
 
@@ -315,7 +330,7 @@ def blend_parts(dc_t, vda_t, fit: Tuple[float, float], opts: Dict) -> Dict:
     """A frame's blend before it is finished: {"out"} (Mix), or {"layout", "detail"} (Layout + Detail), and
     {"other"}: the other model's map in the base map's scale (the Edge Band's)."""
     a, b = float(fit[0]), float(fit[1])
-    if opts["base"] != "DepthCrafter":
+    if opts["base"] != first_of(opts):
         base_t, other_t = vda_t, dc_t * a + b
         dc_t, vda_t = other_t, base_t
     else:
@@ -419,10 +434,10 @@ def blend_clip(pair: Dict[str, str], opts: Dict, stop: Optional[threading.Event]
         if stop is not None and stop.is_set():
             raise InterruptedError("stopped")
     frames = min(frames, len(stats))
-    per_frame = fits(stats[:frames], opts["base"], opts["align"])
-    w, h = output_size(dci, vdi, opts["size"])
+    per_frame = fits(stats[:frames], opts["base"], opts["align"], first_of(opts))
+    w, h = output_size(dci, vdi, opts["size"], first_of(opts))
     w, h = w - w % 2, h - h % 2
-    base_info = dci if opts["base"] == "DepthCrafter" else vdi
+    base_info = dci if opts["base"] == first_of(opts) else vdi
     part = part_path(pair["out"])
     writer = D.DepthWriter(part, D.ClipInfo(path=pair["out"], width=w, height=h, num_frames=frames,
                                            fps=base_info.fps, pix_fmt="yuv420p10le", full_range=False),
@@ -494,9 +509,9 @@ def preview(pair: Dict[str, str], opts: Dict, index: int, stats: np.ndarray,
     dcs, vds = read_frames(dci, lo, n), read_frames(vdi, lo, n)
     if len(dcs) <= index - lo or len(vds) <= index - lo:
         return None
-    w, h = output_size(dci, vdi, opts["size"])
+    w, h = output_size(dci, vdi, opts["size"], first_of(opts))
     device = _device()
-    all_fits = fits(stats, opts["base"], opts["align"]) if len(stats) else None
+    all_fits = fits(stats, opts["base"], opts["align"], first_of(opts)) if len(stats) else None
 
     def fit_at(i):
         return all_fits[min(i, len(all_fits) - 1)] if all_fits is not None else (1.0, 0.0)
@@ -510,7 +525,7 @@ def preview(pair: Dict[str, str], opts: Dict, index: int, stats: np.ndarray,
             out = finish(parts[index - lo], opts, smooth_detail([p["detail"] for p in parts], index - lo, radius))
         else:
             out = blend(dc_t, vda_t, fit, opts)
-        if opts["base"] != "DepthCrafter":
+        if opts["base"] != first_of(opts):
             dc_t = (dc_t * float(fit[0]) + float(fit[1])).clamp(0, 1)
         else:
             vda_t = (vda_t * float(fit[0]) + float(fit[1])).clamp(0, 1)

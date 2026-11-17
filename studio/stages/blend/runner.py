@@ -38,7 +38,8 @@ class BlendRunner:
         from core import depthblend as B
         total = len(pairs)
         if not total:
-            self.outcome.note = f"No clip there has both a DepthCrafter and a {self.opts.get('other') or 'VDA'} map."
+            self.outcome.note = (f"No clip there has both a {self.opts.get('first') or 'DepthCrafter'} and a "
+                                 f"{self.opts.get('other') or 'VDA'} map.")
             return True
         for i, pair in enumerate(pairs):
             if self.stop.is_set():

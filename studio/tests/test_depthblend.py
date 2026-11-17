@@ -83,6 +83,19 @@ class BlendMathTest(unittest.TestCase):
         out = B.blend(self.dc, self.vda, (1.0, 0.0), self._opts(mode="Layout + Detail", detail_amount=0.0))
         self.assertTrue(np.allclose(out, B._blur(self.dc, 4.0).clamp(0, 1), atol=1e-6))
 
+    def test_dvd_as_the_first_map_is_blended_as_depthcrafters_was(self):
+        # First Map DVD, Other VDA (user, 2026-11-17): DVD's map takes DepthCrafter's place in every role
+        for mode in ("Mix", "Layout + Detail"):
+            for base in ("first", "other"):
+                dc_way = self._opts(mode=mode, base="DepthCrafter" if base == "first" else "VDA")
+                dvd_way = self._opts(mode=mode, base="DVD" if base == "first" else "VDA", first="DVD")
+                self.assertTrue(np.allclose(B.blend(self.dc, self.vda, (0.7, 0.05), dc_way),
+                                            B.blend(self.dc, self.vda, (0.7, 0.05), dvd_way), atol=1e-6), (mode, base))
+        x = np.linspace(0, 1, 500)
+        s = sums(x, 2.0 * x - 0.4)
+        self.assertEqual(B._fit(s, "DVD", "DVD"), B._fit(s, "DepthCrafter"))
+        self.assertEqual(B._fit(s, "VDA", "DVD"), B._fit(s, "VDA"))
+
     def test_layout_and_detail_of_one_map_with_itself_is_that_map(self):
         out = B.blend(self.dc, self.dc.clone(), (1.0, 0.0), self._opts(mode="Layout + Detail"))
         self.assertTrue(np.allclose(out, self.dc, atol=1e-5))
@@ -296,6 +309,37 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(got, {"a": (os.path.join("DepthCrafter", "a_depth.mp4"), "a_depth.mp4"),
                                "b": ("b_depth.mp4", os.path.join("DVD", "b_depth.mp4"))})
         self.assertEqual([p["clip"] for p in B.pairs(str(self.d))], ["c"])
+
+    def test_pairs_dvd_with_vda(self):
+        # First Map DVD (user, 2026-11-17: "allow dvd and vda depth map blending"): DVD's and VDA's maps,
+        # wherever each is; DepthCrafter's play no part
+        (self.d / "DepthCrafter").mkdir(); (self.d / "DVD").mkdir(); (self.d / "VDA").mkdir()
+        _clip(self.d / "a_depth.mp4", OUT.DVD_TAG)               # DVD's in place, VDA's beside
+        _clip(self.d / "VDA" / "a_depth.mp4", OUT.TAG)
+        _clip(self.d / "b_depth.mp4", OUT.TAG)                   # VDA's in place, DVD's beside
+        _clip(self.d / "DVD" / "b_depth.mp4", OUT.DVD_TAG)
+        _clip(self.d / "c_depth.mp4")                            # DepthCrafter's and VDA's: not this pair
+        _clip(self.d / "VDA" / "c_depth.mp4", OUT.TAG)
+        got = {p["clip"]: (os.path.relpath(p["dc"], self.d), os.path.relpath(p["other"], self.d))
+               for p in B.pairs(str(self.d), other="VDA", first="DVD")}
+        self.assertEqual(got, {"a": ("a_depth.mp4", os.path.join("VDA", "a_depth.mp4")),
+                               "b": (os.path.join("DVD", "b_depth.mp4"), "b_depth.mp4")})
+        self.assertEqual(B.pairs(str(self.d), other="DVD", first="DVD"), [])      # a map with itself: none
+
+    def test_first_dvd_settings(self):
+        from studio.stages.blend import settings as BS
+        ch = BS.choices("VDA", "DVD")
+        self.assertEqual((ch["first"], ch["other"], ch["base"], ch["size"]),
+                         (["DepthCrafter", "DVD"], ["VDA"], ["DVD", "VDA"], ["Larger", "DVD", "VDA"]))
+        got = BS.normalise({"first": "DVD", "other": "DVD", "base": "DepthCrafter", "size": "DepthCrafter"})
+        self.assertEqual((got["other"], got["base"], got["size"]), ("VDA", "DVD", "DVD"))
+        got = BS.normalise({"first": "DepthCrafter", "other": "DVD", "base": "DVD", "size": "VDA"})
+        self.assertEqual((got["base"], got["size"]), ("DVD", "DVD"))
+        self.assertEqual(BS.normalise({})["first"], "DepthCrafter")   # a blend.json from before: as it was
+        # back from DVD to DepthCrafter: a Base that was the first map stays the first map
+        got = BS.follow_other({"first": "DepthCrafter", "other": "VDA", "base": "DVD", "size": "DVD"}, was_first="DVD")
+        self.assertEqual((got["base"], got["size"]), ("DepthCrafter", "DepthCrafter"))
+        self.assertIn("first", BS.GLOBAL_KEYS)
 
     def test_base_and_size_follow_the_other_map(self):
         from studio.stages.blend import settings as BS

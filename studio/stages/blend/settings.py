@@ -14,7 +14,8 @@ from studio.default_folders import localize as _localize
 DEFAULTS: Dict[str, Any] = {
     # Splatting's depth maps: where VDA's rerun leaves a clip's two maps, and where the blend goes
     "depth_folder": "./output_depthmaps",
-    "other": "VDA",                 # the map blended with DepthCrafter's: VDA's or DVD's (user, 2026-11-07)
+    "first": "DepthCrafter",        # the first map: DepthCrafter's, or DVD's (with VDA's; user, 2026-11-17)
+    "other": "VDA",                 # the map blended with the first: VDA's or DVD's (user, 2026-11-07)
     "mode": "Mix",
     "mix": 0.5,                     # 0 = DepthCrafter, 1 = the other map
     "base": "DepthCrafter",         # the map whose range (Mix) or layout (Layout + Detail) is kept
@@ -43,7 +44,7 @@ DEFAULTS: Dict[str, Any] = {
 }
 DEFAULTS = _localize(DEFAULTS)
 
-_MENUS = {"mode": B.MODES, "other": B.OTHERS, "base": B.BASES, "align": B.ALIGNS, "size": B.SIZES,
+_MENUS = {"mode": B.MODES, "first": B.FIRSTS, "other": B.OTHERS, "base": B.BASES, "align": B.ALIGNS, "size": B.SIZES,
           "edge_band_sides": B.BAND_SIDES}
 _RANGES = {"mix": (0.0, 1.0), "detail_size": (0.5, 64.0), "detail_amount": (0.0, 3.0),
            "mix_near": (0.0, 1.0), "mix_far": (0.0, 1.0), "mix_split": (0.0, 1.0), "mix_soft": (0.02, 1.0),
@@ -52,17 +53,18 @@ _RANGES = {"mix": (0.0, 1.0), "detail_size": (0.5, 64.0), "detail_amount": (0.0,
            "level_white": (0.5, 1.0), "level_gamma": (0.2, 5.0)}
 
 #: The settings every clip shares; the rest a clip can have its own of (Own Settings; user, 2026-11-07)
-GLOBAL_KEYS = ("depth_folder", "other", "output_suffix")
+GLOBAL_KEYS = ("depth_folder", "first", "other", "output_suffix")
 CLIP_KEYS = tuple(k for k in DEFAULTS if k not in GLOBAL_KEYS)
 #: A folder's clips' own settings: {clip: {key: value}}, beside their maps
 CLIPS_FILE = "blend_clips.json"
 
 
-def choices(other: str = "VDA") -> Dict[str, list]:
-    """The menus; Base and Output Size name only the other map picked."""
+def choices(other: str = "VDA", first: str = "DepthCrafter") -> Dict[str, list]:
+    """The menus; Other Map never the first's model; Base and Output Size name only the two maps picked."""
     out = {k: list(v) for k, v in _MENUS.items()}
-    out["base"] = [v for v in B.BASES if v == "DepthCrafter" or v == other]
-    out["size"] = [v for v in B.SIZES if v not in B.OTHERS or v == other]
+    out["other"] = [v for v in B.OTHERS if v != first]
+    out["base"] = [first, other]
+    out["size"] = ["Larger", first, other]
     return out
 
 
@@ -97,11 +99,20 @@ def normalise(data: Dict[str, Any]) -> Dict[str, Any]:
     return follow_other(out)
 
 
-def follow_other(values: Dict[str, Any]) -> Dict[str, Any]:
-    """Base and Output Size naming the other model's map name the one picked (VDA -> DVD when it changes)."""
+def follow_other(values: Dict[str, Any], was_first: str = "") -> Dict[str, Any]:
+    """The two maps never the same model (First DVD: the other is VDA's), and Base and Output Size name one
+    of them: a model no longer picked becomes the first map if it was DepthCrafter (or the first), else the
+    other (VDA -> DVD when Other Map changes). `was_first`: the First Map before a change -- a Base or Size
+    that named it follows the first map (DVD -> DepthCrafter), though DVD can be either map."""
+    first = values.get("first") or "DepthCrafter"
+    if values.get("other") == first:
+        values["other"] = next(v for v in B.OTHERS if v != first)
+    other = values.get("other", "VDA")
     for key in ("base", "size"):
-        if values.get(key) in B.OTHERS:
-            values[key] = values.get("other", "VDA")
+        v = values.get(key)
+        if v is None or v == "Larger" or v in (first, other):
+            continue
+        values[key] = first if v == "DepthCrafter" or v == was_first else other
     return values
 
 

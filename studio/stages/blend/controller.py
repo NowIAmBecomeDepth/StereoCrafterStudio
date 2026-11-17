@@ -42,7 +42,9 @@ HELP: Dict[str, str] = {
                     "is listed.",
     "mode": "Mix: the two maps averaged, by Mix. Layout + Detail: the broad depth of the Base map with the fine "
             "detail -- edges, small shapes -- of the other.",
-    "other": "Which model's map is blended with DepthCrafter's: Video Depth Anything's (VDA) or DVD's. Each "
+    "first": "The first map: DepthCrafter's, or DVD's (then blended with Video Depth Anything's). Each clip "
+             "needs both maps -- the one Splatting reads and the other in its folder beside it.",
+    "other": "Which model's map is blended with the First Map: Video Depth Anything's (VDA) or DVD's. Each "
              "clip needs both maps -- the one Splatting reads and the other in its folder beside it.",
     "mix": "0 is all DepthCrafter, 1 all the other map (VDA or DVD).",
     "base": "Mix: the map whose depth range the blend keeps. Layout + Detail: the map whose broad depth it keeps; "
@@ -191,7 +193,13 @@ class BlendController(QObject):
 
     settings = Property(QObject, lambda self: self._map, constant=True)
     choicesChanged = Signal()
-    choices = Property("QVariantMap", lambda self: S.choices(str(self._map.value("other") or "VDA")), notify=choicesChanged)
+    choices = Property("QVariantMap", lambda self: S.choices(str(self._map.value("other") or "VDA"),
+                                                             str(self._map.value("first") or "DepthCrafter")),
+                       notify=choicesChanged)
+
+    def _names(self) -> str:
+        """"DepthCrafter and a VDA" -- the two maps a clip needs, for the messages."""
+        return f"{self._map.value('first') or 'DepthCrafter'} and a {self._map.value('other') or 'VDA'}"
     help = Property("QVariantMap", lambda self: HELP, constant=True)
 
     def _values(self) -> Dict[str, Any]:
@@ -210,21 +218,24 @@ class BlendController(QObject):
         coerced = S.coerce(key, value)
         if coerced != value or type(coerced) is not type(value):
             self._map.insert(key, coerced)
+        was = self._last_good.get(key)
         self._last_good[key] = coerced
         self._keep(key, coerced)
-        if key == "other":                  # VDA's maps or DVD's (user, 2026-11-07): Base / Output Size follow it
-            for k, v in S.follow_other(self._values()).items():
+        if key in ("first", "other"):       # VDA's maps or DVD's (user, 2026-11-07), DVD's with VDA's (2026-11-17)
+            was_first = was if key == "first" else ""
+            for k, v in S.follow_other(self._values(), was_first).items():
                 if self._map.value(k) != v:
                     self._map.insert(k, v)
                     self._last_good[k] = v
                     self._keep(k, v)
+            both = {"first": self._map.value("first") or "DepthCrafter", "other": self._map.value("other") or "VDA"}
             for vals in self._own.values():   # the clips' own Base / Output Size too
-                vals.update({k: v for k, v in S.follow_other({**vals, "other": coerced}).items()
+                vals.update({k: v for k, v in S.follow_other({**vals, **both}, was_first).items()
                              if k in ("base", "size") and k in vals})
             self.choicesChanged.emit()
         if key == "depth_folder" and not self._chapter_applying:
             self._maybe_leave_chapter()
-        if key in ("depth_folder", "output_suffix", "other"):
+        if key in ("depth_folder", "output_suffix", "first", "other"):
             self.rescan()
         else:
             self.refreshPreview()
@@ -291,7 +302,8 @@ class BlendController(QObject):
         left as they are), else the shared ones. The folder is kept."""
         clip = self._shown_clip()
         if clip in self._own:
-            self._own[clip] = S.clip_values(S.normalise({**S.DEFAULTS, "other": self._global.get("other", "VDA")}))
+            self._own[clip] = S.clip_values(S.normalise({**S.DEFAULTS, "first": self._global.get("first", "DepthCrafter"),
+                                                         "other": self._global.get("other", "VDA")}))
             what = f"{clip}'s own settings are back to the defaults."
         else:
             keep = {"depth_folder": self._global.get("depth_folder")}
@@ -403,7 +415,8 @@ class BlendController(QObject):
         try:
             self._pairs = B.pairs(str(self._map.value("depth_folder") or ""),
                                   str(self._map.value("output_suffix") or "_depth"),
-                                  str(self._map.value("other") or "VDA"))
+                                  str(self._map.value("other") or "VDA"),
+                                  str(self._map.value("first") or "DepthCrafter"))
         except Exception:
             logger.debug("Could not list the clips to blend", exc_info=True)
             self._pairs = []
@@ -454,8 +467,7 @@ class BlendController(QObject):
             return                          # nothing redraws while a job runs (the job's card is busy)
         if not self._pairs:
             self._pv_image, self._pv_frames = "", 0
-            self._pv_message = (f"No clip in this folder has both a DepthCrafter and a "
-                                f"{self._map.value('other') or 'VDA'} map yet.")
+            self._pv_message = f"No clip in this folder has both a {self._names()} map yet."
             self.previewChanged.emit()
             return
         self._pv_req += 1
@@ -576,7 +588,7 @@ class BlendController(QObject):
         self.save()
         if not pairs:
             self.toast.emit("warning", "Nothing to blend",
-                            f"No clip in this folder has both a DepthCrafter and a {self._map.value('other') or 'VDA'} "
+                            f"No clip in this folder has both a {self._names()} "
                             "map. Make it on its tab, or with Splatting's right-click Rerun with Video Depth Anything "
                             "/ Rerun with DVD.")
             return
