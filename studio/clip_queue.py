@@ -993,7 +993,8 @@ class ClipQueue(QObject):
             from core.common.file_organizer import move_files_to_finished
             self._wait_let_go(released)
             try:
-                move_files_to_finished(moves, logger=logger, wait_before_move=0.3, max_retries=5, retry_delay=0.5)
+                # up to 15 s for a file something else has open a moment (a tester, 2026-11-17)
+                move_files_to_finished(moves, logger=logger, wait_before_move=0.3, max_retries=30, retry_delay=0.5)
             except Exception:
                 logger.exception("Move Selected to Finished failed")
             self._sig_moved.emit((rows, current, released))
@@ -1010,7 +1011,12 @@ class ClipQueue(QObject):
         rows, current, released = out if len(out) == 3 else (*out, [])
         self._moving = False
         self._put_back(released)
-        left = [os.path.basename(p) for p, _ in rows if os.path.exists(p)]
+        from core.common.file_holders import holders
+        left = []
+        for p, _ in rows:
+            if os.path.exists(p):
+                who = holders(p)            # who has it open, when Windows can say
+                left.append(os.path.basename(p) + (f" (open in {', '.join(who)})" if who else ""))
         moved = len(rows) - len(left)
         owner = self.parent()
         if owner is not None:

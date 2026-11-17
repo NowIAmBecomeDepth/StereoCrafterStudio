@@ -37,7 +37,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 from studio import chapter_paths
@@ -482,16 +481,17 @@ def _free(path: str) -> str:
     return f"{stem} ({i}){ext}"
 
 
-def _move(src: str, dest: str, retries: int = 5, delay: float = 0.4) -> Optional[str]:
-    for attempt in range(retries):
-        try:
-            shutil.move(src, dest)
-            return None
-        except OSError as e:                     # Windows: still open somewhere
-            if attempt == retries - 1:
-                return str(e)
-            time.sleep(delay)
-    return "not moved"
+def _move(src: str, dest: str) -> Optional[str]:
+    """Windows won't move a file that is open somewhere: tried again for up to 15 s (a tester, 2026-11-17: a
+    Rerun that failed worked ten seconds later), then why not, naming who has it open (core.common.file_holders)."""
+    from core.common.file_holders import move_when_free
+    return move_when_free(src, dest, mover=shutil.move)
+
+
+def _failed_name(path: str, err: str) -> str:
+    """The file's name for the toast, with who has it open when that is known."""
+    tail = err.split(" -- open in ", 1)
+    return os.path.basename(path) + (f" (open in {tail[1]})" if len(tail) == 2 else "")
 
 
 def apply(p: Dict, log: Optional[logging.Logger] = None) -> List[str]:
@@ -507,7 +507,7 @@ def apply(p: Dict, log: Optional[logging.Logger] = None) -> List[str]:
         os.makedirs(level, exist_ok=True)
         err = _move(src, dest)
         if err:
-            failed.append(os.path.basename(src))
+            failed.append(_failed_name(src, err))
             log.warning("Rerun: couldn't move %s back to %s: %s", src, level, err)
         else:
             log.info("Rerun: %s back to %s", os.path.basename(src), level)
@@ -518,7 +518,7 @@ def apply(p: Dict, log: Optional[logging.Logger] = None) -> List[str]:
         os.makedirs(folder, exist_ok=True)
         err = _move(old, _free(os.path.join(folder, os.path.basename(old))))
         if err:
-            failed.append(os.path.basename(old))
+            failed.append(_failed_name(old, err))
             log.warning("Rerun: couldn't move the old %s aside: %s", old, err)
         else:
             log.info("Rerun: old %s into %s", os.path.basename(old), folder)
