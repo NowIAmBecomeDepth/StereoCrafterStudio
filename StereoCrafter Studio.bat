@@ -85,6 +85,9 @@ if not "%RC%"=="0" (
 endlocal & exit /b %RC%
 
 :showlog
+rem the log is UTF-8 (studio/app.py): in the console's own code page the progress bars' blocks
+rem showed as mojibake (a tester, 2026-11-17)
+chcp 65001 >nul
 echo.
 echo  StereoCrafter Studio exited abnormally.
 echo  ----------------------------------------------------------------

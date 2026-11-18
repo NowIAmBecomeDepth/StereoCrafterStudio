@@ -448,7 +448,14 @@ def main() -> int:
     # then exits even if a GPU thread is still unwinding.
     forced = []
 
+    # a window that stops responding writes every thread's stack to this log (a tester, 2026-11-17:
+    # frozen partway through a 6400-clip DVD batch, nothing logged about why)
+    from studio.ui_watchdog import UiWatchdog
+    ui_watchdog = UiWatchdog(str(REPO), app)
+    ui_watchdog.start()
+
     def _shutdown():
+        ui_watchdog.stop()               # a slow close is the exit watchdog's
         _start_exit_watchdog()
         try:
             objects["Shell"].answer_all_no()      # a delete still being asked about: kept

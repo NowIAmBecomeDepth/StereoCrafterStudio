@@ -76,6 +76,15 @@ def run(g, v2: bool) -> None:
     check("...a waiting clip keeps its own items, the rerun among them",
           "Inpaint This Clip Now" in texts and "Rerun in Splatting" in texts, str(texts))
 
+    # a tester, 2026-11-17: "the clip is still in Inpaint ... so the file is open and locked by inpaint tab, i
+    # think" -- Windows' own answer (core.common.file_holders): with the clip listed and drawn here, Studio
+    # holds none of its files open
+    from core.common.file_holders import holders
+    files = [S / "finished" / "clipA.mp4", DP / "finished" / "clipA_depth.mp4", I / "finished" / "clipA_640_splatted2.mp4",
+             I / "clipB_640_splatted2.mp4"] + ([] if v2 else [H / "finished" / "clipA_1280_splatted2.mp4"])
+    pump(1.5)                                             # the rows' thumbnails and frame counts read
+    held = {f.name: holders(str(f)) for f in files if holders(str(f))}
+    check(f"...the clips listed in {title}: Studio holds none of their files open", not held, str(held))
     toasts = []
     sp.toast.connect(lambda *a: toasts.append(a))
     menu(q, "clipA", "rerun")
@@ -96,6 +105,10 @@ def run(g, v2: bool) -> None:
     ssrc = sp.preview.queue
     check("...the clip ticked there alone", until(lambda: ticked_of(ssrc) == ["clipA.mp4"]), str(ticked_of(ssrc)))
     check("...ready for Process Selected", until(lambda: any("Process Selected" in t[2] for t in toasts)), str(toasts[-1:]))
+    q2 = queue_item(2)
+    after = [S / "clipA.mp4", DP / "clipA_depth.mp4", I / "clipB_640_splatted2.mp4"]
+    held = {f.name: holders(str(f)) for f in after if holders(str(f))}
+    check(f"...after the rerun, {title}'s list still showing its clips: none of the files open", not held, str(held))
 
     q = queue_item(2)
     src = q.property("src")

@@ -77,6 +77,58 @@ class MoveLetsGoTest(unittest.TestCase):
         self.assertTrue((self.src / "finished" / self.clip.name).is_file())
         self.assertEqual(splat.preview.restored, 1, "Splatting's preview comes back after the move")
 
+    def test_rerun_in_splatting_with_the_depth_map_open_in_merging(self):
+        # the tester's second report: Inpainting's Rerun in Splatting -- "LC_V2-0343_depth.mp4 -- couldn't be
+        # moved" -- with the depth map open in another stage's preview (Merging's Depth Map preview reads it)
+        from PySide6.QtCore import QObject, Property, Signal
+        from studio import send_back
+        from studio.clip_queue import ClipQueue
+        from studio.gpu_jobs import GpuJobs
+
+        fin = self.src / "finished"
+        fin.mkdir()
+        depth = fin / "LC_V2-0343_depth.mp4"
+        depth.write_bytes(b"d" * 2048)
+        jobs = GpuJobs()
+        owner = QObject()                     # Inpainting's controller
+        merging = QObject()
+        merging.preview = _Preview(str(depth))
+
+        class Target(QObject):                # Splatting's controller, idle
+            took = []
+
+            @Property(bool, constant=True)
+            def busy(self):
+                return False
+
+            def _values(self):
+                return {}
+
+            def takeBack(self, plan):
+                Target.took.append(plan)
+        target = Target()
+        jobs.register("inpainting", "Inpainting", owner)
+        jobs.register("merging", "Merging", merging)
+        q = ClipQueue("inpainting", lambda: {}, owner)
+        q._start = lambda: None
+        plan = {"target": "splatting", "moves": [[str(depth), str(self.src)]], "aside": []}
+        real_plan, send_back.plan = send_back.plan, lambda *a, **k: dict(plan)
+        got = []
+        q.sentBack.connect(lambda t, ok, title, text: got.append((ok, text)))
+        try:
+            q.sendBack("splatting", ["x_splatted2.mp4"], target)
+            end = time.monotonic() + 20
+            while not got and time.monotonic() < end:
+                self.app.processEvents()
+                time.sleep(0.02)
+        finally:
+            send_back.plan = real_plan
+            if merging.preview.fh is not None:
+                merging.preview.fh.close()
+        self.assertEqual(got, [(True, "")], "the depth map open in Merging's preview stayed put")
+        self.assertTrue((self.src / depth.name).is_file())
+        self.assertEqual(merging.preview.restored, 1)
+
     def test_own_preview_and_idle_ones_are_left_alone(self):
         from PySide6.QtCore import QObject
         from studio.gpu_jobs import GpuJobs
