@@ -166,10 +166,18 @@ Section {
         font.weight: Font.DemiBold
         text: "L:"
     }
-    // the clip count on the heading line (user, 2026-09-27)
+    // the clip count on the heading line (user, 2026-09-27). In a narrow list (Splatting's, any stage at the
+    // window's smallest) the heading line ran past the box's right edge (tester carlobs, 2026-11-18): there
+    // Refresh and Show Finished are icons (their tips say the words) and the count gives way, with "...".
+    readonly property bool narrowHead: width < 560
     headerRight: [
         Text {
             objectName: "queueClipCount"
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: implicitWidth
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignRight
             text: queue.src && queue.src.clips.length
                   ? (queue.src.clips.length - queue.archivedCount) + " clips"
                     + (queue.archivedCount ? "  ·  " + queue.archivedCount + " finished" : "")
@@ -182,7 +190,7 @@ Section {
         // outside Studio show up without changing a folder setting first. Every stage's list.
         AccentButton {
             objectName: "queueRefresh"
-            visible: !!queue.src
+            visible: !!queue.src && !queue.narrowHead
             text: "Refresh"
             kind: "ghost"
             implicitHeight: 22
@@ -190,11 +198,20 @@ Section {
             onClicked: queue.src.rescan()
             HoverTip { tip: "Reads the input folders again, so clips added or removed outside Studio show up in the list." }
         },
+        IconButton {
+            objectName: "queueRefreshIcon"
+            visible: !!queue.src && queue.narrowHead
+            iconGlyph: Theme.icon.refresh
+            size: 24
+            enabled: !queue.busy && !queue.moving
+            onClicked: queue.src.rescan()
+            HoverTip { tip: "Refresh: reads the input folders again, so clips added or removed outside Studio show up in the list." }
+        },
         // Show Finished (user, 2026-10-31): with Resume on, a finished clip leaves the list; this
         // lists those in finished/ again, dimmed, so one can be sent back to the stage before
         AccentButton {
             objectName: "queueShowFinished"
-            visible: !!queue.src && !!queue.src.canShowFinished
+            visible: !!queue.src && !!queue.src.canShowFinished && !queue.narrowHead
             text: queue.src && queue.src.showFinished ? "Hide Finished" : "Show Finished"
             kind: "ghost"
             implicitHeight: 22
@@ -202,6 +219,17 @@ Section {
             onClicked: queue.src.setShowFinished(!queue.src.showFinished)
             HoverTip { tip: "Lists the clips this stage has finished and Resume moved into its 'finished' folders, dimmed. "
                             + "Right-click one to rerun it in the stage before; they are never processed or moved from here." }
+        },
+        IconButton {
+            objectName: "queueShowFinishedIcon"
+            visible: !!queue.src && !!queue.src.canShowFinished && queue.narrowHead
+            iconGlyph: Theme.icon.view
+            size: 24
+            enabled: !queue.busy && !queue.moving
+            onClicked: queue.src.setShowFinished(!queue.src.showFinished)
+            HoverTip { tip: (queue.src && queue.src.showFinished ? "Hide Finished" : "Show Finished")
+                            + ": the clips this stage has finished and Resume moved into its 'finished' folders, dimmed. "
+                            + "Right-click one to rerun it in the stage before." }
         }
     ]
     // Takes the room the rail has left rather than asking for its own: the

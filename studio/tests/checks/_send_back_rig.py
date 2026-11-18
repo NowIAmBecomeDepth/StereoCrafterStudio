@@ -145,7 +145,7 @@ def menu(q, name, act=None):
 
 def show_finished(q, on=True):
     """The list's Show Finished button, pressed until the list says `on`."""
-    b = one(q, "queueShowFinished")
+    b = one(q, "queueShowFinished") or one(q, "queueShowFinishedIcon")   # an icon in a narrow list
     if b is None:
         return False
     if bool(q.property("src").property("showFinished")) != on:

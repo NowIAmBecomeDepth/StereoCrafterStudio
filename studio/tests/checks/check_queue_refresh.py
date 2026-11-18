@@ -86,7 +86,7 @@ def run(title, page, qname, want, drop, added):
     drop()
     pump(1.5)
     check(f"...a clip copied in from outside isn't listed on its own", added not in names(q), str(names(q)))
-    btn = one(q, "queueRefresh")
+    btn = one(q, "queueRefresh") or one(q, "queueRefreshIcon")   # an icon in a narrow list
     check(f"...a Refresh on the list's heading", btn is not None and btn.property("enabled"))
     if btn is None:
         return
