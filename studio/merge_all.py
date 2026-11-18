@@ -657,7 +657,7 @@ class Build:
             if err:
                 return {"error": err}
             for part, final in zip(parts, finals):
-                if not partial_output.publish(part, final):
+                if not partial_output.publish(part, final, keep_old=True):
                     return {"error": f"Could not finish {final}."}
             return {"outputs": finals, "frames": self.plan["frames"], "black": self.plan["black"],
                     "way": self.plan["way"], "short": list(self.short)}

@@ -1634,20 +1634,18 @@ def kept_original(path: str) -> Optional[str]:
 def _swap(path: str, part: str, refill: bool = False) -> None:
     """The filled `part` in `path`'s place. The original is kept in ORIGINALS_DIR, where a refill
     reads it (user, 2026-10-26: it went to the Recycle Bin, which can't be read back); a `refill`'s
-    once-filled file goes to the Recycle Bin instead (deleted without one: its original is kept)."""
+    once-filled file goes to the Recycle Bin instead, once the new one is in (kept beside it as .old
+    without one: a splat is never deleted for good -- user, 2026-11-18)."""
     from core.common.partial_output import discard, publish
     try:
         if refill:
-            gone = "is in the Recycle Bin" if _recycle(path) else "was deleted"
-            if os.path.exists(path):
-                os.remove(path)
-            where, what = ORIGINALS_DIR, f"the once-filled one {gone}"
+            where, what = ORIGINALS_DIR, "the once-filled one is still in place"
         else:
             where, what = _keep(path), "it was moved"
     except Exception:
         discard(part)                         # the original stays where it was
         raise
-    if not publish(part, path):
+    if not publish(part, path, keep_old=refill):
         raise RuntimeError(f"Couldn't put the filled {os.path.basename(path)} in place: it is kept as "
                            f"{os.path.basename(part)}; {what}, and the original is in {where}.")
 
@@ -1655,7 +1653,7 @@ def _swap(path: str, part: str, refill: bool = False) -> None:
 def _recycle(path: str) -> bool:
     from core.common import recycle_bin
     try:
-        return bool(recycle_bin.send_to_recycle_bin(path)) and not os.path.exists(path)
+        return bool(recycle_bin.send_to_recycle_bin(path, may_delete_for_good=False)) and not os.path.exists(path)
     except Exception:
         logger.debug("Recycle Bin refused %s", path, exc_info=True)
         return False

@@ -503,7 +503,7 @@ class SweepBFixesTest(EdgeFillTest.__base__):
         replaces is what goes to the Recycle Bin."""
         recycled = []
 
-        def recycle(p):
+        def recycle(p, may_delete_for_good=True):
             trash = os.path.join(self.tmp, "trash")
             os.makedirs(trash, exist_ok=True)
             recycled.append(os.path.basename(p))
@@ -519,7 +519,9 @@ class SweepBFixesTest(EdgeFillTest.__base__):
                 self.assertEqual(f.read(), first)
             F.fill(F.find_groups(self.out)[0], F.find_mask(g, self.masks), lambda *a: None, threading.Event(), steps=4,
                    grain=False, settings={})
-        self.assertEqual(sorted(recycled), sorted(os.path.basename(g.files[k]) for k in ("sbs", "R")),
+        # set aside as "<stem> (earlier)<ext>" until the new one is in (user, 2026-11-18)
+        self.assertEqual(sorted(recycled), sorted("{0} (earlier){1}".format(*os.path.splitext(os.path.basename(g.files[k])))
+                                                  for k in ("sbs", "R")),
                          "a refill recycles the once-filled files")
 
     def test_a_clip_merged_again_is_its_own_original(self):

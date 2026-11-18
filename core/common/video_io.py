@@ -1430,7 +1430,7 @@ def encode_frames_to_mp4(
             stderr_drain.log_if(True)
             discard(encode_path)
             return False
-        if not publish(encode_path, final_output_mp4_path):
+        if not publish(encode_path, final_output_mp4_path, keep_old=True):    # Inpainting's: the earlier one recycled
             discard(encode_path)
             return False
     except Exception as e:
@@ -1498,7 +1498,7 @@ class RawFrameEncoder:
             self._drain.log_if(self._proc.returncode != 0)
             discard(self.encode_path)
             return False
-        if not publish(self.encode_path, self.final_output_path):
+        if not publish(self.encode_path, self.final_output_path, keep_old=True):
             discard(self.encode_path)
             return False
         return True

@@ -1447,7 +1447,7 @@ class MergingEngine:
                 _all_ok = False
                 logger.info(f"Split L/R stopped; {os.path.basename(out_file)} was not written.")
                 break
-            if proc.returncode != 0 or not publish(part_file, out_file):
+            if proc.returncode != 0 or not publish(part_file, out_file, keep_old=True):
                 discard(part_file)
                 _all_ok = False
                 logger.error(f"Split L/R failed for {os.path.basename(out_file)}: {err}")
@@ -2682,7 +2682,8 @@ class MergingEngine:
                 else:
                     logger.debug("FFmpeg process and threads terminated, proceeding to move files.")
                     try:
-                        os.replace(encode_path, output_path)
+                        from core.common.partial_output import replace_keeping_old  # the earlier merge: Recycle Bin (user, 2026-11-18)
+                        replace_keeping_old(encode_path, output_path)
                     except OSError as exc:
                         logger.error(f"Could not finalize {output_path}: {exc}")
                         raise

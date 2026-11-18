@@ -1218,14 +1218,14 @@ class RenderProcessor:
             # the parts and keep whatever was there before.
             if encoding_successful:
                 for final_path, part in parts.items():
-                    if not publish(part, final_path):
+                    if not publish(part, final_path, keep_old=True):     # the earlier splat to the Recycle Bin
                         encoding_successful = False
             if not encoding_successful:
                 for part in parts.values():
                     discard(part)
             if frame_break_part:
                 if encoding_successful and frame_break_ok:
-                    publish(frame_break_part, frame_break_mask_path)
+                    publish(frame_break_part, frame_break_mask_path, keep_old=True)
                 else:
                     discard(frame_break_part)
 

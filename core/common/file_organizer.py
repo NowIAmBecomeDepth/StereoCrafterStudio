@@ -133,21 +133,26 @@ def _move_one(
                 # stale one -- and reported success while doing it. Only drop
                 # the source when it really is the same file; otherwise archive
                 # it beside the old one under a free name.
-                if _looks_identical(src_path, dest_path):
-                    os.remove(src_path)
+                # The same file: it goes to the Recycle Bin, never deleted for good -- a source clip or a
+                # final output may be needed back (user, 2026-11-18). Not recyclable: archived as a different one.
+                from core.common import recycle_bin
+                same = _looks_identical(src_path, dest_path)
+                if same and recycle_bin.send_to_recycle_bin(src_path, may_delete_for_good=False) and \
+                        not os.path.exists(src_path):
                     if logger:
                         logger.info(
-                            f"Removed source file (identical copy already in finished): "
-                            f"{os.path.basename(src_path)}"
+                            f"{os.path.basename(src_path)}: an identical copy is already in finished; "
+                            f"this one went to the Recycle Bin."
                         )
                 else:
                     unique_path = _unique_destination(dest_path)
                     shutil.move(src_path, unique_path)
                     if logger:
                         logger.warning(
-                            f"{os.path.basename(src_path)} differs from the copy already in "
-                            f"finished; archived it as {os.path.basename(unique_path)} instead "
-                            f"of overwriting or deleting either."
+                            f"{os.path.basename(src_path)} "
+                            f"{'is a copy of one that could not be recycled' if same else 'differs from'} "
+                            f"the copy already in finished; archived it as {os.path.basename(unique_path)} "
+                            f"instead of overwriting or deleting either."
                         )
             else:
                 shutil.move(src_path, finished_dir)
@@ -417,7 +422,7 @@ def restore_finished_files(
                     failed_files.append((filename, reason))
                     continue
                 from core.common import recycle_bin
-                if recycle_bin.send_to_recycle_bin(src_path):
+                if recycle_bin.send_to_recycle_bin(src_path, may_delete_for_good=False):
                     restored_count += 1
                     if logger:
                         logger.info(f"'{filename}' is already in the input folder; the duplicate in "

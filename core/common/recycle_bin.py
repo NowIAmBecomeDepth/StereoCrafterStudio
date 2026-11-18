@@ -135,9 +135,11 @@ def has_recycle_bin(path: str) -> bool:
         return False
 
 
-def send_to_recycle_bin(path: str) -> bool:
+def send_to_recycle_bin(path: str, may_delete_for_good: bool = True) -> bool:
     """Move `path` to the Recycle Bin. True if it is gone from its folder.
-    False, and the file kept, when its drive has no bin (see the module doc)."""
+    False, and the file kept, when its drive has no bin (see the module doc).
+    `may_delete_for_good` False: one too big for the bin is kept without asking -- a source clip or a
+    final output only ever goes to the Recycle Bin (user, 2026-11-18)."""
     if not sys.platform.startswith("win"):
         logger.warning("Recycle Bin is Windows-only; leaving %s in place", path)
         return False
@@ -154,7 +156,7 @@ def send_to_recycle_bin(path: str) -> bool:
     size = size_of(full) if cap is not None else 0
     if cap is not None and size > cap:
         # too big for the bin: Windows would delete it for good -- asked first, in Studio
-        ask = ASK_PERMANENT
+        ask = ASK_PERMANENT if may_delete_for_good else None
         yes = False
         if ask is not None:
             try:

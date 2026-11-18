@@ -348,7 +348,8 @@ class StreamingVideoWriter:
             self._remove_part()
             raise RuntimeError(f"ffmpeg failed ({ret}) writing {self.output_path}:\n{stderr}")
         try:
-            os.replace(self.part_path, self.output_path)
+            from core.common.partial_output import replace_keeping_old  # the earlier output: Recycle Bin (user, 2026-11-18)
+            replace_keeping_old(self.part_path, self.output_path)
         except OSError:
             self._remove_part()  # v2: not left behind when the replace is refused
             raise

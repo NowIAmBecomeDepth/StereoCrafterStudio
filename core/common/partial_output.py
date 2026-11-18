@@ -71,9 +71,67 @@ def ffmpeg_output_args(path: str) -> List[str]:
 PUBLISH_RETRY_S = 5.0
 
 
-def publish(part: str, final: str) -> bool:
+def _free(path: str, fmt: str) -> str:
+    """The first of fmt.format(path=..., n="") / n=" 2", " 3", ... that isn't taken."""
+    out, n = fmt.format(n=""), 2
+    while os.path.exists(out):
+        out, n = fmt.format(n=f" {n}"), n + 1
+    return out
+
+
+def retire_old(path: str, kept_as: str = "") -> str:
+    """A source clip or a final Splatting / Inpainting / Merging output that is being replaced only ever
+    goes to the Recycle Bin, in case it is needed back (user, 2026-11-18): there, else -- no bin on its
+    drive, too big for it -- kept as ``<kept_as or path>.old`` (``.old 2``, ...), outside every clip glob,
+    never deleted. "" when nothing was there, "Recycle Bin", or the .old file's path. Raises OSError
+    (PermissionError while it is open elsewhere) when it can't move."""
+    if not os.path.isfile(path):
+        return ""
+    from core.common import recycle_bin
+    try:
+        recycle_bin.send_to_recycle_bin(path, may_delete_for_good=False)
+    except Exception:
+        logger.debug("Recycle Bin refused %s", path, exc_info=True)
+    if not os.path.exists(path):
+        logger.info(f"The earlier {os.path.basename(kept_as or path)} is in the Recycle Bin "
+                    f"(as {os.path.basename(path)}).")
+        return "Recycle Bin"
+    old = _free(kept_as or path, (kept_as or path) + ".old{n}")
+    os.rename(path, old)
+    logger.warning(f"Kept the earlier {os.path.basename(kept_as or path)} as {os.path.basename(old)}: "
+                   f"it couldn't go to the Recycle Bin.")
+    return old
+
+
+def replace_keeping_old(src: str, final: str) -> None:
+    """os.replace(src, final), the earlier ``final`` set aside first as ``<stem> (earlier)<ext>`` and,
+    once the new one is in, sent to the Recycle Bin under that name (retire_old). A refused replace
+    puts the earlier one back, as it was (bug sweep 2026-10-09, A7). Raises what os.replace raises."""
+    aside = ""
+    if os.path.isfile(final):
+        stem, ext = os.path.splitext(final)
+        aside = _free(final, stem + " (earlier{n})" + ext)
+        os.rename(final, aside)
+    try:
+        os.replace(src, final)
+    except BaseException:
+        if aside:
+            try:
+                os.rename(aside, final)
+            except OSError:
+                logger.error(f"The earlier {os.path.basename(final)} is kept as {os.path.basename(aside)}.")
+        raise
+    if aside:
+        try:
+            retire_old(aside, kept_as=final)
+        except OSError as e:
+            logger.warning(f"The earlier {os.path.basename(final)} stays as {os.path.basename(aside)}: {e}")
+
+
+def publish(part: str, final: str, keep_old: bool = False) -> bool:
     """Put the finished ``part`` under its ``final`` name, replacing any
-    earlier output there. False (logged) when it could not. A file another
+    earlier output there -- with `keep_old`, that one goes to the Recycle Bin
+    (replace_keeping_old). False (logged) when it could not. A file another
     program has open only briefly (PermissionError) is retried for up to
     PUBLISH_RETRY_S seconds before giving up."""
     import time
@@ -82,6 +140,9 @@ def publish(part: str, final: str) -> bool:
     delay = 0.1
     while True:
         try:
+            if keep_old:
+                replace_keeping_old(part, final)
+                return True
             os.replace(part, final)
             return True
         except PermissionError as e:

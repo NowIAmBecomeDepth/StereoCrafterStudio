@@ -1528,7 +1528,7 @@ class SceneCutEngine:
                     "Scene %d frame count mismatch: expected %d, got %d.",
                     scene_num, expected_frames, actual_frames,
                 )
-            if not publish(str(output_filename), str(final_filename)):
+            if not publish(str(output_filename), str(final_filename), keep_old=True):  # a source clip: recycled
                 discard(str(output_filename))
                 raise RuntimeError(f"Could not finish {final_filename.name}")
             return actual_frames, expected_frames

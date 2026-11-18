@@ -120,7 +120,7 @@ def render(src: str, folder: str, settings: Dict, stop: Optional[Callable[[], bo
     if proc.returncode != 0 or not os.path.isfile(part):
         discard(part)
         raise RuntimeError("ffmpeg failed: " + ("; ".join(err[-4:]) or f"exit {proc.returncode}"))
-    if not publish(part, final):
+    if not publish(part, final, keep_old=True):
         discard(part)
         raise RuntimeError(f"Couldn't finish {final}")
     if progress is not None and info["frames"]:
