@@ -123,6 +123,10 @@ def _move_one(
 
             dest_path = os.path.join(finished_dir, os.path.basename(src_path))
 
+            if os.path.exists(dest_path) and os.path.samefile(src_path, dest_path):
+                # Already in finished/ (Merging finds a clip's files a "finished" level down since
+                # 2026-11-18): it was its own "identical copy" below and got deleted. Nothing to move.
+                return True, None
             if os.path.exists(dest_path):
                 # A file of this name is already archived. Deleting the source
                 # on that basis alone destroyed the newer file and kept the

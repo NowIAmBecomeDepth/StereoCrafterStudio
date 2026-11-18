@@ -110,5 +110,43 @@ class RestoreFinishedTest(unittest.TestCase):
         self.assertEqual((restored, failed), (0, 1))
 
 
+class AlreadyFinishedTest(unittest.TestCase):
+    """A file already in <dest>/finished is its own "identical copy already in finished": the move removed
+    it as a duplicate and the clip was gone (user's tester, 2026-11-18). Merging finds originals and splats
+    a "finished" level down since 9b5e821, and moved them to the folder they were already in."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.d = Path(tmp.name)
+
+    def touch(self, *parts):
+        p = self.d.joinpath(*parts)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"clip")
+        return str(p)
+
+    def test_a_file_already_there_stays(self):
+        clip = self.touch("orig", "finished", "shot.mp4")
+        ok, err = FO.move_single_file(clip, str(self.d / "orig"))
+        self.assertTrue(ok, err)
+        self.assertTrue(os.path.isfile(clip))
+
+    def test_merging_move_to_finished_keeps_an_original_splatting_moved(self):
+        from studio import clip_queue as Q
+        inp = self.touch("inp", "shot_1408_inpainted_right_eye.mp4")
+        grid = self.touch("mask", "finished", "shot_1408_splatted4.mp4")
+        orig = self.touch("orig", "finished", "shot.mp4")
+        vals = {"inpainted_folder": str(self.d / "inp"), "mask_folder": str(self.d / "mask"),
+                "original_folder": str(self.d / "orig")}
+        moves = Q.merge_finished_moves(vals, [inp])
+        self.assertIn((orig, str(self.d / "orig")), moves)
+        FO.move_files_to_finished(moves)
+        self.assertTrue(os.path.isfile(orig), "the source clip was deleted")
+        self.assertTrue(os.path.isfile(str(self.d / "inp" / "finished" / os.path.basename(inp))))
+        self.assertTrue(os.path.isfile(grid) or os.path.isfile(str(self.d / "mask" / "finished" / "finished"
+                                                                   / os.path.basename(grid))))
+
+
 if __name__ == "__main__":
     unittest.main()
