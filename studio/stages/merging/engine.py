@@ -1509,6 +1509,9 @@ class MergingEngine:
             from core.common.clip_names import natural_key  # v2: clips in number order, as Upcoming Jobs lists them (user, 2026-10-29)
             inpainted_videos.sort(key=lambda p: natural_key(os.path.basename(p)))
             single_mode = False
+            from core.common.finished_chain import newest_per_core  # v2: each clip's newest inpaint
+            from core.common.merge_preflight import core_name_of
+            inpainted_videos = newest_per_core(inpainted_videos, core_name_of)
             _only = getattr(self, "only_clips", None)  # v2: Process Selected
             if _only:
                 inpainted_videos = [v for v in inpainted_videos
@@ -1688,6 +1691,9 @@ class MergingEngine:
                     )
 
                 mask_folder = settings["mask_folder"]
+                if not explicit_splatted_file:  # v2: the clip's splat wherever its finished chain has it
+                    from core.common.finished_chain import dir_holding
+                    mask_folder = dir_holding(mask_folder, f"{glob.escape(core_name)}_*_splat*")
                 # The dual-eye inpaint is a FULL-FRAME VAE reconstruction: every
                 # pixel went through the autoencoder, not just the holes. The
                 # single-eye path repairs that by compositing the inpaint back

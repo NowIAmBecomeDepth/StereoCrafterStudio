@@ -2045,6 +2045,9 @@ class MergingPreviewEngine:
                 if core_name in os.path.basename(mask_folder):
                     _explicit_splat = mask_folder
                 mask_folder = os.path.dirname(mask_folder)
+            if not _explicit_splat and mask_folder:  # v2: the splat wherever its finished chain has it
+                from core.common.finished_chain import dir_holding
+                mask_folder = dir_holding(mask_folder, f"{glob.escape(core_name)}_*_splat*")
             splatted4_pattern = os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted4*.mp4")
             splatted2_pattern = os.path.join(glob.escape(mask_folder), f"{glob.escape(core_name)}_*_splatted2*.mp4")
             logger.debug(

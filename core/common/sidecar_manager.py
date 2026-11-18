@@ -368,10 +368,14 @@ def read_clip_sidecar(
 
 
 def find_video_by_core_name(folder: str, core_name: str) -> Optional[str]:
-    """Scans a folder for a file matching the core_name with any common video extension."""
+    """Scans a folder for a file matching the core_name with any common video extension -- the folder first,
+    then the rest of its "finished" chain (core.common.finished_chain; tester carlobs, 2026-11-18: an original
+    Splatting hadn't moved down to Merging's <Source>/finished/finished had "no original")."""
+    from core.common.finished_chain import chain
     video_extensions = ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm")
-    for ext in video_extensions:
-        full_path = os.path.join(folder, f"{core_name}{ext[1:]}")
-        if os.path.exists(full_path):
-            return full_path
+    for where in chain(folder) or [folder]:
+        for ext in video_extensions:
+            full_path = os.path.join(where, f"{core_name}{ext[1:]}")
+            if os.path.exists(full_path):
+                return full_path
     return None

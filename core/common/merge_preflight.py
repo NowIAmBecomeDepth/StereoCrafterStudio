@@ -44,7 +44,9 @@ def _matches(folder: str, pattern: str) -> List[str]:
     """`pattern`'s own wildcards match; the folder is literal (callers escape names)."""
     if not folder:
         return []
-    folder = glob.escape(folder)
+    # the clip's splat wherever its "finished" chain has it (core.common.finished_chain; tester, 2026-11-18)
+    from core.common.finished_chain import dir_holding
+    folder = glob.escape(dir_holding(folder, pattern))
     # .mkv too: Splatting's Container may be MKV (user, 2026-10-25)
     return [m for ext in (".mp4", ".mov", ".mkv") for m in glob.glob(os.path.join(folder, pattern + ext))]
 

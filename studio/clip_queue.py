@@ -410,13 +410,18 @@ def merge_clips(values: dict) -> List[str]:
                         key=_by_number)
     else:
         return []
+    # each clip once, from its newest inpaint (tester carlobs, 2026-11-18: a low-res inpaint and a later hi-res
+    # one of the same clip were both listed -- their names differ only by width)
+    from core.common.finished_chain import chain, newest_per_core
+    videos = newest_per_core(videos, lambda name: merge_core_name(name))
     mask = str(values.get("mask_folder") or "")
     if mask and os.path.isfile(mask):
         mask = os.path.dirname(mask)
     # the mask folder listed once, not globbed once per video (bug sweep A2); fnmatch is
-    # glob's own matcher, case-blind on Windows as glob is
+    # glob's own matcher, case-blind on Windows as glob is. Its whole "finished" chain (tester, 2026-11-18): a
+    # splat left a level up, or moved a level down after Merging's folder was set, is still the clip's.
     import fnmatch
-    mask_names = _listing(mask) if mask else []
+    mask_names = [n for f in (chain(mask) or [mask]) for n in _listing(f)] if mask else []
     out = []
     for v in videos:
         core = merge_core_name(v)
