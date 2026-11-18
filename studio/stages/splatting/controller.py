@@ -421,6 +421,11 @@ class SplattingController(QObject):
             self.encodingChanged.emit()
         if key == "low_res_auto_size" and coerced and self._shape and not self._busy:
             self._apply_auto_size()
+        if key in ("border_width", "border_bias") and str(self._map.value("border_mode")) != "Manual":
+            # Width and Bias count only in Border Mode Manual -- in Off (the default) they did nothing, in the Auto
+            # modes they were overwritten (tester carlobs, 2026-11-18: "Border Width ... not work in the preview"):
+            # a hand on either means Manual. The mode first, so its change doesn't reset what was just set.
+            self._set("border_mode", "Manual")
         self.preview.note_change(key, coerced)
         if key in self._SETTING_INFO:
             self._fill_settings_info(emit=True)

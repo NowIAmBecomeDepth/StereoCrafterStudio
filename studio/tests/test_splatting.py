@@ -368,6 +368,22 @@ class ControllerTests(unittest.TestCase):
             time.sleep(0.02)
         self.app.processEvents()
 
+    # tester carlobs, 2026-11-18: "the Border Width ... not work in the preview". Width and Bias count only in Border
+    # Mode Manual (Off: nothing; Auto: overwritten), and Off is the default -- a hand on either now means Manual.
+    def test_a_hand_on_border_width_or_bias_means_manual(self):
+        for start in ("Off", "Auto Basic", "Auto Adv."):
+            self.ctl._set("border_mode", start)
+            self.typed("border_width", "3.5")
+            self.assertEqual(self.ctl._map.value("border_mode"), "Manual", start)
+            self.assertEqual(float(self.ctl._map.value("border_width")), 3.5, "...and the width stays as set")
+        self.ctl._set("border_mode", "Off")
+        self.typed("border_bias", "0.4")
+        self.assertEqual(self.ctl._map.value("border_mode"), "Manual")
+        # a clip's sidecar loading its values (the preview's own writes) leaves the mode as the sidecar says
+        self.ctl._set("border_mode", "Off")
+        self.ctl._set("border_width", "2.0")
+        self.assertEqual(self.ctl._map.value("border_mode"), "Off")
+
     # audit 2026-09-28 (minor): "2.5" in a whole-number field passed the
     # number check, stayed text through from_config, and Start toasted
     # "'<=' not supported between instances of 'str' and 'int'".
