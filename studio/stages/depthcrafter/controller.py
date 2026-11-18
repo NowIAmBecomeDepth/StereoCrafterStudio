@@ -547,6 +547,9 @@ class DepthCrafterController(QObject):
                 outcome.error = "The batch ended with an error."
             v = verdict("DepthCrafter", outcome, stopped=self._stop.is_set())
             test, self._test_run = getattr(self, "_test_run", False), False
+            if not test and runner is not None:
+                from studio import send_back
+                send_back.restore_input(self, runner.opts.get("input_dir_or_file_var"))   # a rerun's one clip: done
             if v.handoff and not test:           # a Test Render isn't handed on
                 self._record_job_handoff(runner.opts if runner is not None else None)
             self.toast.emit(v.kind, ("Test render: " if test else "") + v.title,
@@ -927,6 +930,8 @@ class DepthCrafterController(QObject):
             self.toast.emit("warning", "DepthCrafter is busy", "Wait for its job to finish, then try again.")
             return
         source, output = os.path.normpath(source), os.path.normpath(output) if output else ""
+        from studio import send_back
+        send_back.remember_input(self, source)    # put back once this rerun has run (2026-11-18)
         for key, value in (("input_dir_or_file_var", source), ("output_dir", output)):
             if value:
                 self._map.insert(key, value)

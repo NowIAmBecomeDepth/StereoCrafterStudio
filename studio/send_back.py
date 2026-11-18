@@ -471,6 +471,48 @@ def take_back(ctl, queue, p: Dict, set_field: Callable[[str, str], None]) -> Non
     ctl.toast.emit("warning" if p.get("missing") else "info", f"Ready to rerun in {title}", "\n".join(lines))
 
 
+# ---------------------------------------------------------------------------
+# one clip's rerun: the input field back as it was once the rerun has run
+# ---------------------------------------------------------------------------
+
+INPUT_KEY = "input_dir_or_file_var"
+
+
+def _norm(path) -> str:
+    return os.path.normcase(os.path.normpath(str(path or ""))) if path else ""
+
+
+def remember_input(ctl, clip: str, key: str = INPUT_KEY) -> None:
+    """Before loadForRerun puts `clip` in the input field: what the field held, to be put back when that
+    rerun has run (tester carlobs, 2026-11-18: after a Rerun with DVD the Depth tab's input still named the
+    one clip, and the next batch would have run only it). A rerun after a rerun keeps the first one's field."""
+    before = getattr(ctl, "_input_before_rerun", None)
+    ctl._input_before_rerun = (before[0] if before else str(ctl._map.value(key) or ""), str(clip))
+
+
+def restore_input(ctl, ran_input, key: str = INPUT_KEY) -> bool:
+    """A job has ended that ran on `ran_input`. When it ran the rerun's clip and the field still holds that clip,
+    the field goes back to what it held before (and is saved): True. A field changed by hand since the rerun is
+    left as it is, and the rerun forgotten."""
+    held = getattr(ctl, "_input_before_rerun", None)
+    if not held:
+        return False
+    before, clip = held
+    now = str(ctl._map.value(key) or "")
+    if _norm(now) != _norm(clip):
+        ctl._input_before_rerun = None           # changed by hand: no longer the rerun's field
+        return False
+    if _norm(ran_input) != _norm(clip):
+        return False                             # something else ran (it can't, with the clip in the field)
+    ctl._input_before_rerun = None
+    ctl._map.insert(key, before)
+    if hasattr(ctl, "_last_good"):
+        ctl._last_good[key] = before
+    ctl.save()
+    logger.info("Rerun done: the input is back to %s.", before or "(empty)")
+    return True
+
+
 def _free(path: str) -> str:
     if not os.path.exists(path):
         return path

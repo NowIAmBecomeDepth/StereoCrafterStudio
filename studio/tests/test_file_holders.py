@@ -69,6 +69,28 @@ class HoldersTest(unittest.TestCase):
         finally:
             H.WAIT_FOR_FREE = real
 
+    def test_a_reader_studio_dropped_lets_go(self):
+        """Tester carlobs, 2026-11-18: a Rerun with DVD couldn't move LC_V2-0578_depth.mp4, "open in Studio itself",
+        after the previews had let go. A reader that was dropped but not yet collected (a reference cycle) keeps
+        its file open until the garbage collector runs: the move collects once before it waits."""
+        import gc
+        from core.common import file_holders as H
+
+        class Reader:                            # a file kept by an object in a cycle, as a decoder's can be
+            def __init__(self, path):
+                self.f = open(path, "rb")
+                self.me = self
+        was = gc.isenabled()
+        gc.disable()                             # no collection on its own while the move waits
+        try:
+            Reader(self.src)                     # dropped at once; the cycle keeps the file open
+            err = H.move_when_free(str(self.src), str(self.d / self.src.name), wait=1.0)
+        finally:
+            if was:
+                gc.enable()
+        self.assertIsNone(err, err)
+        self.assertTrue((self.d / self.src.name).is_file())
+
     def test_move_to_finished_waits_too(self):
         from PySide6.QtCore import QObject
         from studio.clip_queue import ClipQueue

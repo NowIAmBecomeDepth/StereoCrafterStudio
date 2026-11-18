@@ -81,11 +81,20 @@ def move_when_free(src: str, dest: str, wait: float = WAIT_FOR_FREE, every: floa
     """Move `src` to `dest`, trying again while the file is in use for up to `wait` seconds. None when moved,
     else why not -- naming who has it open when Windows can say."""
     deadline = time.monotonic() + max(0.0, wait)
+    collected = False
     while True:
         try:
             mover(src, dest)
             return None
         except OSError as e:
+            if not collected:
+                # a reader Studio has dropped but not yet collected (a reference cycle) keeps its file open until
+                # the garbage collector runs (tester carlobs, 2026-11-18: "open in Studio itself" after the
+                # previews had let go): once, then the move again at once
+                collected = True
+                import gc
+                gc.collect()
+                continue
             if time.monotonic() >= deadline:
                 who = holders(src)
                 return f"{e}" + (f" -- open in {', '.join(who)}" if who else "")

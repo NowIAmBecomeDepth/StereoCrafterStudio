@@ -484,6 +484,9 @@ class VdaController(QObject):
         stopped = self._stop.is_set()
         v = verdict("Video Depth Anything", outcome, stopped=stopped)
         test, self._test_run = self._test_run, False
+        if not test and runner is not None:
+            from studio import send_back
+            send_back.restore_input(self, runner.opts.get("input_dir_or_file_var"))   # a rerun's one clip: done
         self._status = v.title
         self.stateChanged.emit()
         self.infoChanged.emit()
@@ -569,6 +572,8 @@ class VdaController(QObject):
             return
         source = os.path.normpath(source)
         output = os.path.normpath(output) if output else ""
+        from studio import send_back
+        send_back.remember_input(self, source)    # put back once this rerun has run (2026-11-18)
         for key, value in (("input_dir_or_file_var", source), ("output_dir", output)):
             if value:
                 self._map.insert(key, value)
