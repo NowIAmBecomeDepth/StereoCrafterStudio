@@ -3071,6 +3071,7 @@ class InpaintingEngine:
 
         # --- INITIALIZE HI-RES VARIABLES & FIND MATCH (STEP 1) ---
         hires_video_path: Optional[str] = self._find_high_res_match(input_video_path)
+        self._hires_match = hires_video_path  # v2: moved to finished with the clip, blended or not
         if hires_video_path and (getattr(self, "_run_settings", None) or {}).get("skip_hires_blend_var"):
             logger.info("Skip Hi-Res Blend is on: the low-res inpaint is the output.")  # v2
             hires_video_path = None
@@ -3809,7 +3810,7 @@ class InpaintingEngine:
             if not reverse_completed:
                 logger.warning("Reverse pass failed, but forward pass completed successfully.")
 
-        return True, hires_video_path
+        return True, hires_video_path or getattr(self, "_hires_match", None)  # v2: blended or not
 
     # -- v1 InpaintingGUI._extract_clip_id_from_video_path (inpainting_gui.py:4667)
     def _extract_clip_id_from_video_path(self, video_path: str) -> Optional[int]:

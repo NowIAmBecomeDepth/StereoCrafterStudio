@@ -1299,5 +1299,27 @@ class Sage1TorchCompileTest(unittest.TestCase):
         self.assertIs(values["use_compile"], True, "the saved setting is kept")
 
 
+
+class SkipHiResMovesTheSplatTest(unittest.TestCase):
+    """Skip Hi-Res Blend (tester carlobs, 2026-11-18): the hi-res splat stayed out of finished -- only a BLENDED
+    one came back to be moved -- so Merging, which reads <hires>/finished, never listed the clip."""
+
+    def test_the_match_is_kept_to_be_moved(self):
+        import inspect
+        import tempfile
+        from studio.stages.inpainting.engine import InpaintingEngine
+        eng = InpaintingEngine.__new__(InpaintingEngine)      # only the setup step: nothing loaded
+        eng._run_settings = {"skip_hires_blend_var": True}
+        eng.app_config, eng.run_settings = {}, {}
+        hires = "D:/Splat/hires/LC_V2-0412_848_1920_splatted2.mp4"
+        eng._find_high_res_match = lambda path: hires
+        with tempfile.TemporaryDirectory() as d:
+            _out, data = eng._setup_video_info_and_hires(os.path.join(d, "LC_V2-0412_848_splatted2.mp4"), d, True)
+        self.assertFalse(data.get("is_hires_blend_enabled"), "not blended")
+        self.assertEqual(eng._hires_match, hires, "but kept, to go to finished with the clip")
+        src = inspect.getsource(InpaintingEngine.process_single_video)
+        self.assertIn('return True, hires_video_path or getattr(self, "_hires_match", None)', src)
+
+
 if __name__ == "__main__":
     unittest.main()
