@@ -42,6 +42,10 @@ Section {
     readonly property var frameCounts: src ? src.clipFrames : []
     readonly property var ratios: src && src.clipRatios !== undefined ? src.clipRatios : []
     readonly property var fxs: src ? src.clipFx : []
+    // ...and the names (tester, 2026-11-18: `src.clips.findIndex` on every clip change read the whole Python
+    // list again for EVERY element it looked at -- N x N: 9 s a clip at 1500 clips, minutes at 6400, and the
+    // window froze through a long DVD batch). Array methods on this copy cost nothing.
+    readonly property var clipNames: src ? src.clips : []
     // the clip the preview shows
     readonly property string shownPath: pv && pv.loaded ? (pv.clipPaths[pv.videoIndex] || "") : ""
     property bool busy: false
@@ -153,7 +157,7 @@ Section {
         id: numberMetrics
         font.family: Theme.bodyFont
         font.pixelSize: Theme.smallSize + 1
-        text: String(Math.max(9, queue.src ? queue.src.clips.length : 0)).replace(/./g, "0")
+        text: String(Math.max(9, queue.clipNames.length)).replace(/./g, "0")
     }
     // each row's bar: a set width, the name takes the rest
     readonly property real barWidth: Math.max(40, Math.min(110, (list.width - 8) * 0.22))
@@ -178,8 +182,8 @@ Section {
             Layout.preferredWidth: implicitWidth
             elide: Text.ElideRight
             horizontalAlignment: Text.AlignRight
-            text: queue.src && queue.src.clips.length
-                  ? (queue.src.clips.length - queue.archivedCount) + " clips"
+            text: queue.clipNames.length
+                  ? (queue.clipNames.length - queue.archivedCount) + " clips"
                     + (queue.archivedCount ? "  ·  " + queue.archivedCount + " finished" : "")
                     + (queue.picked ? "  ·  " + queue.picked + " selected" : "") : ""
             color: Theme.fgFaint
@@ -338,9 +342,9 @@ Section {
     Connections {
         target: queue.src
         function onChanged() {
-            const n = queue.src ? queue.src.clips.length : 0
-            if (n !== list.count || queue._firstNames !== (n ? queue.src.clips[0] : "")) {
-                queue._firstNames = n ? queue.src.clips[0] : ""
+            const n = queue.clipNames.length
+            if (n !== list.count || queue._firstNames !== (n ? queue.clipNames[0] : "")) {
+                queue._firstNames = n ? queue.clipNames[0] : ""
                 queue.revealAt = Date.now()
             }
         }
@@ -548,14 +552,14 @@ Section {
         Layout.preferredWidth: 0
         Layout.minimumWidth: 0
         Layout.maximumWidth: queue.width - 28
-        visible: !queue.busy && !!queue.src && queue.src.clips.length > 0
+        visible: !queue.busy && !!queue.src && queue.clipNames.length > 0
         spacing: 6
         AccentButton {
             objectName: "queueSelectAll"
             text: "Select All"
             kind: "ghost"
             implicitHeight: 24
-            enabled: !queue.moving && queue.picked < (queue.src ? queue.src.clips.length : 0)
+            enabled: !queue.moving && queue.picked < queue.clipNames.length
             onClicked: queue.src.checkAll()
             HoverTip { tip: "Ticks every clip in the list." }
         }
@@ -597,7 +601,7 @@ Section {
         visible: queue.listFits
         clip: true
         spacing: 6
-        model: queue.src ? queue.src.clips : []
+        model: queue.clipNames
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: SlimScrollBar { onPressedChanged: if (pressed) wheelGlide.stop() }
         // The wheel scrolls two rows a notch (user, 2026-09-28: Qt's own step
@@ -660,7 +664,7 @@ Section {
             function onRunningChanged() {
                 if (!queue.src || queue.running === "") return
                 const k = queue.keyOf(queue.running)
-                const i = queue.src.clips.findIndex(n => queue.keyOf(n) === k)
+                const i = queue.clipNames.findIndex(n => queue.keyOf(n) === k)
                 if (i >= 0) { wheelGlide.stop(); list.positionViewAtIndex(i, ListView.Contain) }
             }
         }

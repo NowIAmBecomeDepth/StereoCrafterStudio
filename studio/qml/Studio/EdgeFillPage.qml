@@ -48,6 +48,11 @@ Item {
                                          : (picked.length ? picked[picked.length - 1] : "")
     property var measured: ({})             // name -> EdgeFill.measured's map
     readonly property var clips: info.clips || []
+    // Edge Fill's lists as copies, read once per change: an Array method (indexOf, every) called straight on a
+    // Python list property reads the whole list again for every element it looks at -- per tile, N x N (the
+    // same trap froze Upcoming Jobs through a long DVD batch, tester 2026-11-18)
+    readonly property var filledNow: ef ? ef.filledNow : []
+    readonly property var sidecarClips: ef ? ef.sidecarClips : []
 
     readonly property int requiredWidth: 1000
     // the left column's own height, as the other stages ask (2026-11-15: a fixed 620 put the action bar
@@ -581,7 +586,7 @@ Item {
                         // filled (its record says so), or by this run before the grid looks again: a light
                         // green, as the clip lists show a finished row (user, 2026-10-18)
                         readonly property bool finished: modelData.state === "done"
-                                                         || page.ef.filledNow.indexOf(modelData.name) >= 0
+                                                         || page.filledNow.indexOf(modelData.name) >= 0
                         readonly property var m: page.measured[modelData.name] || null
                         // the eye with the strip, at its widest frame once measured
                         readonly property string thumb: m && m.thumb ? m.thumb : (modelData.thumb || "")
@@ -712,7 +717,7 @@ Item {
                                 // a sidecar: filled with its own settings (user, 2026-11-07)
                                 Rectangle {
                                     objectName: "fillEdgesSidecarChip"
-                                    visible: page.ef.sidecarClips.indexOf(tile.modelData.name) >= 0
+                                    visible: page.sidecarClips.indexOf(tile.modelData.name) >= 0
                                     anchors.left: playRight.visible ? playRight.right : parent.left
                                     anchors.top: parent.top
                                     anchors.margins: 6; anchors.topMargin: 7
@@ -811,7 +816,7 @@ Item {
         // its sidecar (user, 2026-11-07: "like splatting ... a create/update sidecar button")
         MenuItem {
             objectName: "fillEdgesSaveSidecar"
-            readonly property bool has: page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            readonly property bool has: page.sidecarClips.indexOf(tileMenu.name) >= 0
             text: has ? "Update Sidecar" : "Create Sidecar"
             enabled: page.idle
             onTriggered: page.ef.saveSidecar([tileMenu.name])
@@ -820,14 +825,14 @@ Item {
         MenuItem {
             objectName: "fillEdgesLoadSidecar"
             text: "Load Sidecar Settings"
-            enabled: page.idle && page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            enabled: page.idle && page.sidecarClips.indexOf(tileMenu.name) >= 0
             onTriggered: page.ef.loadSidecar(tileMenu.name)
             property string tip: "Puts this clip's sidecar settings on the page, to look at or change and save again."
         }
         MenuItem {
             objectName: "fillEdgesRemoveSidecar"
             text: "Remove Sidecar"
-            enabled: page.idle && page.ef.sidecarClips.indexOf(tileMenu.name) >= 0
+            enabled: page.idle && page.sidecarClips.indexOf(tileMenu.name) >= 0
             onTriggered: page.ef.removeSidecar(tileMenu.name)
         }
         MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.border } }
@@ -895,7 +900,7 @@ Item {
         // ticked, the one last clicked first (user, 2026-11-08), every ticked clip's beside it
         AccentButton {
             objectName: "fillEdgesSidecarButton"
-            readonly property bool update: page.sidecarOne.length > 0 && page.ef.sidecarClips.indexOf(page.sidecarOne) >= 0
+            readonly property bool update: page.sidecarOne.length > 0 && page.sidecarClips.indexOf(page.sidecarOne) >= 0
             text: (update ? "Update " : "Create ") + "Sidecar"
             kind: page.picked.length > 1 ? "tonal" : "outline"
             enabled: page.idle && page.sidecarOne.length > 0
@@ -909,7 +914,7 @@ Item {
         AccentButton {
             objectName: "fillEdgesSidecarAllButton"
             visible: page.picked.length > 1
-            readonly property bool update: page.picked.every(n => page.ef.sidecarClips.indexOf(n) >= 0)
+            readonly property bool update: page.picked.every(n => page.sidecarClips.indexOf(n) >= 0)
             text: (update ? "Update " : "Create ") + page.picked.length + " Sidecars"
             kind: "outline"
             enabled: page.idle
