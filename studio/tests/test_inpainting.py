@@ -88,6 +88,68 @@ class JoinChunksTest(unittest.TestCase):
         src = inspect.getsource(self.E.InpaintingEngine.process_single_video)
         self.assertIn("_join_chunks(results)", src)
         self.assertNotIn("torch.cat(results", src)
+        self.assertIn("results = _ChunkSink(total_frames_to_process_actual)", src)
+
+
+class ChunkSinkTest(unittest.TestCase):
+    """A tester's 12 GB card (2026-11-20): "you tried to allocate 26276806656 bytes" in _join_chunks after
+    two hours. The 2026-10-24 join still allocated the clip while every chunk was held -- the same peak as
+    torch.cat. The sink copies each chunk into the one clip as it is made, so no chunk outlives its copy."""
+
+    def setUp(self):
+        from studio.stages.inpainting import engine as E
+        self.E = E
+
+    def chunks(self):
+        import torch
+        g = torch.Generator().manual_seed(4)
+        return [torch.rand((n, 3, 12, 20), generator=g) for n in (22, 22, 22, 9)]
+
+    def test_no_chunk_is_held_after_its_copy(self):
+        import gc, weakref
+        sink = self.E._ChunkSink(75)
+        refs = []
+        for c in self.chunks():
+            refs.append(weakref.ref(c))
+            sink.append(c)
+            del c
+        gc.collect()
+        self.assertEqual([r() is not None for r in refs], [False] * 4,
+                         "a chunk was still held after it was copied into the clip")
+
+    def test_the_same_clip_as_torch_cat(self):
+        import torch
+        chunks = self.chunks()
+        want = torch.cat(chunks, dim=0)
+        sink = self.E._ChunkSink(75)
+        for c in chunks:
+            sink.append(c)
+        self.assertTrue(sink)
+        got = self.E._join_chunks(sink)
+        self.assertEqual(got.dtype, want.dtype)
+        self.assertTrue(torch.equal(got, want))
+
+    def test_more_frames_than_expected_still_join(self):
+        import torch
+        chunks = self.chunks()
+        want = torch.cat(chunks, dim=0)
+        sink = self.E._ChunkSink(30)                  # fewer than the 75 that come
+        for c in chunks:
+            sink.append(c)
+        self.assertTrue(torch.equal(self.E._join_chunks(sink), want))
+
+    def test_fewer_frames_than_expected_are_cut_to_what_came(self):
+        import torch
+        chunks = self.chunks()[:2]
+        sink = self.E._ChunkSink(75)
+        for c in chunks:
+            sink.append(c)
+        got = self.E._join_chunks(sink)
+        self.assertEqual(got.shape[0], 44)
+        self.assertTrue(torch.equal(got, torch.cat(chunks, dim=0)))
+
+    def test_empty_is_false(self):
+        self.assertFalse(self.E._ChunkSink(10))
 
 
 class MaskBlurSlicesTest(unittest.TestCase):

@@ -136,11 +136,50 @@ def _chunk_append_length(i, stride, overlap, actual, total):
     return actual if is_last else stride
 
 
+class _ChunkSink:
+    """The inpainted clip, filled a chunk at a time as each is made (a tester's 12 GB card, 2026-11-20:
+    "you tried to allocate 26276806656 bytes" in _join_chunks after two hours). Collecting the chunks in
+    a list and joining them at the end held every chunk while the clip was allocated -- twice the clip in
+    RAM, the same peak as v1's torch.cat. Here the clip is allocated at the first chunk, `total` frames
+    of its shape and dtype, and each chunk is copied in and let go: the clip plus one chunk. A clip that
+    can't be allocated fails at the first chunk, not after the last. Should more frames come than
+    `total`, the clip grows (the old join's cost, once); fewer are cut off by `clip()`."""
+
+    def __init__(self, total):
+        self.total = max(0, int(total))
+        self.out = None
+        self.at = 0
+
+    def append(self, chunk):
+        n = int(chunk.shape[0])
+        if self.out is None:
+            self.out = torch.empty((max(self.total, n),) + tuple(chunk.shape[1:]), dtype=chunk.dtype)
+        elif self.at + n > self.out.shape[0]:
+            grown = torch.empty((self.at + n,) + tuple(self.out.shape[1:]), dtype=self.out.dtype)
+            grown[:self.at] = self.out[:self.at]
+            self.out = grown
+        self.out[self.at:self.at + n] = chunk
+        self.at += n
+
+    def __len__(self):
+        return self.at
+
+    def __bool__(self):
+        return self.at > 0
+
+    def clip(self):
+        out, self.out = self.out, None
+        if out is None:
+            return torch.empty((0,))
+        return out if self.at == out.shape[0] else out[:self.at]
+
+
 def _join_chunks(chunks):
-    """The inpainted chunks as one clip, each let go once it is copied in. v1's torch.cat held every
-    chunk AND the joined clip at once -- twice the clip in RAM (a user's clip, 2026-10-24: 13 GB more
-    asked for at the end, out of memory after two hours). Now the clip plus one chunk. The same
-    frames, the same dtype; `chunks` is left empty."""
+    """The inpainted chunks as one clip: a _ChunkSink's clip as it is (2026-11-20), or a list of chunks
+    joined one at a time, each let go once it is copied in (2026-10-24). The same frames, the same
+    dtype; `chunks` is left empty."""
+    if isinstance(chunks, _ChunkSink):
+        return chunks.clip()
     total = sum(int(c.shape[0]) for c in chunks)
     first = chunks[0]
     out = torch.empty((total,) + tuple(first.shape[1:]), dtype=first.dtype)
@@ -3345,7 +3384,7 @@ class InpaintingEngine:
             # 3. INPAINTING CHUNKS (The main loop)
             total_frames_to_process_actual = num_frames_original
             stride = max(1, frames_chunk - overlap)
-            results = []
+            results = _ChunkSink(total_frames_to_process_actual)  # v2: each chunk into the clip (2026-11-20)
             previous_chunk_output_frames: Optional[torch.Tensor] = None
 
             for i in range(0, total_frames_to_process_actual, stride):
