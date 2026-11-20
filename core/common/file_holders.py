@@ -76,6 +76,86 @@ def _rm_holders(path: str) -> List[str]:
         rm.RmEndSession(session)
 
 
+#: video readers that don't keep their file's name, listed by owner whatever file they read
+_NAMELESS_READERS = ("VideoReader",)
+
+
+def own_holders(path: str, limit: int = 12) -> List[str]:
+    """What inside this process may still have `path` open, as "Owner.attribute -> Reader" lines (tester carlobs,
+    2026-11-20: "open in Studio itself" twice, and no repro here). Every live object that names the file in an
+    attribute (a reader's path, an open file's name), and every decord VideoReader alive (it keeps no name), each
+    with the objects holding it. Slow (it walks every object): only after a move has failed."""
+    import gc
+    import io
+
+    want = os.path.normcase(os.path.abspath(path)) if path else ""
+    base = os.path.basename(want)
+
+    def names_it(v) -> bool:
+        if not isinstance(v, str) or base not in v.lower():
+            return False
+        try:
+            return os.path.normcase(os.path.abspath(v)) == want or want in os.path.normcase(v)
+        except (TypeError, ValueError):
+            return False
+
+    hits = []
+    for obj in gc.get_objects():
+        try:
+            kind = type(obj).__name__
+            if isinstance(obj, io.IOBase):
+                if not getattr(obj, "closed", True) and names_it(getattr(obj, "name", None)):
+                    hits.append(obj)
+                continue
+            d = getattr(obj, "__dict__", None) if not isinstance(obj, type) else None
+            if not isinstance(d, dict):
+                continue
+            if kind in _NAMELESS_READERS or any(names_it(v) for v in d.values()):
+                hits.append(obj)
+        except Exception:
+            continue
+        if len(hits) >= limit:
+            break
+
+    def owners(obj) -> List[str]:
+        out = []
+        for ref in gc.get_referrers(obj):
+            if ref is hits or isinstance(ref, type(sys._getframe())):
+                continue
+            if isinstance(ref, dict):
+                attr = next((k for k, v in ref.items() if v is obj), "?")
+                owner = next((o for o in gc.get_referrers(ref) if getattr(o, "__dict__", None) is ref), None)
+                out.append(f"{type(owner).__name__}.{attr}" if owner is not None else f"a dict['{attr}']")
+            elif isinstance(ref, (list, tuple, set)):
+                out.append(f"a {type(ref).__name__}")
+            elif getattr(ref, "__dict__", None) is not None and not isinstance(ref, type):
+                out.append(type(ref).__name__)
+        return sorted(set(out))[:6]
+
+    raws = {id(getattr(h, "raw", None)) for h in hits if isinstance(h, io.IOBase)}
+    lines = []
+    for obj in hits:
+        if id(obj) in raws:
+            continue                             # an open file's raw handle: its buffer is listed already
+        what = type(obj).__module__ + "." + type(obj).__name__
+        held = owners(obj)
+        lines.append(f"{what} held by {', '.join(held) if held else 'no object (a running function, or garbage)'}")
+    hits.clear()
+    return lines
+
+
+def _log_own_holders(path: str) -> None:
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        lines = own_holders(path)
+    except Exception:
+        log.debug("Couldn't list what in Studio has %s open", path, exc_info=True)
+        return
+    log.warning("%s is open in Studio itself; what in Studio may hold it:%s", os.path.basename(path),
+                "".join(f"\n    {s}" for s in lines) if lines else " nothing found by name (a native reader?)")
+
+
 def move_when_free(src: str, dest: str, wait: float = WAIT_FOR_FREE, every: float = RETRY_EVERY,
                    mover: Callable[[str, str], object] = shutil.move) -> Optional[str]:
     """Move `src` to `dest`, trying again while the file is in use for up to `wait` seconds. None when moved,
@@ -97,5 +177,7 @@ def move_when_free(src: str, dest: str, wait: float = WAIT_FOR_FREE, every: floa
                 continue
             if time.monotonic() >= deadline:
                 who = holders(src)
+                if any(w == "Studio itself" for w in who):
+                    _log_own_holders(src)
                 return f"{e}" + (f" -- open in {', '.join(who)}" if who else "")
             time.sleep(every)

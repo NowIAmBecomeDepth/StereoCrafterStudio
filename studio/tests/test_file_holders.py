@@ -91,6 +91,29 @@ class HoldersTest(unittest.TestCase):
         self.assertIsNone(err, err)
         self.assertTrue((self.d / self.src.name).is_file())
 
+    def test_a_file_studio_keeps_open_is_traced_to_its_holder(self):
+        """Tester carlobs, 2026-11-20: "open in Studio itself" again, and no repro here. The failed move logs what
+        in Studio still has the file: the reader that names it, and the object holding that reader."""
+        from core.common import file_holders as H
+
+        class DepthReader:                       # a reader that keeps its file's name, as fast_decode's do
+            def __init__(self, path):
+                self.path = path
+                self.f = open(path, "rb")
+
+        class Previewer:
+            pass
+        keeper = Previewer()
+        keeper.depth_reader = DepthReader(str(self.src))
+        try:
+            with self.assertLogs("core.common.file_holders", "WARNING") as logs:
+                err = H.move_when_free(str(self.src), str(self.d / self.src.name), wait=0.5)
+        finally:
+            keeper.depth_reader.f.close()
+        self.assertIn("open in Studio itself", err or "")
+        said = "\n".join(logs.output)
+        self.assertIn("DepthReader held by Previewer.depth_reader", said)
+
     def test_move_to_finished_waits_too(self):
         from PySide6.QtCore import QObject
         from studio.clip_queue import ClipQueue
