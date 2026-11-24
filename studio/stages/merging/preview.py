@@ -632,6 +632,15 @@ class MergingPreview(QObject):
             pv._clear_preview_resources()
             from core.removal import putback
             putback.close_all()                # its readers hold the clip and its original (bug sweep #7)
+            # the Depth Map view's own reader on <clip>_depth.* (tester carlobs, 2026-11-24: Rerun in DVD/DC/VDA
+            # couldn't move the old depth map aside -- "open in Studio itself" -- until the 3rd or 4th try)
+            cap = getattr(eng, "_depth_cap", None)
+            eng._depth_cap = eng._depth_cap_path = None
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    logger.debug("Depth Map reader not closed", exc_info=True)
             pv.video_list = []
             pv.current_video_index = -1
             eng.preview_original_left_tensor = None

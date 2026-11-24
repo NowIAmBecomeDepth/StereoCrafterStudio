@@ -62,6 +62,30 @@ class PreviewGetsTheFolders(unittest.TestCase):
             pv._do(kind, arg, changes)
             self.assertEqual(pv._engine.depth_sidecar_folders, [d])
 
+    def test_release_closes_the_depth_map_reader(self):
+        """A release lets go of the Depth Map view's depth map, so a Rerun can move it aside (tester carlobs,
+        2026-11-24: "open in Studio itself" until the 3rd or 4th try)."""
+        from PySide6.QtGui import QGuiApplication
+        from studio.stages.merging.preview import MergingPreview
+        app = QGuiApplication.instance() or QGuiApplication(["t"])  # noqa: F841
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "clip_depth.mp4")
+            w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 32))
+            for i in range(4):
+                w.write(np.full((32, 64, 3), 40 * i, np.uint8))
+            w.release()
+            pv = MergingPreview(lambda: {})
+            pv.depth_folders_fn = lambda: [d]
+            pv._thread = object()            # no worker: the job is run here
+            eng = pv._ensure_engine()
+            eng.depth_sidecar_folders = [d]
+            self.assertIsNotNone(eng._preview_depth_frame({"core_name": "clip"}, torch.zeros(1, 3, 16, 32)))
+            pv._submit("release")
+            kind, arg, changes, _gen = pv._jobs.popleft()
+            pv._do(kind, arg, changes)
+            self.assertIsNone(eng._depth_cap)
+            os.replace(path, path + ".moved")    # Windows refuses while the reader has it open
+
 
 class SkipHires(unittest.TestCase):
     def test_setting_default_and_run_view(self):
