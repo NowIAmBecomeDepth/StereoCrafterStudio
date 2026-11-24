@@ -101,6 +101,30 @@ class MultiMapDepthFrame(unittest.TestCase):
             self.assertEqual(got[:2], [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")])
 
 
+class MultiMapFrameBreak(unittest.TestCase):
+    """Tester carlobs, 2026-11-24: Merging no longer applied Splatting's Frame Break. A Multi-Map splat moves the
+    clip's depth sidecar (where Frame Break is saved) into <its map's subfolder>/finished; the job looked only
+    in the subfolder Splatting has picked now and sidecars/."""
+
+    def test_job_finds_the_sidecar_in_another_maps_finished(self):
+        import json
+        import types
+        from types import SimpleNamespace
+        from core.common.sidecar_manager import frame_break_settings
+        from studio.stages.merging.controller import MergingController
+        with tempfile.TemporaryDirectory() as d:
+            for sub in ("DepthCrafter", "sidecars", os.path.join("VDA", "finished")):
+                os.makedirs(os.path.join(d, sub))
+            with open(os.path.join(d, "VDA", "finished", "clip_depth.fssidecar"), "w") as f:
+                json.dump({"selected_depth_map": "VDA", "frame_break_bars": 0.2}, f)
+            ctl = SimpleNamespace(_engine=SimpleNamespace(), _engine_values={}, _page_values=lambda: {}, _values=lambda: {},
+                                  splatting=SimpleNamespace(_values=lambda: {"multi_map": True, "input_depth_maps": d}))
+            ctl._depth_folders = lambda: [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")]
+            ctl._depth_map_folders = types.MethodType(MergingController._depth_map_folders, ctl)
+            eng = MergingController._ensure_engine(ctl)
+            self.assertEqual(frame_break_settings("clip", None, eng.depth_sidecar_folders).get("frame_break_bars"), 0.2)
+
+
 class PreviewGetsTheFolders(unittest.TestCase):
     """The preview's own engine is told the depth folders (testers, 2026-11-13: only the job's engine was)."""
 

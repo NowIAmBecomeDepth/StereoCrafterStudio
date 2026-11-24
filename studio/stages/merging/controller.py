@@ -679,7 +679,9 @@ class MergingController(QObject):
         # Every *_var the engine reads sees the settings as they are now.
         # (Split L/R Output is handed over as Full SBS + Split L/R + Delete SBS)
         self._engine_values.update(S.for_engine(S.normalise(self._values())))
-        self._engine.depth_sidecar_folders = self._depth_folders()
+        # every Multi-Map folder too: a Multi-Map splat moves the clip's depth sidecar (its Frame Break) into
+        # <its map's subfolder>/finished (tester carlobs, 2026-11-24: merged without Frame Break)
+        self._engine.depth_sidecar_folders = self._depth_map_folders()
         return self._engine
 
     def _depth_folders(self) -> list:
@@ -704,7 +706,8 @@ class MergingController(QObject):
         return [f for f in dict.fromkeys(out) if f]
 
     def _depth_map_folders(self) -> list:
-        """Where the Depth Map preview looks for a clip's <clip>_depth map: _depth_folders, then -- with Multi-Map
+        """Where the Depth Map preview looks for a clip's <clip>_depth map, and the job for its depth sidecar (its
+        Frame Break): _depth_folders, then -- with Multi-Map
         -- the Depth Maps folder itself and every map subfolder (tester carlobs, 2026-11-24: it looked only in the
         subfolder Splatting has picked now, so a clip splatted from another map -- or the newest, in the folder
         itself -- showed none)."""
