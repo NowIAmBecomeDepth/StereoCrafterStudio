@@ -1020,14 +1020,17 @@ ChangeFoldersButton {
                             AnimRadio {
                                 required property var modelData
                                 enabled: page.idle
-                                text: modelData
+                                text: modelData === "." ? "Newest" : modelData
                                 checked: String(page.st.selected_depth_map) === modelData
                                 font.bold: checked
                                 onToggled: {
                                     if (checked) { page.st.selected_depth_map = modelData; Qt.callLater(page.pv.chooseMap) }
                                     checked = Qt.binding(() => String(page.st.selected_depth_map) === modelData)
                                 }
-                                HoverTip { tip: "Multi-Map: preview (and save to this clip's sidecar) the depth map in this subfolder." }
+                                HoverTip { tip: modelData === "."
+                                    ? "Multi-Map: preview (and save to this clip's sidecar) the newest depth map -- the one in the "
+                                      + "Depth Maps folder itself, where DepthCrafter, VDA and DVD write theirs."
+                                    : "Multi-Map: preview (and save to this clip's sidecar) the depth map in this subfolder." }
                             }
                         }
                         SpCheck { enabled: page.idle; visible: !!page.st.crosshair_enabled && !page.bh["splat.crosshair_white"]; key: "crosshair_white"; text: "White"; help: page.help("crosshair_white") }

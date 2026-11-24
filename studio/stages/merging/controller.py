@@ -282,7 +282,7 @@ class MergingController(QObject):
         self._applying_preview = False
         self._preview_info: Dict[str, Any] = {}
         self.preview = MergingPreview(self._values, self)
-        self.preview.depth_folders_fn = self._depth_folders   # its Depth Map view, as the job's Frame Break
+        self.preview.depth_folders_fn = self._depth_map_folders   # its Depth Map view: every Multi-Map folder too
         # Upcoming Jobs keeps the job's clips (and their bars) while it runs
         self.stateChanged.connect(lambda: self.preview.queue.hold(self._busy))
         self.preview.settingsWritten.connect(self._take_preview_writes)
@@ -701,6 +701,29 @@ class MergingController(QObject):
                 out += [SS.effective_depth_folder(v), SS.sidecar_folder(v, create=False)]
             except Exception:
                 logger.debug("No Splatting depth folder for Frame Break", exc_info=True)
+        return [f for f in dict.fromkeys(out) if f]
+
+    def _depth_map_folders(self) -> list:
+        """Where the Depth Map preview looks for a clip's <clip>_depth map: _depth_folders, then -- with Multi-Map
+        -- the Depth Maps folder itself and every map subfolder (tester carlobs, 2026-11-24: it looked only in the
+        subfolder Splatting has picked now, so a clip splatted from another map -- or the newest, in the folder
+        itself -- showed none)."""
+        out = self._depth_folders()
+        splatting = getattr(self, "splatting", None)
+        if splatting is not None:
+            try:
+                from studio.stages.splatting import settings as SS
+                v = splatting._values()
+                if v.get("multi_map"):
+                    base = str(v.get("input_depth_maps") or "")
+                    if base and os.path.isfile(base):
+                        base = os.path.dirname(base)
+                    if os.path.isdir(base):
+                        out += [base] + [os.path.join(base, d) for d in os.listdir(base)
+                                         if d.lower() not in ("sidecars", "finished", "edit_history")
+                                         and os.path.isdir(os.path.join(base, d))]
+            except Exception:
+                logger.debug("No Multi-Map folders for the Depth Map preview", exc_info=True)
         return [f for f in dict.fromkeys(out) if f]
 
     @Slot()

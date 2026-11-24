@@ -1110,6 +1110,7 @@ class BatchProcessor:
             # Sidecar check
             selected = sidecar_data.get("selected_depth_map") or settings.selected_depth_map
             if selected:
+                selected = "" if selected.strip() == "." else selected     # Multi-Map's Newest: the folder itself
                 candidate = os.path.join(base_folder, selected, f"{video_name}_depth.mp4")
                 if os.path.exists(candidate):
                     return candidate

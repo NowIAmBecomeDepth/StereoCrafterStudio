@@ -442,14 +442,41 @@ def config_for_run(values: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+#: Multi-Map's choice for the maps in the Depth Maps folder itself -- where DepthCrafter, VDA and DVD write the
+#: newest map, setting the one it replaces aside into DepthCrafter/, VDA/ or DVD/ (tester carlobs, 2026-11-24:
+#: Multi-Map listed only the subfolders, so the newest map couldn't be picked). "." joins to the folder itself.
+NEWEST_MAP = "."
+NEWEST_MAP_LABEL = "Newest"
+
+
+def depth_map_choices(base: str) -> list:
+    """Multi-Map's choices in `base`: NEWEST_MAP when the folder itself holds a *_depth.mp4, then every subfolder
+    holding one (v1 _scan_depth_map_folders; edit_history/ is the Depth Map Editor's replaced maps, never a map)."""
+    if not base or not os.path.isdir(base):
+        return []
+
+    def has_map(folder: str) -> bool:
+        try:
+            return any(e.is_file() and e.name.lower().endswith("_depth.mp4") for e in os.scandir(folder))
+        except OSError:
+            return False
+
+    out = [NEWEST_MAP] if has_map(base) else []
+    for item in sorted(os.listdir(base)):
+        path = os.path.join(base, item)
+        if os.path.isdir(path) and item.lower() != "edit_history" and has_map(path):
+            out.append(item)
+    return out
+
+
 def effective_depth_folder(values: Dict[str, Any]) -> str:
     """v1 _get_effective_depth_map_folder: a single depth FILE means its folder;
-    Multi-Map reads the chosen subfolder."""
+    Multi-Map reads the chosen subfolder (NEWEST_MAP: the folder itself)."""
     base = values.get("input_depth_maps", "")
     if base and os.path.isfile(base):
         base = os.path.dirname(base)
     chosen = str(values.get("selected_depth_map") or "").strip()
-    if values.get("multi_map") and chosen:
+    if values.get("multi_map") and chosen and chosen != NEWEST_MAP:
         return os.path.join(base, chosen)
     return base
 

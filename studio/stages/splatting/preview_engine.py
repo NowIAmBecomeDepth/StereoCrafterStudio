@@ -3093,14 +3093,9 @@ class SplattingPreviewEngine:
 
         # Find all subfolders that contain depth map files
         try:
-            for item in sorted(os.listdir(base_folder)):
-                subfolder_path = os.path.join(base_folder, item)
-                # edit_history: the Depth Map Editor's replaced maps, never a map (2026-09-29)
-                if os.path.isdir(subfolder_path) and item.lower() != "edit_history":
-                    # Check if this subfolder contains *_depth.mp4 files
-                    depth_files = glob.glob(os.path.join(subfolder_path, "*_depth.mp4"))
-                    if depth_files:
-                        self.depth_map_subfolders.append(item)
+            # v2: Newest (the folder itself) first, then the subfolders (see gen PATCHES)
+            from studio.stages.splatting.settings import depth_map_choices
+            self.depth_map_subfolders = depth_map_choices(base_folder)
         except Exception as e:
             logger.error(f"Error scanning depth map subfolders: {e}")
             return
@@ -3221,7 +3216,7 @@ class SplattingPreviewEngine:
         if base_folder and os.path.isfile(base_folder):
             base_folder = os.path.dirname(base_folder)
 
-        if self.multi_map_var.get() and self.selected_depth_map_var.get().strip():
+        if self.multi_map_var.get() and self.selected_depth_map_var.get().strip() not in ("", "."):  # v2: "." = Newest
             # Multi-Map is enabled and a subfolder is selected
             return os.path.join(base_folder, self.selected_depth_map_var.get().strip())
         else:
@@ -5864,6 +5859,7 @@ class SplattingPreviewEngine:
             try:
                 if self.multi_map_var.get():
                     sel_map = (self.selected_depth_map_var.get() or "").strip()
+                    sel_map = "Newest" if sel_map == "." else sel_map  # v2: Multi-Map's Newest (see gen PATCHES)
                     if sel_map and self.processing_map_var.get() != sel_map:
                         self.processing_map_var.set(sel_map)
                 else:

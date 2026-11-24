@@ -1489,6 +1489,21 @@ class MergingPreviewEngine:
         import cv2
         core = (meta or dict()).get("core_name") or ""
         folders = list(getattr(self, "depth_sidecar_folders", None) or [])
+        # the map the clip was splatted from first: its Multi-Map choice in its sidecar (tester carlobs, 2026-11-24)
+        # (Multi-Map keeps sidecars in <Depth Maps>/sidecars, or its finished/; "." is the Depth Maps folder itself)
+        try:
+            from core.common.sidecar_manager import _raw_sidecar, find_depth_sidecar
+            sidecar = find_depth_sidecar(core, folders)
+            chosen = str(_raw_sidecar(sidecar).get("selected_depth_map") or "").strip()
+            up = os.path.dirname(sidecar or "")
+            for _ in range(3):
+                if not chosen or os.path.basename(up).lower() == "sidecars":
+                    break
+                up = os.path.dirname(up)
+            if chosen and os.path.basename(up).lower() == "sidecars":
+                folders.insert(0, os.path.normpath(os.path.join(os.path.dirname(up), chosen)))
+        except Exception:
+            logger.debug("Depth Map preview: the clip's Multi-Map choice not read", exc_info=True)
         path = None
         for folder in folders:
             if os.path.isfile(folder):

@@ -128,6 +128,60 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(want))
 
 
+class MultiMapNewestTest(unittest.TestCase):
+    """Tester carlobs, 2026-11-24: "using Multi Map appear only the Maps in the subfolder (DC, VDA, DVD) but the
+    last generated is not in the relative subfolders" -- DepthCrafter / VDA / DVD write the newest map into the
+    Depth Maps folder itself and set the old one aside into a subfolder. Multi-Map offers it as Newest (".")."""
+
+    @staticmethod
+    def _tree(tmp):
+        for rel in ("clip_depth.mp4", "DepthCrafter/clip_depth.mp4", "VDA/clip_depth.mp4",
+                    "edit_history/clip_depth.mp4", "sidecars/clip_depth.fssidecar"):
+            os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
+            open(os.path.join(tmp, rel), "wb").close()
+        os.makedirs(os.path.join(tmp, "empty"))
+
+    def test_choices_put_newest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._tree(tmp)
+            self.assertEqual(S.depth_map_choices(tmp), [".", "DepthCrafter", "VDA"])
+            os.remove(os.path.join(tmp, "clip_depth.mp4"))
+            self.assertEqual(S.depth_map_choices(tmp), ["DepthCrafter", "VDA"])
+            self.assertEqual(S.depth_map_choices(os.path.join(tmp, "nope")), [])
+
+    def test_newest_is_the_folder_itself(self):
+        from types import SimpleNamespace
+        from core.splatting.batch_processing import BatchProcessor
+        from studio.stages.splatting.preview_engine import SplattingPreviewEngine
+        with tempfile.TemporaryDirectory() as tmp:
+            self._tree(tmp)
+            self.assertEqual(S.effective_depth_folder({"multi_map": True, "input_depth_maps": tmp,
+                                                       "selected_depth_map": "."}), tmp)
+            var = lambda v: SimpleNamespace(get=lambda: v)
+            eng = SimpleNamespace(multi_map_var=var(True), input_depth_maps_var=var(tmp), selected_depth_map_var=var("."))
+            self.assertEqual(SplattingPreviewEngine._get_effective_depth_map_folder(eng), tmp)
+            settings = SimpleNamespace(input_depth_maps=tmp, multi_map=True, selected_depth_map="VDA")
+            got = BatchProcessor._resolve_depth_path(None, os.path.join(tmp, "clip.mp4"), settings,
+                                                     {"selected_depth_map": "."}, False)
+            self.assertEqual(got, os.path.join(tmp, "clip_depth.mp4"))
+
+    def test_engine_scan_lists_newest(self):
+        from types import SimpleNamespace
+        from studio.stages.splatting.preview_engine import SplattingPreviewEngine
+        with tempfile.TemporaryDirectory() as tmp:
+            self._tree(tmp)
+            picked = []
+            var = lambda v: SimpleNamespace(get=lambda: v)
+            eng = SimpleNamespace(input_depth_maps_var=var(tmp), depth_map_subfolders=[],
+                                  selected_depth_map_var=SimpleNamespace(set=picked.append),
+                                  _clear_depth_map_radio_buttons=lambda: None,
+                                  _create_depth_map_radio_buttons=lambda: None,
+                                  on_slider_release=lambda _e: None)
+            SplattingPreviewEngine._scan_depth_map_folders(eng)
+            self.assertEqual(eng.depth_map_subfolders, [".", "DepthCrafter", "VDA"])
+            self.assertEqual(picked, ["."])
+
+
 class KeyframedBoostTest(unittest.TestCase):
     """audit 2026-09-28 (low confidence, settled): the batch handed the boost
     settings -- depth_peak_raw among them -- to the render only when the

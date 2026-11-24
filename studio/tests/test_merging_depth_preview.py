@@ -46,6 +46,61 @@ class DepthFrame(unittest.TestCase):
             fake._depth_cap.release()
 
 
+def _write_map(path, level):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 32))
+    for _ in range(6):
+        w.write(np.full((32, 64, 3), level, np.uint8))
+    w.release()
+
+
+class MultiMapDepthFrame(unittest.TestCase):
+    """Tester carlobs, 2026-11-24: "When i splat with Multi Map then in Merge all the depthmap preview disappear"
+    ("Depth Map preview: no ..._depth map in [...\\Depth\\DepthCrafter, ...\\Depth\\sidecars]"): it looked only
+    in the subfolder Splatting has picked now. It reads the map the clip's sidecar chose, wherever that is."""
+
+    def test_reads_the_map_the_clips_sidecar_chose(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            _write_map(os.path.join(d, "DepthCrafter", "clip_depth.mp4"), 20)
+            _write_map(os.path.join(d, "VDA", "finished", "clip_depth.mp4"), 230)
+            os.makedirs(os.path.join(d, "sidecars", "finished"))
+            with open(os.path.join(d, "sidecars", "finished", "clip_depth.fssidecar"), "w") as f:
+                json.dump({"selected_depth_map": "VDA"}, f)
+            fake = _Fake()
+            fake.depth_sidecar_folders = [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")]
+            out = fake._preview_depth_frame({"core_name": "clip"}, torch.zeros(1, 3, 16, 32))
+            fake._depth_cap.release()
+            self.assertGreater(float(out.mean()), 0.7)          # VDA's map, not DepthCrafter's
+
+    def test_newest_chosen_reads_the_folder_itself(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            _write_map(os.path.join(d, "DepthCrafter", "clip_depth.mp4"), 20)
+            _write_map(os.path.join(d, "finished", "clip_depth.mp4"), 230)
+            os.makedirs(os.path.join(d, "sidecars"))
+            with open(os.path.join(d, "sidecars", "clip_depth.fssidecar"), "w") as f:
+                json.dump({"selected_depth_map": "."}, f)
+            fake = _Fake()
+            fake.depth_sidecar_folders = [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")]
+            out = fake._preview_depth_frame({"core_name": "clip"}, torch.zeros(1, 3, 16, 32))
+            fake._depth_cap.release()
+            self.assertGreater(float(out.mean()), 0.7)
+
+    def test_controller_hands_every_multi_map_folder(self):
+        from types import SimpleNamespace
+        from studio.stages.merging.controller import MergingController
+        with tempfile.TemporaryDirectory() as d:
+            for sub in ("DepthCrafter", "VDA", "sidecars", "finished"):
+                os.makedirs(os.path.join(d, sub))
+            ctl = SimpleNamespace(_depth_folders=lambda: [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")],
+                                  splatting=SimpleNamespace(_values=lambda: {"multi_map": True, "input_depth_maps": d}))
+            got = MergingController._depth_map_folders(ctl)
+            self.assertEqual(sorted(got), sorted([os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars"), d,
+                                                  os.path.join(d, "VDA")]))
+            self.assertEqual(got[:2], [os.path.join(d, "DepthCrafter"), os.path.join(d, "sidecars")])
+
+
 class PreviewGetsTheFolders(unittest.TestCase):
     """The preview's own engine is told the depth folders (testers, 2026-11-13: only the job's engine was)."""
 

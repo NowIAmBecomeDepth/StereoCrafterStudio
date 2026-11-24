@@ -1103,8 +1103,13 @@ class SplattingPreview(QObject):
     def _do_job(self, eng, pv, kind: str, arg: Any) -> Dict[str, Any]:
         if kind == "load":
             # Multi-Map's subfolders, the first time (v1 scans on the checkbox /
-            # folder change) -- keeping the saved map if it is still there.
-            if eng.multi_map_var.get() and not eng.depth_map_subfolders:
+            # folder change) -- keeping the saved map if it is still there. Again whenever the choices
+            # changed: a DepthCrafter / VDA / DVD run adds Newest or a subfolder (tester carlobs, 2026-11-24).
+            base = str(eng.input_depth_maps_var.get() or "")
+            if os.path.isfile(base):
+                base = os.path.dirname(base)
+            if eng.multi_map_var.get() and (not eng.depth_map_subfolders
+                                            or S.depth_map_choices(base) != list(eng.depth_map_subfolders)):
                 saved = eng.selected_depth_map_var.get()
                 eng._scan_depth_map_folders()
                 if saved and saved in eng.depth_map_subfolders:
